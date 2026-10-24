@@ -28,3 +28,8 @@ Kurze Erklärungen zu jedem Subsystem: was es ist und warum wir es brauchen.
 - Eine **Bitmap-Schrift** speichert pro Zeichen 16 Bytes, eins pro Pixelzeile. Bit 7 ist das linke Pixel. Zum Zeichnen prüfen wir jedes Bit und setzen dann Vorder- oder Hintergrundfarbe.
 - **PSF2** ist das Fontformat der Linux-Konsole: Header, Glyphen und eine Tabelle „welcher Unicode-Buchstabe ist welcher Glyph“. Darüber kommen die Umlaute.
 - **Scrolling**: Ist die letzte Zeile voll, kopieren wir alle Pixelzeilen um eine Schrifthöhe (16 px) nach oben und leeren die unterste Zeile.
+
+## M4 – GDT und TSS
+- Die **GDT** ist eine Tabelle von Segment-Deskriptoren, ein Überbleibsel aus 16/32-bit-Zeiten. Im 64-bit-Modus zählen fast nur noch zwei Dinge: ob ein Code-Segment „64-bit“ ist (L-Bit) und welche Privilegstufe gilt (Ring 0 = Kernel, Ring 3 = Programme).
+- Das **CS-Register** lässt sich nicht einfach beschreiben. Wir legen Selector und Rücksprungadresse auf den Stack und machen einen „far return“ (`retfq`), dann lädt die CPU CS neu.
+- Der **TSS** enthält im 64-bit-Modus keine Task-Infos mehr, sondern Stack-Zeiger. Die **IST** (Interrupt Stack Table) sind bis zu 7 Notfall-Stacks. Läuft der Kernel-Stack über, ist er kaputt, und der Double-Fault-Handler bräuchte selbst einen Stack. Deshalb lassen wir die CPU dafür auf einen eigenen IST-Stack umschalten. Ohne den gäbe es einen **Triple Fault**, und die CPU würde neu starten.

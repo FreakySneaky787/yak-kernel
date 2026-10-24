@@ -31,5 +31,15 @@
 - Ergebnis über das `isa-debug-exit`-Gerät an Port 0xF4: Wert 0x10 → QEMU-Exitcode 33 = PASS, 0x11 → 35 = FAIL.
 - Alle Testausgaben gehen über COM1 (`serial_println!`).
 
+## GDT / TSS
+| Selector | Eintrag |
+|---|---|
+| 0x00 | Null |
+| 0x08 | Kernel-Code (64-bit, DPL 0) |
+| 0x10 | Kernel-Data (DPL 0), auch SS/DS/ES/FS/GS |
+| 0x18 | TSS (16 Byte, belegt 2 Slots) |
+
+IST1 (`gdt::DOUBLE_FAULT_IST`) = 20 KiB statischer Stack für Double Faults. User-Segmente kommen erst mit Userspace dazu.
+
 ## Interrupt-Vektoren
 _(kommt mit M5/M6)_

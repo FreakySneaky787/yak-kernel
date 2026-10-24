@@ -18,6 +18,7 @@ pub mod testing;
 /// Gemeinsame Initialisierung für Kernel und alle Test-Binaries.
 pub fn init() {
     serial::init();
+    arch::x86_64::gdt::init();
     console::init();
     if !boot::BASE_REVISION.is_supported() {
         serial_println!(

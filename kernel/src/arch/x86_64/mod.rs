@@ -1,3 +1,4 @@
+pub mod gdt;
 pub mod port;
 
 use core::arch::asm;

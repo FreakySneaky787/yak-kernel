@@ -9,7 +9,7 @@ Legende: ✅ erledigt · 🔨 in Arbeit · ⬜ offen · **[USER]** = schreibt de
 | 1 | Limine-Boot, Serial-Ausgabe, Framebuffer-Testbild, Panic-Handler | ✅ | manuell: BIOS + UEFI |
 | 2 | Test-Framework + `make test` | ✅ | 7 Tests: lib, boot, should_panic + manuelle Fail-Gegenprobe |
 | 3 | Framebuffer-Textkonsole (Bitmap-Font), `println!` | ✅ | 9 Unit-Tests (Font, Konsole) + Screenshot |
-| 4 | GDT + TSS (Double-Fault-Stack) | ⬜ | |
+| 4 | GDT + TSS (Double-Fault-Stack) | ✅ | 3 Tests: CS/TR/GDTR, IST-Stack |
 | 5 | IDT + Exception-Handler | ⬜ | |
 | 6 | PIC remappen + PIT-Timer | ⬜ | |
 | 7 | PS/2-Tastatur | ⬜ | |
@@ -29,5 +29,8 @@ Legende: ✅ erledigt · 🔨 in Arbeit · ⬜ offen · **[USER]** = schreibt de
 - **2026-10-24** – M3: Eigener PSF2-Parser (`font.rs`, Terminus 8×16, OFL) und Textkonsole (`console.rs`) mit Umbruch, Tab, Backspace und Scrolling.
   `print!`/`println!` schreiben auf Bildschirm und Serial. `without_interrupts` ist schon vorbereitet. Dazu `scripts/screenshot.py` für visuelle Checks.
 
+- **2026-10-24** – M4: Eigene GDT (Null, Kernel-Code 0x08, Kernel-Data 0x10, TSS 0x18) und TSS mit IST1 = 20-KiB-Double-Fault-Stack. CS wird per `retfq` neu geladen.
+
 ## Nächster Schritt
-**M4:** GDT mit Kernel-Code- und Kernel-Data-Segment sowie TSS. Der TSS bekommt einen IST-Stack für Double Faults. Segmente neu laden (far return für CS) und `ltr`.
+**M5:** IDT mit 256 Einträgen und Handlern für alle CPU-Exceptions (Vektoren 0–31) über `extern "x86-interrupt"`. Double Fault läuft auf IST1, Page Fault liest CR2.
+Tests: `int3` kommt zurück, Integrationstests für Stack Overflow → Double Fault und für Page Fault mit CR2-Prüfung.
