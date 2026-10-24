@@ -155,6 +155,24 @@ Short explanations of every subsystem: what it is and why we need it.
   change. The E2E test proves it by writing a file, powering off, booting again and reading it back.
 - The **RTC** (real-time clock) is a battery-powered clock chip; we read it via ports 0x70/0x71 for file timestamps and `date`.
 
+## M16 – User space
+- The CPU has **privilege levels** (rings). The kernel runs in ring 0 and may do everything; programs run in **ring 3**, where
+  privileged instructions (`cli`, `hlt`, writing CR3, port I/O) raise a general protection fault and pages without the
+  **USER** bit cannot be touched. A misbehaving program therefore cannot crash the kernel – it gets killed instead.
+- Each process has its own **address space**: its own top-level page table (PML4). The lower half is private, the upper half
+  (the kernel) is the same in all of them. Switching processes = loading another PML4 into **CR3**.
+- Entering ring 3 the first time: build the stack frame an interrupt would push (SS, RSP, RFLAGS, CS, RIP – with ring-3
+  selectors) and execute `iretq`. Coming back happens through interrupts/exceptions (the CPU switches to the kernel stack
+  stored in the TSS, **RSP0**) or through `syscall`.
+- A **system call** is a controlled door into the kernel: the program puts a number and arguments into registers and executes
+  `syscall`; the CPU jumps to the address in the LSTAR MSR in ring 0, the kernel does the work and returns with `sysret`.
+  The kernel must never trust pointers from user space – it checks every buffer against the process's page tables.
+- An **ELF file** describes how to build the program image: the *program headers* list segments ("map these bytes from the
+  file at that address, with these permissions, plus zeroed memory for `.bss`"). Our loader maps exactly these and jumps to
+  the *entry point*.
+- Our programs live in `user/`: a tiny runtime (`ulib`: `_start`, syscall wrappers, `println!`) plus one file per program.
+  They are ordinary Rust `no_std` binaries, linked at 0x40_0000, and are loaded from `/bin` on the FAT32 disk.
+
 ## Tooling – GNU ld and binutils
 - rustc compiles our code into object files; a **linker** combines them into the final ELF according to `kernel/linker.ld`
   (load address, section order, segments). We use **GNU ld** (`ld.bfd`) for that.

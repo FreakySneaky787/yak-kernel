@@ -1,4 +1,5 @@
 /kernel/target/
+/user/target/
 /build/
 /vendor/
 *.iso

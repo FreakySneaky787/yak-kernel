@@ -5,15 +5,22 @@
 //! 512 entries. We reach every table through the HHDM, so no recursive
 //! mapping trick is needed.
 //!
-//! We operate on the page tables Limine created (CR3). Intermediate tables we
-//! add come from the frame allocator. Empty tables are not freed on unmap
-//! (keeps the code simple; the waste is at most a few frames).
+//! The kernel runs on the page tables Limine created (`kernel_root`).
+//! Intermediate tables we add come from the frame allocator. Empty tables are
+//! not freed on unmap (keeps the code simple; the waste is at most a few frames).
+//!
+//! User processes get their own PML4 (`mem::address_space`). Its upper half
+//! (entries 256..511) is a copy of the kernel's, so all address spaces share
+//! the kernel's lower-level tables. For that to stay true, `init` creates
+//! every upper-half PML4 entry up front: later kernel mappings only change
+//! shared tables below the PML4, never the PML4 itself.
 
 use super::pmm::{alloc_frame_zeroed, free_frame};
 use super::{PAGE_SIZE, PhysAddr, VirtAddr};
 use crate::arch::x86_64::without_interrupts;
 use core::arch::asm;
 use core::fmt;
+use core::sync::atomic::{AtomicU64, Ordering};
 use spin::Mutex;
 
 /// Page table entry flags (Intel SDM Vol. 3, 4.5).
@@ -155,6 +162,53 @@ pub fn read_cr3() -> PhysAddr {
     PhysAddr(value & ADDR_MASK) // lower bits are flags / PCID
 }
 
+/// Activates the address space whose PML4 is at `root` (flushes the TLB).
+///
+/// # Safety
+/// `root` must map the kernel (its upper half must be the kernel's).
+pub unsafe fn write_cr3(root: PhysAddr) {
+    unsafe { asm!("mov cr3, {}", in(reg) root.0, options(nostack, preserves_flags)) };
+}
+
+/// First PML4 index of the higher half (kernel space).
+pub const KERNEL_PML4_START: usize = 256;
+
+static KERNEL_ROOT: AtomicU64 = AtomicU64::new(0);
+
+/// PML4 of the kernel address space (the one Limine built).
+pub fn kernel_root() -> PhysAddr {
+    match KERNEL_ROOT.load(Ordering::Relaxed) {
+        0 => read_cr3(),
+        root => PhysAddr(root),
+    }
+}
+
+/// Remembers the kernel PML4 and creates all missing upper-half PML4
+/// entries (one empty PDPT each), see the module docs. Needs the frame allocator.
+pub fn init() {
+    let root = read_cr3();
+    KERNEL_ROOT.store(root.0, Ordering::Relaxed);
+    let pml4 = table_at(root);
+    for entry in &mut pml4.entries[KERNEL_PML4_START..] {
+        if !entry.is_present() {
+            let frame = alloc_frame_zeroed().expect("out of memory for kernel page tables");
+            *entry = Entry::new(frame, Flags::PRESENT | Flags::WRITABLE);
+        }
+        // Limine sets USER on its intermediate tables (the leaves are
+        // supervisor-only). Clearing it here locks ring 3 out of the whole
+        // upper half, whatever the lower levels say.
+        *entry = Entry(entry.0 & !Flags::USER.0);
+    }
+    unsafe { write_cr3(root) }; // flush cached translations
+}
+
+/// Copies the kernel half of the kernel PML4 into the (zeroed) table at `root`.
+pub fn share_kernel_half(root: PhysAddr) {
+    let src = table_at(kernel_root());
+    let dst = table_at(root);
+    dst.entries[KERNEL_PML4_START..].copy_from_slice(&src.entries[KERNEL_PML4_START..]);
+}
+
 /// Removes a single page from the TLB (the CPU's translation cache).
 pub fn flush_tlb(virt: VirtAddr) {
     unsafe { asm!("invlpg [{}]", in(reg) virt.0, options(nostack, preserves_flags)) };
@@ -167,10 +221,16 @@ fn table_at(phys: PhysAddr) -> &'static mut PageTable {
 /// Serializes all page table modifications.
 static PAGING_LOCK: Mutex<()> = Mutex::new(());
 
-/// Returns the physical address `virt` is mapped to (handles huge pages).
+/// Returns the physical address `virt` is mapped to in the active address
+/// space (handles huge pages).
 pub fn translate(virt: VirtAddr) -> Option<PhysAddr> {
+    translate_in(read_cr3(), virt)
+}
+
+/// Like `translate`, in the address space whose PML4 is at `root`.
+pub fn translate_in(root: PhysAddr, virt: VirtAddr) -> Option<PhysAddr> {
     let idx = table_indices(virt);
-    let mut table = table_at(read_cr3());
+    let mut table = table_at(root);
     for (level, &i) in idx.iter().enumerate() {
         let entry = table.entries[i];
         if !entry.is_present() {
@@ -191,8 +251,13 @@ pub fn translate(virt: VirtAddr) -> Option<PhysAddr> {
 
 /// Flags of the final (4 KiB) entry mapping `virt`, if any.
 pub fn page_flags(virt: VirtAddr) -> Option<Flags> {
+    page_flags_in(read_cr3(), virt)
+}
+
+/// Like `page_flags`, in the address space whose PML4 is at `root`.
+pub fn page_flags_in(root: PhysAddr, virt: VirtAddr) -> Option<Flags> {
     let idx = table_indices(virt);
-    let mut table = table_at(read_cr3());
+    let mut table = table_at(root);
     for &i in &idx[..3] {
         let entry = table.entries[i];
         if !entry.is_present() || entry.is_huge() {
@@ -204,15 +269,20 @@ pub fn page_flags(virt: VirtAddr) -> Option<Flags> {
     entry.is_present().then(|| entry.flags())
 }
 
-/// Maps the 4 KiB page at `virt` to the frame `phys`.
+/// Maps the 4 KiB page at `virt` to the frame `phys` in the active address space.
 pub fn map_page(virt: VirtAddr, phys: PhysAddr, flags: Flags) -> Result<(), MapError> {
+    map_page_in(read_cr3(), virt, phys, flags)
+}
+
+/// Like `map_page`, in the address space whose PML4 is at `root`.
+pub fn map_page_in(root: PhysAddr, virt: VirtAddr, phys: PhysAddr, flags: Flags) -> Result<(), MapError> {
     if virt.0 % PAGE_SIZE != 0 || !phys.is_page_aligned() {
         return Err(MapError::NotAligned);
     }
     without_interrupts(|| {
         let _guard = PAGING_LOCK.lock();
         let idx = table_indices(virt);
-        let mut table = table_at(read_cr3());
+        let mut table = table_at(root);
         // Intermediate tables get the most permissive flags; the leaf decides.
         let mut parent_flags = Flags::PRESENT | Flags::WRITABLE;
         if flags.contains(Flags::USER) {
@@ -242,13 +312,18 @@ pub fn map_page(virt: VirtAddr, phys: PhysAddr, flags: Flags) -> Result<(), MapE
 /// Unmaps the 4 KiB page at `virt` and returns the frame it pointed to
 /// (the caller decides whether to free it).
 pub fn unmap_page(virt: VirtAddr) -> Result<PhysAddr, UnmapError> {
+    unmap_page_in(read_cr3(), virt)
+}
+
+/// Like `unmap_page`, in the address space whose PML4 is at `root`.
+pub fn unmap_page_in(root: PhysAddr, virt: VirtAddr) -> Result<PhysAddr, UnmapError> {
     if virt.0 % PAGE_SIZE != 0 {
         return Err(UnmapError::NotAligned);
     }
     without_interrupts(|| {
         let _guard = PAGING_LOCK.lock();
         let idx = table_indices(virt);
-        let mut table = table_at(read_cr3());
+        let mut table = table_at(root);
         for &i in &idx[..3] {
             let entry = table.entries[i];
             if !entry.is_present() {
@@ -268,6 +343,36 @@ pub fn unmap_page(virt: VirtAddr) -> Result<PhysAddr, UnmapError> {
         flush_tlb(virt);
         Ok(frame)
     })
+}
+
+/// Frees the lower (user) half of the address space at `root`: every mapped
+/// frame and every page table, then the PML4 itself. All user mappings own
+/// their frames. `root` must not be active and must not be the kernel's.
+pub fn free_user_half(root: PhysAddr) {
+    assert!(
+        root != read_cr3() && root != kernel_root(),
+        "freeing an active address space"
+    );
+    fn free_table(table: PhysAddr, level: usize) {
+        for &entry in table_at(table).entries.iter() {
+            if !entry.is_present() {
+                continue;
+            }
+            if level < 3 {
+                assert!(!entry.is_huge(), "huge page in a user address space");
+                free_table(entry.addr(), level + 1);
+            } else {
+                free_frame(entry.addr());
+            }
+        }
+        free_frame(table);
+    }
+    for entry in &table_at(root).entries[..KERNEL_PML4_START] {
+        if entry.is_present() {
+            free_table(entry.addr(), 1);
+        }
+    }
+    free_frame(root);
 }
 
 /// Allocates fresh zeroed frames and maps `pages` pages starting at `virt`.
@@ -330,6 +435,17 @@ mod tests {
 
     /// Free virtual area for tests (PML4 slot 509, unused by Limine and us).
     const TEST_AREA: u64 = 0xFFFF_FE80_0000_0000;
+
+    #[test_case]
+    fn kernel_half_is_fully_populated() {
+        let pml4 = table_at(kernel_root());
+        assert!(pml4.entries[KERNEL_PML4_START..].iter().all(|e| e.is_present()));
+        assert!(
+            pml4.entries[KERNEL_PML4_START..]
+                .iter()
+                .all(|e| !e.flags().contains(Flags::USER))
+        );
+    }
 
     #[test_case]
     fn indices_split_address() {

@@ -19,6 +19,7 @@ pub mod font;
 pub mod fs;
 pub mod input;
 pub mod mem;
+pub mod process;
 pub mod qemu;
 pub mod ringbuf;
 pub mod serial;
@@ -41,6 +42,7 @@ pub fn init() {
     arch::x86_64::gdt::init();
     arch::x86_64::interrupts::init();
     mem::init();
+    arch::x86_64::syscall::init();
     arch::x86_64::irq::init();
     console::init();
     task::init();

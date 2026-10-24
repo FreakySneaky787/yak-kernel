@@ -34,4 +34,9 @@ Format: number · date · title, then symptom → cause → fix → test.
 - **`sudo` does not work through `!` in Claude Code** because there is no TTY for the password prompt. The user runs installs in a separate terminal.
 - **`cargo fmt -- <file>` formats the whole crate**, not just the file. Format deliberately with `make fmt`, and commit pure
   formatting separately from functional changes.
+- **Limine sets the USER bit on its upper-half page tables** (PML4/PDPT/PD entries; the leaf entries are supervisor-only).
+  Harmless while the leaves are right, but `paging::init` clears USER in all upper-half PML4 entries so ring 3 can never
+  reach kernel memory by accident (found by the test `kernel_half_is_fully_populated`).
+- **`x86_64-unknown-none` defaults to `code-model=kernel`** (addresses in the top 2 GiB). User programs linked at 0x40_0000
+  need `-C code-model=small`, otherwise GNU ld fails with "relocation truncated to fit".
 - **Limine's stack has no guard page** – a stack overflow silently corrupts memory instead of faulting (until M9 gives us our own stack).

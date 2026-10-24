@@ -1,8 +1,13 @@
 //! Handlers for CPU exceptions (vectors 0-31) and construction of the kernel IDT.
+//!
+//! An exception raised by user code (CS has RPL 3) is the program's fault:
+//! the process is killed and the kernel carries on. In kernel code it is a
+//! bug and the kernel panics.
 
 use super::gdt::DOUBLE_FAULT_IST;
 use super::idt::{Idt, InterruptStackFrame, read_cr2};
 use crate::serial_println;
+use alloc::format;
 use core::sync::atomic::{AtomicU64, Ordering};
 use spin::Once;
 
@@ -78,6 +83,10 @@ pub fn kernel_idt() -> Option<&'static Idt> {
 
 // ---- Handler ----------------------------------------------------------------
 
+fn from_user(frame: &InterruptStackFrame) -> bool {
+    frame.cs & 3 == 3
+}
+
 extern "x86-interrupt" fn breakpoint(frame: InterruptStackFrame) {
     BREAKPOINT_COUNT.fetch_add(1, Ordering::Relaxed);
     serial_println!("EXCEPTION: BREAKPOINT at {:#x}", frame.rip);
@@ -88,6 +97,14 @@ extern "x86-interrupt" fn double_fault(frame: InterruptStackFrame, error_code: u
 }
 
 extern "x86-interrupt" fn page_fault(frame: InterruptStackFrame, error_code: u64) {
+    if from_user(&frame) {
+        crate::process::kill_current(format!(
+            "page fault at {:#x} ({}), rip={:#x}",
+            read_cr2(),
+            PageFaultError(error_code),
+            frame.rip
+        ));
+    }
     panic!(
         "EXCEPTION: PAGE FAULT at address {:#018x}\n  cause: {}\n{:?}",
         read_cr2(),
@@ -97,6 +114,12 @@ extern "x86-interrupt" fn page_fault(frame: InterruptStackFrame, error_code: u64
 }
 
 extern "x86-interrupt" fn general_protection(frame: InterruptStackFrame, error_code: u64) {
+    if from_user(&frame) {
+        crate::process::kill_current(format!(
+            "general protection fault (code {:#x}), rip={:#x}",
+            error_code, frame.rip
+        ));
+    }
     panic!(
         "EXCEPTION: GENERAL PROTECTION FAULT (Selector/Code {:#x})\n{:?}",
         error_code, frame
@@ -107,15 +130,24 @@ extern "x86-interrupt" fn machine_check(frame: InterruptStackFrame) -> ! {
     panic!("EXCEPTION: MACHINE CHECK\n{:?}", frame);
 }
 
-/// Generates simple handlers that panic with their name (and error code, if any).
+/// Generates simple handlers that kill the process (user mode) or panic
+/// (kernel mode) with their name (and error code, if any).
 macro_rules! panicking_handler {
     ($name:ident, $text:literal) => {
         extern "x86-interrupt" fn $name(frame: InterruptStackFrame) {
+            if from_user(&frame) {
+                crate::process::kill_current(format!(concat!($text, ", rip={:#x}"), frame.rip).to_lowercase());
+            }
             panic!(concat!("EXCEPTION: ", $text, "\n{:?}"), frame);
         }
     };
     ($name:ident, $text:literal, error_code) => {
         extern "x86-interrupt" fn $name(frame: InterruptStackFrame, error_code: u64) {
+            if from_user(&frame) {
+                crate::process::kill_current(
+                    format!(concat!($text, " (code {:#x}), rip={:#x}"), error_code, frame.rip).to_lowercase(),
+                );
+            }
             panic!(
                 concat!("EXCEPTION: ", $text, " (code {:#x})\n{:?}"),
                 error_code, frame

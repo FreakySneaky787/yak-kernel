@@ -63,6 +63,8 @@ elif [[ "$KERNEL_MODE" == test ]]; then
 else
     DISK="$BUILD/disk.img"
     [[ -f "$DISK" ]] || "$ROOT/scripts/mkdisk.sh" "$DISK" 64 2>/dev/null
+    # keep /bin on the persistent disk in sync with the freshly built programs
+    "$ROOT/scripts/install-user.sh" "$DISK"
 fi
 
 QEMU_ARGS=(

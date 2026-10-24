@@ -62,6 +62,14 @@ STEPS = [
     ("does-not-exist\r", ["unknown command 'does-not-exist'"], []),
     ('echo "unterminated\r', ["unterminated"], []),
     ("echo Grüße äöü\r", ["Grüße äöü"], []),
+    # user space: programs from /bin on the disk, running in ring 3
+    ("ls /bin\r", ["hello", "fault", "upper"], []),
+    ("hello e2e world\r", ["Hello from user space! I am process", "arg 1: e2e", "arg 2: world", "Bye!"], ["error"]),
+    ("upp\t\rhello Welt äöü\r", ["Type a line: hello Welt äöü", "HELLO WELT ÄÖÜ"], ["error"]),  # completion + stdin
+    ("fault null\r", ["fault was killed: page fault at 0x0"], []),
+    ("fault kernel\r", ["fault was killed: page fault at 0xffffffff80000000"], ["must never happen"]),
+    ("run /bin/fault exit 3\r", ["fault exited with code 3"], []),
+    ("echo kernel still alive\r", ["kernel still alive"], ["error"]),
 ]
 
 

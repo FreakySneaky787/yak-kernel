@@ -29,7 +29,7 @@
 ## Virtual address space
 | Range | PML4 slot | Use |
 |---|---|---|
-| `0x0000_0000_0000_0000` – `0x0000_7FFF_FFFF_FFFF` | 0–255 | lower half, unused (reserved for user space later) |
+| `0x0000_0000_0000_0000` – `0x0000_7FFF_FFFF_FFFF` | 0–255 | user space: private per process (see "User space") |
 | `0xFFFF_8000_0000_0000` + phys | 256 | HHDM (Limine): all RAM + framebuffer, **no MMIO** |
 | `0xFFFF_FE00_0000_0000` | 508 | kernel heap (grows upward, max 1 GiB) |
 | `0xFFFF_FE80_0000_0000` | 509 | scratch area for paging unit tests |
@@ -38,7 +38,12 @@
 
 - `paging::ensure_hhdm_mapped(phys, size, flags)` maps pages Limine left out of the HHDM (ACPI tables, LAPIC `0xFEE0_0000`,
   I/O APIC `0xFEC0_0000`) at their usual HHDM address, so every physical address is still reached as `phys + hhdm_offset`.
-- Page tables: we modify Limine's tables (CR3) through the HHDM; intermediate tables come from the frame allocator and are not freed.
+- Page tables: we modify Limine's tables through the HHDM; intermediate tables come from the frame allocator and are not freed.
+- `paging::init` remembers Limine's PML4 as `kernel_root()` and creates **all 256 upper-half PML4 entries** up front (empty PDPTs).
+  Every process PML4 copies these entries, so later kernel mappings (heap growth, new stacks, MMIO) land in shared lower-level
+  tables and are visible in every address space. The PML4 entries themselves never change after boot.
+- Limine sets the USER bit on its upper-half intermediate tables (leaves are supervisor-only). `paging::init` clears USER in all
+  upper-half PML4 entries, so ring 3 cannot reach the kernel half, whatever the lower levels say.
 - Limine enables EFER.NXE (so `NO_EXECUTE` is usable) and CR0.WP (the kernel cannot write read-only pages either).
 - `kmain` switches from Limine's stack to a 64 KiB guarded stack (`mem::stack`) immediately after `kernel::init()`.
 
@@ -81,6 +86,48 @@
 - Validation outside the kernel: after `make test`, `scripts/check-test-disks.sh` runs `fsck.fat -n` on every test disk and
   checks kernel-written files with mtools; the E2E test does the same for its disk after two boots.
 
+## User space
+- **Address space** (`mem::address_space::AddressSpace`): own PML4, user half empty, kernel half shared. Frames are filled via the
+  HHDM, so loading never switches CR3. `Drop` frees every user frame and page table (`paging::free_user_half`); all user
+  mappings own their frames. It must not be the active address space when dropped.
+- **User layout**: ELF segments between `USER_IMAGE_START` (64 KiB, null page area stays unmapped) and `USER_IMAGE_END`;
+  our programs link at `0x40_0000`. Stack: 16 pages below `USER_STACK_TOP = 0x7FFF_FFFF_0000`, nothing mapped below it
+  (overflow → page fault → process killed). The argument string is copied to the stack top; `_start` gets pointer and length in RDI/RSI.
+- **ELF loader** (`process::elf`): static `ET_EXEC` x86_64 only, `PT_LOAD` segments with R/W/X → USER, WRITABLE, NO_EXECUTE.
+  Every header field is bounds-checked; segments outside the user image area or an entry point outside an X segment are refused.
+- **Processes** (`process::PROCESSES`, interrupts off while locked): one kernel thread per process. `task::spawn_user` creates a
+  thread with its own CR3 and a `UserEntry`; `thread_start` drops the closure and then `iretq`s to ring 3 (`enter_user`).
+  The thread's kernel stack is abandoned at that point and reused from its top by every interrupt/syscall from ring 3.
+- **Scheduler**: each thread has `cr3`; on a switch the scheduler loads it (if different) and sets TSS.RSP0 + the syscall stack
+  to the next thread's kernel stack top (`syscall::set_kernel_stack`). Switching CR3 on the old thread's stack is fine: kernel
+  stacks are in the shared half.
+- **End of a process**: `exit` syscall, CPU exception with CS.RPL = 3 (handlers call `process::kill_current` instead of panicking),
+  or `process::kill(pid)` (checked when the timer interrupts user code and on every syscall return). `exit_current` records the
+  status, moves the thread to the kernel CR3, frees the address space and exits the thread. The status stays in the table until
+  `process::wait` (zombie); the shell always waits.
+- **System calls** (`syscall`/`sysret`): STAR = kernel CS 0x08 / sysret base 0x10, LSTAR = `syscall_entry`, FMASK clears
+  IF/TF/DF/AC. The stub swaps to the kernel stack via a static (single CPU, interrupts off until it is pushed), saves a
+  `SyscallFrame`, enables interrupts and calls `process::syscall::dispatch`. Convention like Linux: number in RAX, args in
+  RDI/RSI/RDX/R10/R8/R9, result in RAX, negative = `-errno`; only RCX/R11 are clobbered. Syscalls may block (read, sleep).
+  | # | Name | |
+  |---|---|---|
+  | 0 | `exit(code)` | never returns |
+  | 1 | `write(fd, buf, len)` | fd 1/2 → console (or a capture buffer in tests) |
+  | 2 | `read(fd, buf, len)` | fd 0 → keyboard/serial keys as terminal bytes (`\n`, `0x08`, UTF-8), blocks for ≥ 1 byte |
+  | 3 | `sleep_ms(ms)` | |
+  | 4 | `getpid()` | |
+  | 5 | `uptime_ms()` | |
+  | 6 | `yield()` | |
+- **User pointers**: every buffer is checked page by page against the process's page tables (present + USER, + WRITABLE for
+  `read`) before the kernel touches it; then it is accessed directly (the process CR3 is active). No SMAP/SMEP yet.
+- **User programs** (`user/`, crate `ulib` + `src/bin/*`): built with the same target as the kernel but `code-model=small`,
+  linked by GNU ld at `0x40_0000` (`user/linker.ld`). `make user` copies them to `build/user/bin`; `scripts/mkdisk.sh`
+  and (for the persistent disk) `run-qemu.sh` install them into `/bin` via `scripts/install-user.sh`.
+- **Shell**: a word that is not a built-in is a program path or a name in `/bin`; `run <path> [args]` does the same explicitly.
+  Arguments are joined with single spaces. Non-zero exit codes and kills are reported as errors.
+- Limitations: no FPU/SSE state is saved (kernel and our programs are built soft-float); no user heap; no file syscalls yet;
+  no Ctrl+C for a running program (`kill` exists in the kernel API only); a program blocked in `read` is only killed after its next key.
+
 ## Kernel heap
 - `mem::heap::LinkedListHeap`: free blocks form a singly linked list sorted by address; each free block stores `size` + `next` in its first 16 bytes.
 - First fit; a block is split into [front padding][allocation][rest], padding and rest go back to the list. Freeing inserts by address and merges neighbours.
@@ -94,9 +141,12 @@
 | 0x00 | null |
 | 0x08 | kernel code (64-bit, DPL 0) |
 | 0x10 | kernel data (DPL 0), also used for SS/DS/ES/FS/GS |
-| 0x18 | TSS (16 bytes, occupies 2 slots) |
+| 0x18 | user data (DPL 3), selector `0x1B` with RPL 3 |
+| 0x20 | user code (64-bit, DPL 3), selector `0x23` |
+| 0x28 | TSS (16 bytes, occupies 2 slots) |
 
-IST1 (`gdt::DOUBLE_FAULT_IST`) = 20 KiB static stack for double faults. User segments will be added together with user space.
+The user data/code order is dictated by `sysret` (SS = STAR base + 8, CS = base + 16). IST1 (`gdt::DOUBLE_FAULT_IST`) =
+20 KiB static stack for double faults. RSP0 = kernel stack of the running thread, rewritten on every context switch.
 
 ## Interrupt vectors
 | Vector | What |

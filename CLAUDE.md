@@ -13,7 +13,8 @@ The conversation with the user happens in German.
 ## Commands
 | Command | What |
 |---|---|
-| `make build` | build the kernel (`kernel/target/x86_64-unknown-none/debug/kernel`) |
+| `make build` | build the user programs and the kernel (`kernel/target/x86_64-unknown-none/debug/kernel`) |
+| `make user` | build the user programs (`user/`) into `build/user/bin` (installed into `/bin` on every disk image) |
 | `make run` | QEMU with a window (BIOS), serial output in the terminal |
 | `make run-uefi` | same, with OVMF/UEFI firmware |
 | `make test` | all in-kernel tests headless in QEMU, exit status 0 = green |
@@ -57,7 +58,9 @@ Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.s
 - `kernel/src/console.rs` – framebuffer text console, macros `print!` / `println!` (screen + serial)
 - `kernel/src/testing.rs` – test runner, `Testable`, test panic handler
 - `kernel/src/qemu.rs` – exit QEMU (isa-debug-exit)
-- `kernel/src/mem/` – `mod.rs` (PhysAddr/VirtAddr, HHDM), `pmm.rs` (bitmap frame allocator), `paging.rs` (page tables: translate/map/unmap), `stack.rs` (guarded kernel stacks), `heap.rs` (linked-list `#[global_allocator]`)
+- `kernel/src/mem/` – `mod.rs` (PhysAddr/VirtAddr, HHDM), `pmm.rs` (bitmap frame allocator), `paging.rs` (page tables: translate/map/unmap, kernel root),
+  `address_space.rs` (per-process PML4), `stack.rs` (guarded kernel stacks), `heap.rs` (linked-list `#[global_allocator]`)
+- `kernel/src/process/` – `mod.rs` (process table, spawn/wait/kill), `elf.rs` (ELF64 loader), `syscall.rs` (syscall dispatcher)
 - `kernel/src/input.rs` – merged keyboard + serial input, `TerminalDecoder`; `kernel/src/ringbuf.rs` – IRQ-safe byte ring buffer
 - `kernel/src/shell/` – `mod.rs` (commands, `Shell::run`), `line_editor.rs`, `parser.rs`
 - `kernel/src/task/` – threads + preemptive scheduler (`mod.rs`), context switch assembly (`switch.rs`)
@@ -65,11 +68,13 @@ Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.s
   `drivers/mod.rs` – global `DISK`; `drivers/rtc.rs` – CMOS real-time clock
 - `kernel/src/fs/` – `mod.rs` (root mount `fs::ROOT`, `SystemDisk`, path `normalize`), `fat32.rs` (FAT32 read/write, LFN, `format`)
 - `rootfs/` – initial contents of the FAT32 disk image; `scripts/mkdisk.sh` – builds the image;
-  `scripts/check-test-disks.sh` – `fsck.fat` + mtools validation of the test disks (run by `make test`)
+  `scripts/check-test-disks.sh` – `fsck.fat` + mtools validation of the test disks (run by `make test`);
+  `scripts/install-user.sh` – copies `build/user/bin/*` into `/bin` of a disk image
+- `user/` – user programs: `src/lib.rs` (`ulib`: `_start`, `sys` syscalls, `print!`), `src/bin/*.rs` (one program each), `linker.ld`
 - `kernel/src/time.rs` – ticks, `uptime_ms`, `sleep_ms`
 - `kernel/src/drivers/keyboard.rs` – PS/2 driver, ring buffer, `read_key()`; `drivers/scancode.rs` – decoder + layouts (DE/US)
 - `kernel/src/arch/x86_64/` – CPU specifics: `port.rs` (in/out), `gdt.rs` (GDT+TSS), `idt.rs` (IDT structure),
-  `interrupts.rs` (exception handlers, kernel IDT), `irq.rs` (IRQ routing + handlers), `lapic.rs` (local APIC + timer), `ioapic.rs`, `pic.rs` (legacy, masked), `pit.rs` (timer calibration), `msr.rs`, `cpu.rs` (cpuid), `power.rs` (reboot/poweroff),
+  `interrupts.rs` (exception handlers, kernel IDT), `syscall.rs` (syscall entry stub, MSRs, `enter_user`), `irq.rs` (IRQ routing + handlers), `lapic.rs` (local APIC + timer), `ioapic.rs`, `pic.rs` (legacy, masked), `pit.rs` (timer calibration), `msr.rs`, `cpu.rs` (cpuid), `power.rs` (reboot/poweroff),
   interrupt helpers in `mod.rs`
 - `kernel/tests/` – integration tests (each one is a separate kernel)
 - `kernel/linker.ld` – higher-half layout at `0xffffffff80000000`

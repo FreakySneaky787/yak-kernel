@@ -7,6 +7,9 @@
 //!   input, or waiting for another thread to exit (join). Interrupt handlers
 //!   and `exit` wake them up again.
 //! - When nothing is ready, the idle thread halts the CPU.
+//! - A thread can carry a user address space (`cr3`) and leave for ring 3
+//!   (`spawn_user`); on every switch the scheduler loads the next thread's
+//!   CR3 and registers its kernel stack for interrupts and syscalls from ring 3.
 //!
 //! Locking rule: the scheduler state is only touched with interrupts
 //! disabled. `schedule()` drops the lock *before* switching stacks; with
@@ -14,7 +17,9 @@
 
 mod switch;
 
-use crate::arch::x86_64::{disable_interrupts, enable_interrupts, interrupts_enabled, without_interrupts};
+use crate::arch::x86_64::{disable_interrupts, enable_interrupts, interrupts_enabled, syscall, without_interrupts};
+use crate::mem::PhysAddr;
+use crate::mem::paging;
 use crate::mem::stack::{self, KernelStack};
 use crate::time;
 use alloc::boxed::Box;
@@ -49,6 +54,15 @@ pub enum State {
 
 type Entry = Box<dyn FnOnce() + Send + 'static>;
 
+/// Where a user thread starts in ring 3; `arg0`/`arg1` arrive in RDI/RSI.
+#[derive(Debug, Clone, Copy)]
+pub struct UserEntry {
+    pub rip: u64,
+    pub rsp: u64,
+    pub arg0: u64,
+    pub arg1: u64,
+}
+
 struct Thread {
     id: Tid,
     name: String,
@@ -58,6 +72,10 @@ struct Thread {
     /// `None` for the boot thread (it runs on a stack we did not allocate).
     stack: Option<KernelStack>,
     cpu_ticks: u64,
+    /// Address space (PML4) the thread runs in; the kernel's for kernel threads.
+    cr3: PhysAddr,
+    /// Set for user threads until they enter ring 3.
+    user_entry: Option<UserEntry>,
 }
 
 struct Scheduler {
@@ -140,6 +158,8 @@ pub fn init() {
                 rsp: 0,
                 stack: None,
                 cpu_ticks: 0,
+                cr3: paging::kernel_root(),
+                user_entry: None,
             }),
         );
         *SCHEDULER.lock() = Some(Scheduler {
@@ -170,6 +190,10 @@ fn idle_loop() {
 }
 
 fn spawn_internal(name: &str, entry: Entry) -> Tid {
+    spawn_with(name, entry, paging::kernel_root(), None)
+}
+
+fn spawn_with(name: &str, entry: Entry, cr3: PhysAddr, user_entry: Option<UserEntry>) -> Tid {
     let stack = stack::alloc_stack(THREAD_STACK_PAGES).expect("out of memory for a thread stack");
     // Double box: a thin pointer fits into one register for the trampoline
     let arg = Box::into_raw(Box::new(entry)) as u64;
@@ -188,6 +212,8 @@ fn spawn_internal(name: &str, entry: Entry) -> Tid {
                 rsp,
                 stack: Some(stack),
                 cpu_ticks: 0,
+                cr3,
+                user_entry,
             }),
         );
         s.ready.push_back(id);
@@ -200,12 +226,30 @@ pub fn spawn(name: &str, f: impl FnOnce() + Send + 'static) -> Tid {
     spawn_internal(name, Box::new(f))
 }
 
+/// Starts a thread that runs in the address space `cr3` and immediately
+/// drops to ring 3 at `entry`. The caller owns the address space and must
+/// keep it alive until the thread has switched away from it for good.
+pub fn spawn_user(name: &str, cr3: PhysAddr, entry: UserEntry) -> Tid {
+    spawn_with(name, Box::new(|| {}), cr3, Some(entry))
+}
+
 /// Entry point of every new thread (called by the assembly trampoline).
 extern "C" fn thread_start(arg: *mut Entry) -> ! {
     // We arrive here through `schedule()`, which runs with interrupts disabled
     enable_interrupts();
     let entry = unsafe { Box::from_raw(arg) };
     entry();
+    // Only now, with the closure dropped, a user thread leaves for ring 3:
+    // nothing on this kernel stack is ever returned to.
+    let user_entry = without_interrupts(|| {
+        SCHEDULER.lock().as_mut().and_then(|s| {
+            let current = s.current;
+            s.thread(current).user_entry.take()
+        })
+    });
+    if let Some(e) = user_entry {
+        unsafe { syscall::enter_user(e.rip, e.rsp, e.arg0, e.arg1) };
+    }
     exit()
 }
 
@@ -233,10 +277,19 @@ fn schedule() {
         } else {
             s.current = next;
             let old_rsp: *mut u64 = &mut s.thread(current).rsp;
-            Some((old_rsp, s.thread(next).rsp))
+            let t = s.thread(next);
+            Some((old_rsp, t.rsp, t.cr3, t.stack.map(|st| st.top.as_u64())))
         }
     }; // lock released here, interrupts are still off
-    if let Some((old_rsp, new_rsp)) = switch {
+    if let Some((old_rsp, new_rsp, cr3, kernel_stack)) = switch {
+        if let Some(top) = kernel_stack {
+            syscall::set_kernel_stack(top);
+        }
+        // Kernel stacks live in the shared upper half: switching CR3 while
+        // still on the old thread's stack is fine.
+        if cr3 != paging::read_cr3() {
+            unsafe { paging::write_cr3(cr3) };
+        }
         unsafe { switch::kernel_switch_context(old_rsp, new_rsp) };
     }
 }
@@ -329,6 +382,20 @@ pub fn join(id: Tid) {
                 return;
             }
             block_current(Wait::Join(id));
+        }
+    });
+}
+
+/// Moves the current thread into the address space `cr3` (and activates it).
+/// Used by an exiting process to leave its address space before freeing it.
+pub fn set_current_cr3(cr3: PhysAddr) {
+    without_interrupts(|| {
+        if let Some(s) = SCHEDULER.lock().as_mut() {
+            let current = s.current;
+            s.thread(current).cr3 = cr3;
+        }
+        if cr3 != paging::read_cr3() {
+            unsafe { paging::write_cr3(cr3) };
         }
     });
 }

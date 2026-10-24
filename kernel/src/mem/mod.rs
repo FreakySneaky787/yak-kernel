@@ -1,6 +1,7 @@
 //! Memory management: address types, the higher-half direct map (HHDM),
 //! and the physical frame allocator.
 
+pub mod address_space;
 pub mod heap;
 pub mod paging;
 pub mod pmm;
@@ -82,6 +83,7 @@ pub fn init() {
     let hhdm = crate::boot::HHDM.response().expect("Limine provided no HHDM response");
     HHDM_OFFSET.store(hhdm.offset, Ordering::Relaxed);
     pmm::init();
+    paging::init();
     heap::init();
 }
 

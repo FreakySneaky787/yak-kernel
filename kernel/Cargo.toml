@@ -24,6 +24,10 @@ harness = false
 name = "page_fault"
 harness = false
 
+[[test]]
+name = "userspace"
+harness = false
+
 [profile.dev]
 panic = "abort"
 

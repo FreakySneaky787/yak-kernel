@@ -4,7 +4,12 @@
 //! see valid code/data descriptors. The important part is the
 //! TSS: it contains the interrupt stack table (IST) - separate stacks the
 //! CPU switches to for certain exceptions (e.g. a double fault caused by a
-//! stack overflow, where the normal stack is unusable).
+//! stack overflow, where the normal stack is unusable) - and RSP0, the
+//! kernel stack the CPU switches to when an interrupt arrives in ring 3.
+//!
+//! The order of the user segments is dictated by `sysret`: it loads
+//! SS = STAR.base + 8 and CS = STAR.base + 16 (see `syscall.rs`), so user
+//! data must come directly before user code.
 
 use core::arch::asm;
 use core::mem::size_of;
@@ -12,7 +17,10 @@ use spin::Once;
 
 pub const KERNEL_CODE_SELECTOR: u16 = 0x08;
 pub const KERNEL_DATA_SELECTOR: u16 = 0x10;
-pub const TSS_SELECTOR: u16 = 0x18;
+/// Ring-3 selectors include the requested privilege level (RPL = 3).
+pub const USER_DATA_SELECTOR: u16 = 0x18 | 3;
+pub const USER_CODE_SELECTOR: u16 = 0x20 | 3;
+pub const TSS_SELECTOR: u16 = 0x28;
 
 /// IST index (1-based, as in the IDT entry) of the double fault stack.
 pub const DOUBLE_FAULT_IST: u8 = 1;
@@ -22,7 +30,7 @@ const IST_STACK_SIZE: usize = 5 * 4096;
 #[repr(C, packed(4))]
 pub struct TaskStateSegment {
     _reserved0: u32,
-    /// Stacks for switching to ring 0/1/2 (needed once we have user space)
+    /// Stacks for switching to ring 0/1/2; RSP0 = kernel stack of the running thread
     pub privilege_stacks: [u64; 3],
     _reserved1: u64,
     /// IST1..IST7 (Index 0 = IST1)
@@ -53,8 +61,8 @@ struct Stack([u8; IST_STACK_SIZE]);
 
 static mut DOUBLE_FAULT_STACK: Stack = Stack([0; IST_STACK_SIZE]);
 
-/// Null, kernel code, kernel data, TSS (16 bytes = 2 entries)
-const GDT_ENTRIES: usize = 5;
+/// Null, kernel code, kernel data, user data, user code, TSS (16 bytes = 2 entries)
+const GDT_ENTRIES: usize = 7;
 
 #[repr(C, align(8))]
 pub struct Gdt([u64; GDT_ENTRIES]);
@@ -62,6 +70,8 @@ pub struct Gdt([u64; GDT_ENTRIES]);
 // Descriptor bits: P=present, S=code/data, E=executable, RW, L=64-bit, G=4K granularity
 const KERNEL_CODE: u64 = 0x00AF_9A00_0000_FFFF; // P|DPL0|S|E|RW, L=1, G=1
 const KERNEL_DATA: u64 = 0x00CF_9200_0000_FFFF; // P|DPL0|S|RW, D/B=1, G=1
+const USER_DATA: u64 = 0x00CF_F200_0000_FFFF; // like kernel data, DPL3
+const USER_CODE: u64 = 0x00AF_FA00_0000_FFFF; // like kernel code, DPL3
 
 fn tss_descriptor(tss: &'static TaskStateSegment) -> (u64, u64) {
     let base = tss as *const _ as u64;
@@ -76,8 +86,14 @@ fn tss_descriptor(tss: &'static TaskStateSegment) -> (u64, u64) {
     (low, high)
 }
 
-static TSS: Once<TaskStateSegment> = Once::new();
+/// Not behind a lock: RSP0 is rewritten on every context switch (with
+/// interrupts disabled) and the CPU reads it on its own.
+static mut TSS: TaskStateSegment = TaskStateSegment::new();
 static GDT: Once<Gdt> = Once::new();
+
+fn tss() -> &'static TaskStateSegment {
+    unsafe { &*core::ptr::addr_of!(TSS) }
+}
 
 #[repr(C, packed)]
 struct DescriptorTablePointer {
@@ -86,16 +102,15 @@ struct DescriptorTablePointer {
 }
 
 pub fn init() {
-    let tss = TSS.call_once(|| {
-        let mut tss = TaskStateSegment::new();
+    let gdt = GDT.call_once(|| {
         let stack_start = core::ptr::addr_of!(DOUBLE_FAULT_STACK) as u64;
         // Stacks grow downwards -> store the end of the array
-        tss.interrupt_stacks[(DOUBLE_FAULT_IST - 1) as usize] = stack_start + IST_STACK_SIZE as u64;
-        tss
-    });
-    let gdt = GDT.call_once(|| {
-        let (tss_low, tss_high) = tss_descriptor(tss);
-        Gdt([0, KERNEL_CODE, KERNEL_DATA, tss_low, tss_high])
+        unsafe {
+            let tss = &mut *core::ptr::addr_of_mut!(TSS);
+            tss.interrupt_stacks[(DOUBLE_FAULT_IST - 1) as usize] = stack_start + IST_STACK_SIZE as u64;
+        }
+        let (tss_low, tss_high) = tss_descriptor(tss());
+        Gdt([0, KERNEL_CODE, KERNEL_DATA, USER_DATA, USER_CODE, tss_low, tss_high])
     });
 
     let ptr = DescriptorTablePointer {
@@ -131,9 +146,17 @@ pub fn init() {
 
 /// Top of the double fault stack (for tests).
 pub fn double_fault_stack_top() -> u64 {
-    TSS.get()
-        .map(|t| t.interrupt_stacks[(DOUBLE_FAULT_IST - 1) as usize])
-        .unwrap_or(0)
+    tss().interrupt_stacks[(DOUBLE_FAULT_IST - 1) as usize]
+}
+
+/// Sets RSP0: the stack the CPU loads when an interrupt or exception
+/// arrives while ring-3 code runs. Call with interrupts disabled.
+pub fn set_kernel_stack(top: u64) {
+    unsafe { core::ptr::addr_of_mut!((*core::ptr::addr_of_mut!(TSS)).privilege_stacks).write_unaligned([top, 0, 0]) };
+}
+
+pub fn kernel_stack() -> u64 {
+    unsafe { core::ptr::addr_of!((*core::ptr::addr_of!(TSS)).privilege_stacks).read_unaligned()[0] }
 }
 
 #[cfg(test)]
@@ -169,6 +192,18 @@ mod tests {
         let (limit, base) = read_gdtr();
         assert_eq!(limit as usize, size_of::<Gdt>() - 1);
         assert_eq!(base, GDT.get().unwrap() as *const _ as u64);
+    }
+
+    #[test_case]
+    fn user_segments_have_dpl3() {
+        let gdt = GDT.get().unwrap();
+        for sel in [USER_DATA_SELECTOR, USER_CODE_SELECTOR] {
+            let desc = gdt.0[(sel >> 3) as usize];
+            assert_eq!((desc >> 45) & 3, 3, "selector {:#x} is not DPL3", sel);
+        }
+        // sysret: SS = base + 8, CS = base + 16 (base = kernel data selector)
+        assert_eq!(USER_DATA_SELECTOR & !3, KERNEL_DATA_SELECTOR + 8);
+        assert_eq!(USER_CODE_SELECTOR & !3, KERNEL_DATA_SELECTOR + 16);
     }
 
     #[test_case]

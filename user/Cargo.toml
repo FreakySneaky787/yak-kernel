@@ -1,0 +1,17 @@
+[package]
+name = "user"
+version = "0.1.0"
+edition = "2024"
+
+# The runtime library every program links against (syscalls, print!, _start)
+[lib]
+name = "ulib"
+test = false
+bench = false
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+opt-level = "s"

@@ -4,9 +4,13 @@ CARGO      := source $$HOME/.cargo/env && cd kernel && cargo
 LIMINE_DIR := vendor/limine
 LIMINE_BRANCH := v11.x-binary
 KERNEL_ELF := kernel/target/x86_64-unknown-none/debug/kernel
+# User programs (user/src/bin/*.rs) are copied to /bin on every disk image
+USER_PROGRAMS := $(basename $(notdir $(wildcard user/src/bin/*.rs)))
+USER_OUT   := user/target/x86_64-unknown-none/release
+USER_BIN   := build/user/bin
 OVMF       := /usr/share/edk2/ovmf/OVMF_CODE.fd
 
-.PHONY: all limine limine-tool build run run-uefi debug gdb test e2e e2e-uefi check fmt \
+.PHONY: all limine limine-tool user build run run-uefi debug gdb test e2e e2e-uefi check fmt \
         disk disk-reset disasm symbols sections addr2line clean distclean
 
 all: build
@@ -20,11 +24,17 @@ $(LIMINE_DIR)/limine-bios-cd.bin:
 limine-tool: limine
 	$(MAKE) -C $(LIMINE_DIR) CC=gcc
 
-build: limine
+# User programs -> build/user/bin (scripts/mkdisk.sh puts them into /bin)
+user:
+	source $$HOME/.cargo/env && cd user && cargo build --release
+	mkdir -p $(USER_BIN)
+	cp $(addprefix $(USER_OUT)/,$(USER_PROGRAMS)) $(USER_BIN)/
+
+build: limine user
 	$(CARGO) build
 
 # Window + serial output in the terminal
-run: limine
+run: limine user
 	$(CARGO) run
 
 run-uefi: build
@@ -38,7 +48,7 @@ gdb:
 	gdb -q $(KERNEL_ELF) -ex 'set disassembly-flavor intel' -ex 'target remote :1234'
 
 # All in-kernel tests in QEMU, exit status 0 = all green
-test: limine
+test: limine user
 	rm -rf build/test-disks
 	$(CARGO) test
 	scripts/check-test-disks.sh
@@ -57,6 +67,7 @@ check: test e2e e2e-uefi
 # Format all kernel code (rustfmt, see kernel/rustfmt.toml)
 fmt:
 	$(CARGO) fmt
+	source $$HOME/.cargo/env && cd user && cargo fmt
 
 # Persistent FAT32 disk used by `make run` (created from rootfs/ if missing)
 DISK_IMG := build/disk.img
@@ -90,6 +101,7 @@ addr2line: build
 
 clean:
 	$(CARGO) clean
+	source $$HOME/.cargo/env && cd user && cargo clean
 	rm -rf build
 
 distclean: clean

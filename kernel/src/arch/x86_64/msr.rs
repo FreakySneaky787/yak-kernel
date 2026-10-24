@@ -4,6 +4,14 @@
 use core::arch::asm;
 
 pub const IA32_APIC_BASE: u32 = 0x1B;
+/// Extended feature enable register (bit 0 = SCE: `syscall`/`sysret` enabled).
+pub const IA32_EFER: u32 = 0xC000_0080;
+/// Segment selectors loaded by `syscall` (bits 32..47) and `sysret` (48..63).
+pub const IA32_STAR: u32 = 0xC000_0081;
+/// Entry point of `syscall` in 64-bit mode.
+pub const IA32_LSTAR: u32 = 0xC000_0082;
+/// RFLAGS bits that `syscall` clears.
+pub const IA32_FMASK: u32 = 0xC000_0084;
 
 pub fn read(msr: u32) -> u64 {
     let (low, high): (u32, u32);

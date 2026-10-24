@@ -3,6 +3,10 @@
 //!
 //! Commands write to a `&mut dyn fmt::Write`, so unit tests can run them
 //! against a `String`; the interactive shell uses `Stdout` (console + serial).
+//!
+//! A word that is not a built-in command is looked up as a program: a path
+//! (`./prog`, `/bin/hello`) or a name in `/bin`. Programs run as user
+//! processes and write directly to the console.
 
 pub mod line_editor;
 pub mod parser;
@@ -12,6 +16,7 @@ use crate::drivers::keyboard;
 use crate::drivers::scancode::Layout;
 use crate::fs::{self, fat32::FsError};
 use crate::mem::{heap, pmm};
+use crate::process::{self, ExitStatus};
 use crate::{boot, input, task, time};
 use alloc::format;
 use alloc::string::String;
@@ -141,6 +146,12 @@ pub static COMMANDS: &[Command] = &[
         run: cmd_demo,
     },
     Command {
+        name: "run",
+        usage: "run <program> [args...]",
+        help: "run a user program (also: just type its name if it is in /bin)",
+        run: cmd_run,
+    },
+    Command {
         name: "colors",
         usage: "colors",
         help: "show the console colour palette",
@@ -260,14 +271,25 @@ pub fn find_command(name: &str) -> Option<&'static Command> {
     COMMANDS.iter().find(|c| c.name == name)
 }
 
-/// Command names starting with `prefix` (for tab completion).
+/// Command and `/bin` program names starting with `prefix` (for tab completion).
 pub fn complete_command(prefix: &str) -> Vec<String> {
-    COMMANDS
+    let mut names: Vec<String> = COMMANDS
         .iter()
         .filter(|c| c.name.starts_with(prefix))
         .map(|c| String::from(c.name))
-        .collect()
+        .collect();
+    let programs = fs::with_root(|fs| fs.read_dir(BIN_DIR)).unwrap_or_default();
+    for entry in programs.iter().filter(|e| !e.is_dir()) {
+        if entry.name.starts_with(prefix) && !names.contains(&entry.name) {
+            names.push(entry.name.clone());
+        }
+    }
+    names.sort();
+    names
 }
+
+/// Where the shell looks for programs typed by name.
+pub const BIN_DIR: &str = "/bin";
 
 pub struct Shell {
     editor: LineEditor,
@@ -301,11 +323,14 @@ impl Shell {
         let Some(name) = words.first() else {
             return true;
         };
-        let Some(command) = find_command(name) else {
-            writeln!(out, "\x1b[91merror:\x1b[0m unknown command '{}' (try 'help')", name).ok();
-            return false;
+        let result = match find_command(name) {
+            Some(command) => (command.run)(self, &words[1..], out),
+            None => match self.find_program(name) {
+                Some(path) => run_program(&path, &words[1..]),
+                None => Err(format!("unknown command '{}' (try 'help')", name)),
+            },
         };
-        match (command.run)(self, &words[1..], out) {
+        match result {
             Ok(()) => true,
             Err(e) => {
                 writeln!(out, "\x1b[91merror:\x1b[0m {}", e).ok();
@@ -692,6 +717,40 @@ fn cmd_colors(_: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), St
     Ok(())
 }
 
+// ---- user programs ----
+
+impl Shell {
+    /// Resolves a program name: paths relative to the cwd, plain names in `/bin`.
+    fn find_program(&self, name: &str) -> Option<String> {
+        let path = if name.contains('/') {
+            self.path(name)
+        } else {
+            format!("{}/{}", BIN_DIR, name)
+        };
+        let entry = fs::with_root(|fs| fs.lookup(&path)).ok()?;
+        (!entry.is_dir()).then_some(path)
+    }
+}
+
+/// Loads `path` from the disk, runs it with `args` and waits for it.
+fn run_program(path: &str, args: &[String]) -> Result<(), String> {
+    let image = fs::with_root(|fs| fs.read_file(path)).map_err(|e| fs_err(path, e))?;
+    let name = path.rsplit('/').next().unwrap_or(path);
+    let status = process::run(name, &image, &args.join(" "), process::Output::Console)
+        .map_err(|e| format!("{}: {}", path, e))?;
+    match status {
+        ExitStatus::Exited(0) => Ok(()),
+        ExitStatus::Exited(code) => Err(format!("{} exited with code {}", name, code)),
+        ExitStatus::Killed(reason) => Err(format!("{} was killed: {}", name, reason)),
+    }
+}
+
+fn cmd_run(shell: &mut Shell, args: &[String], _: &mut dyn Write) -> Result<(), String> {
+    let program = arg(args, 0, "run <program> [args...]")?;
+    let path = shell.path(program);
+    run_program(&path, &args[1..])
+}
+
 // ---- file system commands ----
 
 impl Shell {
@@ -1016,6 +1075,22 @@ mod tests {
         assert!(!ok(&mut shell, "cd README.txt").0);
     }
 
+    /// Needs the programs from `make user` on the test disk (`/bin`).
+    #[test_case]
+    fn programs_run_from_bin() {
+        assert!(run("hello from a test").0);
+        assert!(run("/bin/fault exit 0").0);
+        let (ok, out) = run("run /bin/fault exit 3");
+        assert!(!ok && out.contains("fault exited with code 3"), "{}", out);
+        let (ok, out) = run("fault null");
+        assert!(!ok && out.contains("fault was killed: page fault at 0x0"), "{}", out);
+        let (ok, out) = run("run /README.txt");
+        assert!(!ok && out.contains("not an ELF file"), "{}", out);
+        let (ok, out) = run("run /bin/nothing");
+        assert!(!ok && out.contains("no such file"), "{}", out);
+        assert_eq!(process::count(), 0);
+    }
+
     #[test_case]
     fn int3_returns() {
         assert!(run("int3").0);
@@ -1024,6 +1099,7 @@ mod tests {
     #[test_case]
     fn completion_candidates() {
         assert_eq!(complete_command("me"), ["mem", "memmap"]);
+        assert_eq!(complete_command("hel"), ["hello", "help"]);
         assert!(complete_command("zzz").is_empty());
     }
 }

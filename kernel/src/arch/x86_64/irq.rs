@@ -59,12 +59,16 @@ pub fn init() {
     lapic::start_timer(TIMER_VECTOR, time::TIMER_HZ);
 }
 
-extern "x86-interrupt" fn timer(_frame: InterruptStackFrame) {
+extern "x86-interrupt" fn timer(frame: InterruptStackFrame) {
     time::tick();
     // EOI before scheduling: we may switch to another thread here and only
     // return to this handler much later; the LAPIC must accept new ticks.
     lapic::eoi();
     crate::task::on_tick();
+    // About to return to user code: a killed process must not continue
+    if frame.cs & 3 == 3 {
+        crate::process::check_killed();
+    }
 }
 
 extern "x86-interrupt" fn keyboard(_frame: InterruptStackFrame) {

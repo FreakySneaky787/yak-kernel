@@ -25,7 +25,7 @@ pub fn uptime_ms() -> u64 {
 /// before that (early boot) the CPU halts until the deadline.
 /// Requires interrupts to be enabled.
 pub fn sleep_ms(ms: u64) {
-    let target = ticks() + ms.div_ceil(MS_PER_TICK);
+    let target = ticks().saturating_add(ms.div_ceil(MS_PER_TICK));
     if crate::task::is_running() {
         crate::task::sleep_until(target);
         return;

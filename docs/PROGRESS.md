@@ -25,7 +25,7 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 | 13 | Multitasking: kernel threads, context switch, scheduler | ✅ | 7 scheduler tests + shell tests + E2E (`ps`, `demo`), 3× stable |
 | 14 | Storage: PCI enumeration, AHCI SATA driver, block device layer | ✅ | 11 tests + E2E (`lspci`, `disk`, `hexdump`) |
 | 15 | FAT32 file system (read/write, long names), persistent across reboots | ✅ | 30 tests + `fsck.fat`/mtools check of all test disks + 45-step E2E incl. reboot (BIOS + UEFI) |
-| 16 | User space: ring 3, syscalls, ELF loader | ⬜ | |
+| 16 | User space: ring 3, syscalls, ELF loader | ✅ | 26 new unit tests (hand-assembled programs) + integration test `userspace` (real programs from disk) + 7 E2E steps |
 
 ## Log
 - **2026-10-24** – Setup: Rust nightly 1.101 (rustup), target `x86_64-unknown-none`, Limine v11.x-binary.
@@ -95,6 +95,17 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   Session was interrupted once before the commit; `make check` re-run green on resume. The `poweroff` exit-status-33 observation
   from before the cut did not reproduce (4/4 sessions exited with 0).
 
+- **2026-10-24** – M16: user space. GDT gets user data/code (DPL 3, order fixed by `sysret`), TSS moves to 0x28, RSP0 is set
+  on every context switch. `syscall`/`sysret` via STAR/LSTAR/FMASK with an assembly stub (`arch/x86_64/syscall.rs`).
+  Per-process address spaces (`mem/address_space.rs`): own PML4, kernel half shared – `paging::init` pre-creates all
+  upper-half PML4 entries so they never change. ELF64 loader (`process/elf.rs`), process table with spawn/wait/kill and
+  exit statuses (`process/mod.rs`), 7 syscalls (`process/syscall.rs`: exit, write, read, sleep_ms, getpid, uptime_ms, yield)
+  with page-table checks of every user buffer. Exceptions from ring 3 kill only the process. User programs in Rust in `user/`
+  (runtime `ulib` + `hello`, `upper`, `fault`), linked at 0x40_0000 with GNU ld, installed into `/bin` on every disk.
+  Shell: `run <path>`, or just the program name for `/bin` (also in tab completion).
+  Found: Limine sets USER on its upper-half intermediate page tables – cleared in `paging::init` (BUGS.md pitfalls).
+  **Stage 2 complete: 156 in-kernel tests + 6 test kernels + 52 E2E steps green (BIOS and UEFI).**
+
 ## Open items / later
 - AHCI uses polling; switching to completion interrupts (MSI or the PCI interrupt line) would free the CPU during I/O.
 - Thread-level sleeping mutex (today all shared state uses spin locks with interrupts disabled).
@@ -102,10 +113,13 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 - Reclaim `BOOTLOADER_RECLAIMABLE` memory once we no longer use Limine's stack, page tables and responses.
 - Shell lines longer than one console row are not handled by the line editor (input is capped at 120 characters).
 - `gcc` is not installed yet → `make limine-tool` (bios-install for USB/HDD images) is not available.
+- User space: no FPU/SSE state saving (everything is soft-float), no SMAP/SMEP, no user heap, no file syscalls,
+  no Ctrl+C for a running program (`process::kill` exists, but nothing in the shell triggers it), only a single CPU.
 
 ## Next step
-**M16 – user space:** ring-3 code/data segments in the GDT, TSS RSP0 for the kernel stack on interrupts from ring 3,
-per-process page tables (kernel half shared), `syscall`/`sysret` via the STAR/LSTAR/SFMASK MSRs with a small syscall table
-(`write`, `exit`, `read`, `sleep`), an ELF64 loader, and a first program loaded from the FAT32 disk (`run /bin/hello`).
-Tests: GDT/MSR setup, ELF parser against embedded images, a user program that makes syscalls, a user page fault that kills only
-the process (kernel keeps running), E2E `run` from the shell.
+**Stage 2 is complete.** Stage 3 still has to be agreed with the user. Proposal (in this order):
+- **M17 – files for programs:** per-process file descriptor table, syscalls `open`/`read`/`write`/`close`/`readdir`
+  on the FAT32 root; port `cat` and `ls` to user programs.
+- **M18 – user heap:** `brk`-style syscall plus a heap allocator in `ulib` (enables `alloc` in programs).
+- **M19 – processes from processes:** `spawn`/`wait`/`kill` syscalls, Ctrl+C kills the foreground program, then move the
+  shell into user space (an `init` program started by the kernel).
