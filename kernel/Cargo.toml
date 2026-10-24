@@ -9,8 +9,12 @@ spin = "0.12.3"
 
 [[bin]]
 name = "kernel"
-test = true
+test = false
 bench = false
+
+[[test]]
+name = "should_panic"
+harness = false
 
 [profile.dev]
 panic = "abort"

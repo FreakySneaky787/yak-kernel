@@ -31,7 +31,10 @@ Bei Triple Faults hilft es, an `scripts/run-qemu.sh` die Flags `-d int,cpu_reset
   Erlaubte Crates: `limine` (Boot-Protokoll), `spin` (Locks). Neue Crates erst nach Rücksprache.
 
 ## Layout
-- `kernel/src/main.rs` – `kmain`, Panic-Handler
+- `kernel/src/lib.rs` – Kernel als Library, `init()`, Unit-Test-Einstieg
+- `kernel/src/main.rs` – `kmain`, Panic-Handler (nur das Boot-Binary)
+- `kernel/src/testing.rs` – Test-Runner, `Testable`, Test-Panic-Handler
+- `kernel/tests/` – Integrationstests (je ein eigener Kernel)
 - `kernel/src/boot.rs` – Limine-Requests
 - `kernel/src/serial.rs` – COM1, Makros `serial_print!` / `serial_println!`
 - `kernel/src/qemu.rs` – QEMU beenden (isa-debug-exit)

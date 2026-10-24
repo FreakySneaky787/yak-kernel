@@ -1,27 +1,15 @@
 #![no_std]
 #![no_main]
 
-mod arch;
-mod boot;
-mod qemu;
-mod serial;
-
 use core::panic::PanicInfo;
+use kernel::{arch, boot, serial_println};
 
 /// Einsprungpunkt – Limine springt hierher (siehe `ENTRY(kmain)` in linker.ld).
 /// Wir laufen bereits im 64-bit Long Mode, Paging ist aktiv, Interrupts sind aus.
 #[unsafe(no_mangle)]
 extern "C" fn kmain() -> ! {
-    serial::init();
+    kernel::init();
     serial_println!("KernelTry booting...");
-
-    if !boot::BASE_REVISION.is_supported() {
-        serial_println!(
-            "Limine unterstuetzt Base Revision nicht (aktiv: {:?})",
-            boot::BASE_REVISION.actual_revision()
-        );
-        arch::x86_64::halt_loop();
-    }
 
     if let Some(fb_resp) = boot::FRAMEBUFFER.response() {
         if let Some(fb) = fb_resp.framebuffers().first() {

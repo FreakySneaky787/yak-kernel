@@ -15,9 +15,11 @@ LIMINE="$ROOT/vendor/limine"
 BUILD="$ROOT/build"
 TIMEOUT="${KERNEL_TEST_TIMEOUT:-30}"
 
-# Testbinaries legt cargo unter target/<triple>/<profile>/deps/ ab
+# Testbinaries von `cargo test` tragen einen Hash im Namen (kernel-<16 hex>),
+# das Binary von `cargo run` heißt nur `kernel`. Der Ablageort hängt von der
+# Cargo-Version ab (deps/ oder build/<pkg>/<hash>/out/), siehe docs/BUGS.md.
 if [[ -z "${KERNEL_MODE:-}" ]]; then
-    if [[ "$ELF" == */deps/* ]]; then KERNEL_MODE=test; else KERNEL_MODE=run; fi
+    if [[ "$(basename "$ELF")" =~ -[0-9a-f]{16}$ ]]; then KERNEL_MODE=test; else KERNEL_MODE=run; fi
 fi
 
 if [[ ! -f "$LIMINE/limine-bios-cd.bin" ]]; then

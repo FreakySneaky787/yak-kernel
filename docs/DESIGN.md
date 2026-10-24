@@ -17,6 +17,10 @@
 - Linker-Sections: `.limine_requests` (zwischen Start- und End-Marker), `.text`, `.rodata`, `.data`/`.bss`, jede auf Seitengröße ausgerichtet und mit eigenem PT_LOAD.
 
 ## Testen
+- Crate-Aufbau: `src/lib.rs` enthält den ganzen Kernel. `src/main.rs` ist nur `kmain` + Panic-Handler.
+  Jedes Test-Binary (lib-Unit-Tests, `tests/*.rs`) definiert sein eigenes `kmain`. Der Linker nutzt in allen `ENTRY(kmain)`.
+- Unit-Tests: `#[test_case]` direkt im Modul. Integrationstests: `kernel/tests/<name>.rs` mit eigenem Harness-Setup (siehe `tests/boot.rs`).
+  Tests, die panicken müssen, bekommen `harness = false` in `Cargo.toml` (siehe `tests/should_panic.rs`).
 - `scripts/run-qemu.sh` ist der Cargo-Runner. Liegt das ELF unter `deps/`, ist es ein Test-Binary, dann laufen QEMU headless und ein Timeout.
 - Ergebnis über das `isa-debug-exit`-Gerät an Port 0xF4: Wert 0x10 → QEMU-Exitcode 33 = PASS, 0x11 → 35 = FAIL.
 - Alle Testausgaben gehen über COM1 (`serial_println!`).

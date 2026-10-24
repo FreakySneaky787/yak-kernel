@@ -7,7 +7,7 @@ Legende: ✅ erledigt · 🔨 in Arbeit · ⬜ offen · **[USER]** = schreibt de
 |---|---|---|---|
 | 0 | Setup: Toolchain, Limine, Git, GitHub | ✅ | – |
 | 1 | Limine-Boot, Serial-Ausgabe, Framebuffer-Testbild, Panic-Handler | ✅ | manuell: BIOS + UEFI |
-| 2 | Test-Framework + `make test` | ⬜ | Pass- und Should-Panic-Test |
+| 2 | Test-Framework + `make test` | ✅ | 7 Tests: lib, boot, should_panic + manuelle Fail-Gegenprobe |
 | 3 | Framebuffer-Textkonsole (Bitmap-Font), `println!` | ⬜ | |
 | 4 | GDT + TSS (Double-Fault-Stack) | ⬜ | |
 | 5 | IDT + Exception-Handler (**[USER]**: einzelne Handler) | ⬜ | |
@@ -22,6 +22,10 @@ Legende: ✅ erledigt · 🔨 in Arbeit · ⬜ offen · **[USER]** = schreibt de
 - **2026-10-24** – Setup: Rust nightly 1.101 (rustup), Target `x86_64-unknown-none`, Limine v11.x-binary.
   M1: Der Kernel bootet über BIOS und UEFI und gibt „Hello from KernelTry!“ über die serielle Schnittstelle aus. Auf dem Framebuffer (1280×800×32) erscheinen Farbbalken.
 
+- **2026-10-24** – M2: Der Kernel ist jetzt Library + Binary. Custom Test Framework in `kernel/src/testing.rs`.
+  Integrationstests: `tests/boot.rs` (Limine-Antworten) und `tests/should_panic.rs`. Bug #1 gefunden und behoben (Runner hat den Testmodus nicht erkannt).
+
 ## Nächster Schritt
-**M2:** Custom Test Framework (`#![feature(custom_test_frameworks)]`). `cargo test` startet den Kernel über `scripts/run-qemu.sh` im Testmodus,
-die Tests melden ihr Ergebnis über `qemu::exit`. Dazu kommt ein separater Integrationstest für `should_panic`.
+**M3:** Textkonsole auf dem Framebuffer. Eigener 8×16-Bitmap-Font (als Rust-Array), `console.rs` mit Cursor, Zeilenumbruch und Scrolling.
+Makros `print!`/`println!` schreiben auf Framebuffer **und** Serial. Tests: viele Zeilen ausgeben (Scrolling) ohne Panic, Cursor-Position prüfen.
+Danach fliegt das Farbbalken-Testbild aus `main.rs`.
