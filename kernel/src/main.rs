@@ -17,6 +17,12 @@ extern "C" fn kmain() -> ! {
         kernel::serial_println!("Console: {}x{} characters", cols, rows);
     }
     println!("Hello from KernelTry! Umlaut check: äöüß");
+    let mem = kernel::mem::pmm::stats();
+    println!(
+        "Memory: {} MiB usable, {} MiB free",
+        mem.usable_bytes() / (1024 * 1024),
+        mem.free_bytes() / (1024 * 1024)
+    );
     println!("Uptime: {} ms, Tastatur-Layout: {:?}", kernel::time::uptime_ms(), keyboard::layout());
     println!("Type something (echo mode, the shell arrives in M11):");
     print!("> ");

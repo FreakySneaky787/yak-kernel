@@ -19,6 +19,13 @@
 - Linker sections: `.limine_requests` (between start and end marker), `.text`, `.rodata`, `.data`/`.bss`,
   each page-aligned with its own PT_LOAD segment.
 
+## Physical memory
+- `mem::pmm` is a bitmap allocator: one bit per 4 KiB frame (1 = used), covering physical memory up to the end of the highest usable region.
+- The bitmap lives in the first usable region big enough for it and is reserved in itself. Frame 0 is never handed out.
+- Only `USABLE` memory is managed for now. `BOOTLOADER_RECLAIMABLE` still holds Limine's stack/page tables/responses.
+- All access to physical memory goes through the HHDM (`PhysAddr::to_virt`). Allocator calls run with interrupts disabled.
+- `free_frame` panics on double free / invalid addresses – that is always a kernel bug.
+
 ## GDT / TSS
 | Selector | Entry |
 |---|---|

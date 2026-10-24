@@ -13,7 +13,7 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 | 5 | IDT + exception handlers | ✅ | 3 unit tests + integration tests `page_fault`, `stack_overflow` |
 | 6 | PIC remap + PIT timer | ✅ | 4 tests: ticks, sleep_ms, PIC mask, APIC off |
 | 7 | PS/2 keyboard | ✅ | 13 unit tests + E2E via `sendkey` (QWERTZ, umlauts, AltGr, Caps) |
-| 8 | Physical frame allocator from the Limine memory map | ⬜ | |
+| 8 | Physical frame allocator from the Limine memory map | ✅ | 9 tests: fake memory maps, real alloc/free, zeroing |
 | 9 | Paging: map/unmap, kernel stack with guard page | ⬜ | |
 | 10 | Kernel heap → `alloc` | ⬜ | |
 | 11 | Shell | ⬜ | |
@@ -37,13 +37,18 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 - **2026-10-24** – Repository translated to English (user request). Kernel now linked with **GNU ld** (`ld.bfd`) instead of rust-lld;
   added binutils make targets (`disasm`, `symbols`, `sections`, `addr2line`).
 
+- **2026-10-24** – M8: `mem/` module with `PhysAddr`/`VirtAddr`, HHDM offset, bitmap frame allocator (`mem/pmm.rs`).
+  Bitmap logic is independent of Limine and unit-tested with fake memory maps. 253 MiB usable with `-m 256M`.
+  Base revision check moved to the very start of `kernel::init()`.
+
 ## Open items / later
+- Reclaim `BOOTLOADER_RECLAIMABLE` memory once we no longer use Limine's stack, page tables and responses.
 - Switch to local APIC + I/O APIC (needs MMIO mapping, i.e. after M9). Then remove `lapic::disable()`.
 - Own kernel stack with a guard page (M9), then a real recursion stack overflow test.
 - The console has no visible cursor yet (needed for the shell in M11).
 - Automated E2E keyboard test: the runner would have to send `sendkey` through the monitor. Makes sense together with the shell (M11).
 
 ## Next step
-**M8:** physical frame allocator. Read the usable regions from the Limine memory map, bitmap allocator for 4 KiB frames
-(the bitmap itself lives in a usable region, accessed through the HHDM). API: `alloc_frame()`, `free_frame()`, statistics (free/total).
-Tests: alloc/free, no double allocation, alignment, statistics add up.
+**M9:** paging. Own 4-level page table code (walk, map, unmap, translate) on top of the frame allocator, accessed through the HHDM.
+Then a kernel stack with an unmapped guard page and a switch to it, plus a real recursion stack overflow test.
+Tests: map a fresh page, write/read through it, unmap → page fault, translate known addresses.

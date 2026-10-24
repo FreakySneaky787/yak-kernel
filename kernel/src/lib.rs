@@ -13,6 +13,7 @@ pub mod boot;
 pub mod console;
 pub mod drivers;
 pub mod font;
+pub mod mem;
 pub mod qemu;
 pub mod serial;
 pub mod testing;
@@ -21,10 +22,7 @@ pub mod time;
 /// Common initialization for the kernel and all test binaries.
 pub fn init() {
     serial::init();
-    arch::x86_64::gdt::init();
-    arch::x86_64::interrupts::init();
-    arch::x86_64::irq::init();
-    console::init();
+    // Check the protocol revision before touching any Limine response
     if !boot::BASE_REVISION.is_supported() {
         serial_println!(
             "Limine does not support our base revision (active: {:?})",
@@ -32,6 +30,11 @@ pub fn init() {
         );
         arch::x86_64::halt_loop();
     }
+    arch::x86_64::gdt::init();
+    arch::x86_64::interrupts::init();
+    mem::init();
+    arch::x86_64::irq::init();
+    console::init();
     arch::x86_64::enable_interrupts();
 }
 

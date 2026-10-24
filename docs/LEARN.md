@@ -74,6 +74,14 @@ Short explanations of every subsystem: what it is and why we need it.
 - **Race while waiting**: "buffer empty? → `hlt`" is dangerous if the interrupt arrives exactly in between – then the CPU sleeps although
   a key is already there. Solution: interrupts off, check, then `sti; hlt` – the CPU guarantees that no interrupt can slip in between `sti` and `hlt`.
 
+## M8 – Physical memory
+- RAM is managed in **frames** of 4 KiB. Limine tells us via the **memory map** which address ranges are usable RAM and which are
+  reserved (firmware, ACPI, devices, the kernel itself, ...).
+- The **bitmap allocator** keeps one bit per frame: 0 = free, 1 = used. Allocating means finding a 0 bit and setting it; freeing clears it.
+  For 256 MiB that is only 65536 bits = 8 KiB of bookkeeping.
+- Physical addresses cannot be dereferenced directly because paging is on. Limine maps all of physical memory at a fixed
+  offset (**HHDM**, higher-half direct map), so physical `p` is accessible at virtual `p + offset`.
+
 ## Tooling – GNU ld and binutils
 - rustc compiles our code into object files; a **linker** combines them into the final ELF according to `kernel/linker.ld`
   (load address, section order, segments). We use **GNU ld** (`ld.bfd`) for that.
