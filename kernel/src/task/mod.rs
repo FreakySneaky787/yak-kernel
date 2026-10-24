@@ -110,8 +110,12 @@ impl Scheduler {
 
     /// Frees dead threads (never the current one: we may still be on its stack).
     fn reap(&mut self) {
-        let dead: Vec<Tid> =
-            self.threads.values().filter(|t| t.state == State::Dead && t.id != self.current).map(|t| t.id).collect();
+        let dead: Vec<Tid> = self
+            .threads
+            .values()
+            .filter(|t| t.state == State::Dead && t.id != self.current)
+            .map(|t| t.id)
+            .collect();
         for id in dead {
             if let Some(thread) = self.threads.remove(&id) {
                 if let Some(stack) = thread.stack {
@@ -129,9 +133,22 @@ pub fn init() {
         let mut threads = BTreeMap::new();
         threads.insert(
             0,
-            Box::new(Thread { id: 0, name: String::from("main"), state: State::Running, rsp: 0, stack: None, cpu_ticks: 0 }),
+            Box::new(Thread {
+                id: 0,
+                name: String::from("main"),
+                state: State::Running,
+                rsp: 0,
+                stack: None,
+                cpu_ticks: 0,
+            }),
         );
-        *SCHEDULER.lock() = Some(Scheduler { threads, ready: VecDeque::new(), current: 0, idle: 0, next_id: 1 });
+        *SCHEDULER.lock() = Some(Scheduler {
+            threads,
+            ready: VecDeque::new(),
+            current: 0,
+            idle: 0,
+            next_id: 1,
+        });
         let idle = spawn_internal("idle", Box::new(idle_loop));
         let mut guard = SCHEDULER.lock();
         let s = guard.as_mut().unwrap();
@@ -162,8 +179,17 @@ fn spawn_internal(name: &str, entry: Entry) -> Tid {
         let s = guard.as_mut().expect("scheduler not initialized");
         let id = s.next_id;
         s.next_id += 1;
-        s.threads
-            .insert(id, Box::new(Thread { id, name: String::from(name), state: State::Ready, rsp, stack: Some(stack), cpu_ticks: 0 }));
+        s.threads.insert(
+            id,
+            Box::new(Thread {
+                id,
+                name: String::from(name),
+                state: State::Ready,
+                rsp,
+                stack: Some(stack),
+                cpu_ticks: 0,
+            }),
+        );
         s.ready.push_back(id);
         id
     })
@@ -280,7 +306,10 @@ pub fn exit() -> ! {
         let mut guard = SCHEDULER.lock();
         let s = guard.as_mut().unwrap();
         let current = s.current;
-        assert!(current != 0 && current != s.idle, "the main and idle threads cannot exit");
+        assert!(
+            current != 0 && current != s.idle,
+            "the main and idle threads cannot exit"
+        );
         s.thread(current).state = State::Dead;
         s.wake(|w| w == Wait::Join(current));
     }
@@ -290,15 +319,17 @@ pub fn exit() -> ! {
 
 /// Waits until thread `id` has exited.
 pub fn join(id: Tid) {
-    without_interrupts(|| loop {
-        let alive = SCHEDULER
-            .lock()
-            .as_mut()
-            .is_some_and(|s| s.threads.get(&id).is_some_and(|t| t.state != State::Dead));
-        if !alive {
-            return;
+    without_interrupts(|| {
+        loop {
+            let alive = SCHEDULER
+                .lock()
+                .as_mut()
+                .is_some_and(|s| s.threads.get(&id).is_some_and(|t| t.state != State::Dead));
+            if !alive {
+                return;
+            }
+            block_current(Wait::Join(id));
         }
-        block_current(Wait::Join(id));
     });
 }
 
@@ -312,7 +343,12 @@ pub fn list() -> Vec<ThreadInfo> {
         SCHEDULER.lock().as_ref().map_or_else(Vec::new, |s| {
             s.threads
                 .values()
-                .map(|t| ThreadInfo { id: t.id, name: t.name.clone(), state: t.state, cpu_ticks: t.cpu_ticks })
+                .map(|t| ThreadInfo {
+                    id: t.id,
+                    name: t.name.clone(),
+                    state: t.state,
+                    cpu_ticks: t.cpu_ticks,
+                })
                 .collect()
         })
     })

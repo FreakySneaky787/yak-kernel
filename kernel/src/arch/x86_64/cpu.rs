@@ -58,7 +58,16 @@ pub struct Features {
 
 pub fn features() -> Features {
     let basic = cpuid(1);
-    let ext = if max_extended_leaf() >= 0x8000_0001 { cpuid(0x8000_0001) } else { CpuidResult { eax: 0, ebx: 0, ecx: 0, edx: 0 } };
+    let ext = if max_extended_leaf() >= 0x8000_0001 {
+        cpuid(0x8000_0001)
+    } else {
+        CpuidResult {
+            eax: 0,
+            ebx: 0,
+            ecx: 0,
+            edx: 0,
+        }
+    };
     Features {
         sse: basic.edx & (1 << 25) != 0,
         sse2: basic.edx & (1 << 26) != 0,

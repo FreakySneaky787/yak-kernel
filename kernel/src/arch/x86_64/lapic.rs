@@ -7,8 +7,8 @@
 
 use super::msr::{self, IA32_APIC_BASE};
 use super::pit;
-use crate::mem::paging::{self, Flags};
 use crate::mem::PhysAddr;
+use crate::mem::paging::{self, Flags};
 use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 const APIC_GLOBAL_ENABLE: u64 = 1 << 11;
@@ -65,8 +65,8 @@ pub fn init(phys_base: u64) {
     let msr_value = msr::read(IA32_APIC_BASE);
     unsafe { msr::write(IA32_APIC_BASE, msr_value | APIC_GLOBAL_ENABLE) };
 
-    let virt = paging::ensure_hhdm_mapped(PhysAddr(phys_base), 0x1000, Flags::MMIO)
-        .expect("cannot map local APIC registers");
+    let virt =
+        paging::ensure_hhdm_mapped(PhysAddr(phys_base), 0x1000, Flags::MMIO).expect("cannot map local APIC registers");
     BASE.store(virt.as_u64(), Ordering::Relaxed);
 
     write(REG_TPR, 0); // accept all priorities

@@ -19,7 +19,10 @@ extern "C" fn kmain() -> ! {
 extern "C" fn kernel_main() -> ! {
     let mem = pmm::stats();
     let heap = heap::stats();
-    println!("\x1b[1;96mKernelTry\x1b[0m {} - a hobby kernel in Rust", env!("CARGO_PKG_VERSION"));
+    println!(
+        "\x1b[1;96mKernelTry\x1b[0m {} - a hobby kernel in Rust",
+        env!("CARGO_PKG_VERSION")
+    );
     println!(
         "Memory: {} MiB usable, heap {} KiB | keyboard layout: {:?} | boot took {} ms",
         mem.usable_bytes() / (1024 * 1024),

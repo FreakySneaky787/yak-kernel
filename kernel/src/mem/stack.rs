@@ -41,7 +41,11 @@ pub fn alloc_stack(pages: usize) -> Result<KernelStack, MapError> {
     let guard = NEXT_SLOT.fetch_add(span, Ordering::Relaxed);
     assert!(guard + span <= STACK_AREA_END, "kernel stack area exhausted");
     paging::map_fresh(VirtAddr(guard + PAGE_SIZE), pages, Flags::KERNEL_DATA)?;
-    Ok(KernelStack { guard: VirtAddr(guard), top: VirtAddr(guard + span), pages })
+    Ok(KernelStack {
+        guard: VirtAddr(guard),
+        top: VirtAddr(guard + span),
+        pages,
+    })
 }
 
 /// Unmaps a stack and returns its frames. The guard page and the virtual

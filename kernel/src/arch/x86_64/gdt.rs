@@ -131,7 +131,9 @@ pub fn init() {
 
 /// Top of the double fault stack (for tests).
 pub fn double_fault_stack_top() -> u64 {
-    TSS.get().map(|t| t.interrupt_stacks[(DOUBLE_FAULT_IST - 1) as usize]).unwrap_or(0)
+    TSS.get()
+        .map(|t| t.interrupt_stacks[(DOUBLE_FAULT_IST - 1) as usize])
+        .unwrap_or(0)
 }
 
 #[cfg(test)]

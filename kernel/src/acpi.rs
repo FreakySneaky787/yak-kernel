@@ -109,8 +109,8 @@ pub enum AcpiError {
 
 /// Maps `len` bytes at physical `phys` (if needed) and returns them as a slice.
 fn phys_bytes(phys: u64, len: usize) -> Result<&'static [u8], AcpiError> {
-    let virt = paging::ensure_hhdm_mapped(PhysAddr(phys), len as u64, Flags::KERNEL_DATA)
-        .map_err(|_| AcpiError::MapFailed)?;
+    let virt =
+        paging::ensure_hhdm_mapped(PhysAddr(phys), len as u64, Flags::KERNEL_DATA).map_err(|_| AcpiError::MapFailed)?;
     Ok(unsafe { core::slice::from_raw_parts(virt.as_ptr::<u8>(), len) })
 }
 
@@ -151,7 +151,11 @@ pub fn init() -> Result<&'static AcpiInfo, AcpiError> {
     let resp = crate::boot::RSDP.response().ok_or(AcpiError::NoRsdp)?;
     let addr = resp.address as u64;
     // Base revision 3 reports a physical address, newer revisions an HHDM address
-    let rsdp_phys = if addr >= hhdm_offset() { addr - hhdm_offset() } else { addr };
+    let rsdp_phys = if addr >= hhdm_offset() {
+        addr - hhdm_offset()
+    } else {
+        addr
+    };
 
     let rsdp = phys_bytes(rsdp_phys, 20)?;
     if &rsdp[0..8] != b"RSD PTR " {
@@ -183,16 +187,29 @@ pub fn init() -> Result<&'static AcpiInfo, AcpiError> {
     let mut tables = Vec::new();
     let mut madt = None;
     for off in (SDT_HEADER_LEN..root.len()).step_by(entry_size) {
-        let phys = if entry_size == 8 { u64_at(root, off) } else { u32_at(root, off) as u64 };
+        let phys = if entry_size == 8 {
+            u64_at(root, off)
+        } else {
+            u32_at(root, off) as u64
+        };
         let header = phys_bytes(phys, SDT_HEADER_LEN)?;
         let signature: [u8; 4] = header[0..4].try_into().unwrap();
-        tables.push(TableInfo { signature, phys, length: u32_at(header, 4) });
+        tables.push(TableInfo {
+            signature,
+            phys,
+            length: u32_at(header, 4),
+        });
         if &signature == b"APIC" {
             madt = Some(parse_madt(read_table(phys)?));
         }
     }
 
-    let info = AcpiInfo { revision, oem_id, tables, madt: madt.ok_or(AcpiError::NoMadt)? };
+    let info = AcpiInfo {
+        revision,
+        oem_id,
+        tables,
+        madt: madt.ok_or(AcpiError::NoMadt)?,
+    };
     Ok(ACPI.call_once(|| info))
 }
 
@@ -212,11 +229,23 @@ fn parse_madt(table: &[u8]) -> Madt {
         }
         let e = &table[off..off + len];
         match kind {
-            0 => madt.local_apics.push(LocalApic { processor_id: e[2], apic_id: e[3], flags: u32_at(e, 4) }),
-            1 => madt.io_apics.push(IoApic { id: e[2], address: u32_at(e, 4), gsi_base: u32_at(e, 8) }),
-            2 => madt.overrides.push(InterruptOverride { source: e[3], gsi: u32_at(e, 4), flags: u16_at(e, 8) }),
+            0 => madt.local_apics.push(LocalApic {
+                processor_id: e[2],
+                apic_id: e[3],
+                flags: u32_at(e, 4),
+            }),
+            1 => madt.io_apics.push(IoApic {
+                id: e[2],
+                address: u32_at(e, 4),
+                gsi_base: u32_at(e, 8),
+            }),
+            2 => madt.overrides.push(InterruptOverride {
+                source: e[3],
+                gsi: u32_at(e, 4),
+                flags: u16_at(e, 8),
+            }),
             5 => madt.local_apic_address = u64_at(e, 4), // 64-bit LAPIC address override
-            _ => {} // NMI sources, x2APIC entries, ... not needed yet
+            _ => {}                                      // NMI sources, x2APIC entries, ... not needed yet
         }
         off += len;
     }

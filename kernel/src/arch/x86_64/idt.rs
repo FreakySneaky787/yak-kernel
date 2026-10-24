@@ -54,7 +54,15 @@ const PRESENT_INTERRUPT_GATE: u8 = 0x8E;
 
 impl Entry {
     const fn missing() -> Entry {
-        Entry { offset_low: 0, selector: 0, ist: 0, type_attr: 0, offset_mid: 0, offset_high: 0, _reserved: 0 }
+        Entry {
+            offset_low: 0,
+            selector: 0,
+            ist: 0,
+            type_attr: 0,
+            offset_mid: 0,
+            offset_high: 0,
+            _reserved: 0,
+        }
     }
 
     fn set_address(&mut self, addr: u64) -> &mut Entry {
@@ -95,7 +103,9 @@ impl Default for Idt {
 
 impl Idt {
     pub const fn new() -> Idt {
-        Idt { entries: [Entry::missing(); 256] }
+        Idt {
+            entries: [Entry::missing(); 256],
+        }
     }
 
     pub fn set(&mut self, vector: u8, handler: Handler) -> &mut Entry {
@@ -125,7 +135,10 @@ impl Idt {
             limit: u16,
             base: u64,
         }
-        let ptr = Pointer { limit: (size_of::<Idt>() - 1) as u16, base: self as *const _ as u64 };
+        let ptr = Pointer {
+            limit: (size_of::<Idt>() - 1) as u16,
+            base: self as *const _ as u64,
+        };
         unsafe { asm!("lidt [{}]", in(reg) &ptr, options(readonly, nostack, preserves_flags)) };
     }
 }

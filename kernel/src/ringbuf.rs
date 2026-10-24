@@ -10,7 +10,11 @@ pub struct RingBuffer<const N: usize> {
 
 impl<const N: usize> RingBuffer<N> {
     pub const fn new() -> Self {
-        RingBuffer { buf: [0; N], head: 0, len: 0 }
+        RingBuffer {
+            buf: [0; N],
+            head: 0,
+            len: 0,
+        }
     }
 
     /// Returns `false` if the buffer was full.
@@ -59,6 +63,9 @@ mod tests {
         assert!(!rb.push(4)); // full
         assert_eq!(rb.pop(), Some(1));
         assert!(rb.push(5)); // wrap-around
-        assert_eq!((rb.pop(), rb.pop(), rb.pop(), rb.pop()), (Some(2), Some(3), Some(5), None));
+        assert_eq!(
+            (rb.pop(), rb.pop(), rb.pop(), rb.pop()),
+            (Some(2), Some(3), Some(5), None)
+        );
     }
 }

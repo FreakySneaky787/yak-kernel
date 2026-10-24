@@ -55,7 +55,12 @@ pub fn panic_report(info: &core::panic::PanicInfo) -> ! {
     if let Some(mut guard) = console::CONSOLE.try_lock() {
         if let Some(console) = guard.as_mut() {
             use core::fmt::Write;
-            write!(console, "\n\x1b[1;37;41m KERNEL PANIC \x1b[0m \x1b[91m{}\x1b[0m\nSystem halted.\n", info).ok();
+            write!(
+                console,
+                "\n\x1b[1;37;41m KERNEL PANIC \x1b[0m \x1b[91m{}\x1b[0m\nSystem halted.\n",
+                info
+            )
+            .ok();
         }
     }
     arch::x86_64::halt_loop()

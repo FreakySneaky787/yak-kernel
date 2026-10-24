@@ -5,8 +5,8 @@
 //! (read/write the selected register). Each input has a 64-bit redirection
 //! entry at index 0x10 + 2 * n.
 
-use crate::mem::paging::{self, Flags};
 use crate::mem::PhysAddr;
+use crate::mem::paging::{self, Flags};
 use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 const IOREGSEL: u64 = 0x00;

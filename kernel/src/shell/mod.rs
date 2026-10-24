@@ -40,25 +40,120 @@ pub struct Command {
 }
 
 pub static COMMANDS: &[Command] = &[
-    Command { name: "help", usage: "help [command]", help: "list commands or show help for one", run: cmd_help },
-    Command { name: "echo", usage: "echo [words...]", help: "print the arguments", run: cmd_echo },
-    Command { name: "clear", usage: "clear", help: "clear the screen", run: cmd_clear },
-    Command { name: "mem", usage: "mem", help: "physical memory and heap usage", run: cmd_mem },
-    Command { name: "memmap", usage: "memmap", help: "memory map reported by the bootloader", run: cmd_memmap },
-    Command { name: "uptime", usage: "uptime", help: "time since boot", run: cmd_uptime },
-    Command { name: "sleep", usage: "sleep <ms>", help: "wait for the given number of milliseconds", run: cmd_sleep },
-    Command { name: "cpu", usage: "cpu", help: "processor vendor, model and features", run: cmd_cpu },
-    Command { name: "acpi", usage: "acpi", help: "ACPI tables, CPUs and interrupt routing", run: cmd_acpi },
-    Command { name: "layout", usage: "layout [de|us]", help: "show or set the keyboard layout", run: cmd_layout },
-    Command { name: "history", usage: "history", help: "previously entered commands", run: cmd_history },
-    Command { name: "ps", usage: "ps", help: "list kernel threads", run: cmd_ps },
-    Command { name: "demo", usage: "demo [threads]", help: "run worker threads in parallel (multitasking demo)", run: cmd_demo },
-    Command { name: "colors", usage: "colors", help: "show the console colour palette", run: cmd_colors },
-    Command { name: "version", usage: "version", help: "kernel version", run: cmd_version },
-    Command { name: "int3", usage: "int3", help: "trigger a breakpoint exception (harmless)", run: cmd_int3 },
-    Command { name: "panic", usage: "panic [message]", help: "trigger a kernel panic", run: cmd_panic },
-    Command { name: "reboot", usage: "reboot", help: "restart the machine", run: cmd_reboot },
-    Command { name: "poweroff", usage: "poweroff", help: "switch the machine off", run: cmd_poweroff },
+    Command {
+        name: "help",
+        usage: "help [command]",
+        help: "list commands or show help for one",
+        run: cmd_help,
+    },
+    Command {
+        name: "echo",
+        usage: "echo [words...]",
+        help: "print the arguments",
+        run: cmd_echo,
+    },
+    Command {
+        name: "clear",
+        usage: "clear",
+        help: "clear the screen",
+        run: cmd_clear,
+    },
+    Command {
+        name: "mem",
+        usage: "mem",
+        help: "physical memory and heap usage",
+        run: cmd_mem,
+    },
+    Command {
+        name: "memmap",
+        usage: "memmap",
+        help: "memory map reported by the bootloader",
+        run: cmd_memmap,
+    },
+    Command {
+        name: "uptime",
+        usage: "uptime",
+        help: "time since boot",
+        run: cmd_uptime,
+    },
+    Command {
+        name: "sleep",
+        usage: "sleep <ms>",
+        help: "wait for the given number of milliseconds",
+        run: cmd_sleep,
+    },
+    Command {
+        name: "cpu",
+        usage: "cpu",
+        help: "processor vendor, model and features",
+        run: cmd_cpu,
+    },
+    Command {
+        name: "acpi",
+        usage: "acpi",
+        help: "ACPI tables, CPUs and interrupt routing",
+        run: cmd_acpi,
+    },
+    Command {
+        name: "layout",
+        usage: "layout [de|us]",
+        help: "show or set the keyboard layout",
+        run: cmd_layout,
+    },
+    Command {
+        name: "history",
+        usage: "history",
+        help: "previously entered commands",
+        run: cmd_history,
+    },
+    Command {
+        name: "ps",
+        usage: "ps",
+        help: "list kernel threads",
+        run: cmd_ps,
+    },
+    Command {
+        name: "demo",
+        usage: "demo [threads]",
+        help: "run worker threads in parallel (multitasking demo)",
+        run: cmd_demo,
+    },
+    Command {
+        name: "colors",
+        usage: "colors",
+        help: "show the console colour palette",
+        run: cmd_colors,
+    },
+    Command {
+        name: "version",
+        usage: "version",
+        help: "kernel version",
+        run: cmd_version,
+    },
+    Command {
+        name: "int3",
+        usage: "int3",
+        help: "trigger a breakpoint exception (harmless)",
+        run: cmd_int3,
+    },
+    Command {
+        name: "panic",
+        usage: "panic [message]",
+        help: "trigger a kernel panic",
+        run: cmd_panic,
+    },
+    Command {
+        name: "reboot",
+        usage: "reboot",
+        help: "restart the machine",
+        run: cmd_reboot,
+    },
+    Command {
+        name: "poweroff",
+        usage: "poweroff",
+        help: "switch the machine off",
+        run: cmd_poweroff,
+    },
 ];
 
 pub fn find_command(name: &str) -> Option<&'static Command> {
@@ -67,7 +162,11 @@ pub fn find_command(name: &str) -> Option<&'static Command> {
 
 /// Command names starting with `prefix` (for tab completion).
 pub fn complete_command(prefix: &str) -> Vec<String> {
-    COMMANDS.iter().filter(|c| c.name.starts_with(prefix)).map(|c| String::from(c.name)).collect()
+    COMMANDS
+        .iter()
+        .filter(|c| c.name.starts_with(prefix))
+        .map(|c| String::from(c.name))
+        .collect()
 }
 
 pub struct Shell {
@@ -82,7 +181,9 @@ impl Default for Shell {
 
 impl Shell {
     pub fn new() -> Shell {
-        Shell { editor: LineEditor::new() }
+        Shell {
+            editor: LineEditor::new(),
+        }
     }
 
     /// Parses and runs one command line. Returns `true` on success.
@@ -140,7 +241,11 @@ fn cmd_help(_: &mut Shell, args: &[String], out: &mut dyn Write) -> Result<(), S
     for c in COMMANDS {
         writeln!(out, "  \x1b[96m{:<18}\x1b[0m {}", c.usage, c.help).ok();
     }
-    writeln!(out, "Keys: arrows, Home/End, Tab completes, Up/Down history, Ctrl+C cancel, Ctrl+L clear").ok();
+    writeln!(
+        out,
+        "Keys: arrows, Home/End, Tab completes, Up/Down history, Ctrl+C cancel, Ctrl+L clear"
+    )
+    .ok();
     Ok(())
 }
 
@@ -158,11 +263,25 @@ fn cmd_mem(_: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), Strin
     const MIB: u64 = 1024 * 1024;
     let p = pmm::stats();
     let used = p.usable_bytes() - p.free_bytes();
-    writeln!(out, "Physical: {} MiB usable, {} MiB used, {} MiB free ({} frames of 4 KiB free)",
-        p.usable_bytes() / MIB, used / MIB, p.free_bytes() / MIB, p.free_frames).ok();
+    writeln!(
+        out,
+        "Physical: {} MiB usable, {} MiB used, {} MiB free ({} frames of 4 KiB free)",
+        p.usable_bytes() / MIB,
+        used / MIB,
+        p.free_bytes() / MIB,
+        p.free_frames
+    )
+    .ok();
     let h = heap::stats();
-    writeln!(out, "Heap:     {} KiB mapped, {} bytes used, {} free blocks (largest {} KiB)",
-        h.total / 1024, h.used, h.free_blocks, h.largest_free_block / 1024).ok();
+    writeln!(
+        out,
+        "Heap:     {} KiB mapped, {} bytes used, {} free blocks (largest {} KiB)",
+        h.total / 1024,
+        h.used,
+        h.free_blocks,
+        h.largest_free_block / 1024
+    )
+    .ok();
     Ok(())
 }
 
@@ -185,8 +304,15 @@ fn memmap_type_name(t: u64) -> &'static str {
 fn cmd_memmap(_: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), String> {
     let memmap = boot::MEMMAP.response().ok_or("no memory map from the bootloader")?;
     for e in memmap.entries() {
-        writeln!(out, "  {:#014x} - {:#014x}  {:>9} KiB  {}",
-            e.base, e.base + e.length, e.length / 1024, memmap_type_name(e.type_)).ok();
+        writeln!(
+            out,
+            "  {:#014x} - {:#014x}  {:>9} KiB  {}",
+            e.base,
+            e.base + e.length,
+            e.length / 1024,
+            memmap_type_name(e.type_)
+        )
+        .ok();
     }
     Ok(())
 }
@@ -194,12 +320,26 @@ fn cmd_memmap(_: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), St
 fn cmd_uptime(_: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), String> {
     let ms = time::uptime_ms();
     let (h, m, s) = (ms / 3_600_000, ms / 60_000 % 60, ms / 1000 % 60);
-    writeln!(out, "up {:02}:{:02}:{:02}.{:03} ({} ticks at {} Hz)", h, m, s, ms % 1000, time::ticks(), time::TIMER_HZ).ok();
+    writeln!(
+        out,
+        "up {:02}:{:02}:{:02}.{:03} ({} ticks at {} Hz)",
+        h,
+        m,
+        s,
+        ms % 1000,
+        time::ticks(),
+        time::TIMER_HZ
+    )
+    .ok();
     Ok(())
 }
 
 fn cmd_sleep(_: &mut Shell, args: &[String], out: &mut dyn Write) -> Result<(), String> {
-    let ms: u64 = args.first().ok_or("usage: sleep <ms>")?.parse().map_err(|_| "not a number")?;
+    let ms: u64 = args
+        .first()
+        .ok_or("usage: sleep <ms>")?
+        .parse()
+        .map_err(|_| "not a number")?;
     time::sleep_ms(ms);
     writeln!(out, "slept {} ms", ms).ok();
     Ok(())
@@ -211,7 +351,15 @@ fn cmd_cpu(_: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), Strin
         writeln!(out, "Model:  {}", brand).ok();
     }
     let f = cpu::features();
-    let flags = [("sse", f.sse), ("sse2", f.sse2), ("apic", f.apic), ("x2apic", f.x2apic), ("nx", f.nx), ("lm", f.long_mode), ("hypervisor", f.hypervisor)];
+    let flags = [
+        ("sse", f.sse),
+        ("sse2", f.sse2),
+        ("apic", f.apic),
+        ("x2apic", f.x2apic),
+        ("nx", f.nx),
+        ("lm", f.long_mode),
+        ("hypervisor", f.hypervisor),
+    ];
     write!(out, "Flags: ").ok();
     for (name, on) in flags {
         if on {
@@ -231,17 +379,40 @@ fn cmd_acpi(_: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), Stri
     }
     writeln!(out).ok();
     let madt = &info.madt;
-    writeln!(out, "Local APIC at {:#x}, legacy 8259 present: {}", madt.local_apic_address, madt.has_8259).ok();
+    writeln!(
+        out,
+        "Local APIC at {:#x}, legacy 8259 present: {}",
+        madt.local_apic_address, madt.has_8259
+    )
+    .ok();
     for cpu in &madt.local_apics {
-        writeln!(out, "  CPU {}: APIC ID {}{}", cpu.processor_id, cpu.apic_id, if cpu.flags & 1 != 0 { "" } else { " (disabled)" }).ok();
+        writeln!(
+            out,
+            "  CPU {}: APIC ID {}{}",
+            cpu.processor_id,
+            cpu.apic_id,
+            if cpu.flags & 1 != 0 { "" } else { " (disabled)" }
+        )
+        .ok();
     }
     for io in &madt.io_apics {
-        writeln!(out, "  I/O APIC {} at {:#x}, GSI base {}", io.id, io.address, io.gsi_base).ok();
+        writeln!(
+            out,
+            "  I/O APIC {} at {:#x}, GSI base {}",
+            io.id, io.address, io.gsi_base
+        )
+        .ok();
     }
     for o in &madt.overrides {
-        writeln!(out, "  ISA IRQ {} -> GSI {}{}{}", o.source, o.gsi,
+        writeln!(
+            out,
+            "  ISA IRQ {} -> GSI {}{}{}",
+            o.source,
+            o.gsi,
             if o.active_low() { ", active low" } else { "" },
-            if o.level_triggered() { ", level" } else { "" }).ok();
+            if o.level_triggered() { ", level" } else { "" }
+        )
+        .ok();
     }
     Ok(())
 }
@@ -277,7 +448,15 @@ fn cmd_ps(_: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), String
             task::State::Blocked(task::Wait::Join(id)) => format!("join {}", id),
             task::State::Dead => String::from("dead"),
         };
-        writeln!(out, "  {:>3}  {:<12} {:>3}%    {}", t.id, state, t.cpu_ticks * 100 / total, t.name).ok();
+        writeln!(
+            out,
+            "  {:>3}  {:<12} {:>3}%    {}",
+            t.id,
+            state,
+            t.cpu_ticks * 100 / total,
+            t.name
+        )
+        .ok();
     }
     Ok(())
 }
@@ -290,22 +469,40 @@ fn cmd_demo(_: &mut Shell, args: &[String], out: &mut dyn Write) -> Result<(), S
     if !(1..=16).contains(&count) {
         return Err(String::from("use 1 to 16 threads"));
     }
-    writeln!(out, "starting {} worker threads, each counts primes below 30000...", count).ok();
+    writeln!(
+        out,
+        "starting {} worker threads, each counts primes below 30000...",
+        count
+    )
+    .ok();
     let start = time::ticks();
     let ids: Vec<task::Tid> = (1..=count)
         .map(|n| {
             task::spawn("demo-worker", move || {
                 // naive prime counting: pure CPU work, preempted by the timer
-                let primes = (2u64..30_000).filter(|&k| (2..).take_while(|d| d * d <= k).all(|d| k % d != 0)).count();
+                let primes = (2u64..30_000)
+                    .filter(|&k| (2..).take_while(|d| d * d <= k).all(|d| k % d != 0))
+                    .count();
                 let tid = task::current_id();
-                crate::println!("  worker {} (thread {}) found {} primes after {} ms", n, tid, primes, time::uptime_ms());
+                crate::println!(
+                    "  worker {} (thread {}) found {} primes after {} ms",
+                    n,
+                    tid,
+                    primes,
+                    time::uptime_ms()
+                );
             })
         })
         .collect();
     for id in ids {
         task::join(id);
     }
-    writeln!(out, "all workers done in {} ms", (time::ticks() - start) * time::MS_PER_TICK).ok();
+    writeln!(
+        out,
+        "all workers done in {} ms",
+        (time::ticks() - start) * time::MS_PER_TICK
+    )
+    .ok();
     Ok(())
 }
 
@@ -320,7 +517,12 @@ fn cmd_colors(_: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), St
 }
 
 fn cmd_version(_: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), String> {
-    writeln!(out, "KernelTry {} (x86_64, Rust, Limine boot protocol)", env!("CARGO_PKG_VERSION")).ok();
+    writeln!(
+        out,
+        "KernelTry {} (x86_64, Rust, Limine boot protocol)",
+        env!("CARGO_PKG_VERSION")
+    )
+    .ok();
     Ok(())
 }
 
@@ -331,7 +533,11 @@ fn cmd_int3(_: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), Stri
 }
 
 fn cmd_panic(_: &mut Shell, args: &[String], _: &mut dyn Write) -> Result<(), String> {
-    let message = if args.is_empty() { String::from("requested by the user") } else { args.join(" ") };
+    let message = if args.is_empty() {
+        String::from("requested by the user")
+    } else {
+        args.join(" ")
+    };
     panic!("{}", message);
 }
 
@@ -358,7 +564,10 @@ mod tests {
 
     #[test_case]
     fn echo_joins_arguments() {
-        assert_eq!(run("echo hello   \"big world\""), (true, String::from("hello big world\n")));
+        assert_eq!(
+            run("echo hello   \"big world\""),
+            (true, String::from("hello big world\n"))
+        );
     }
 
     #[test_case]

@@ -49,7 +49,13 @@ impl FrameBitmap {
     pub fn new(bits: &'static mut [u64], frame_count: usize, usable: &[Region]) -> FrameBitmap {
         assert!(bits.len() >= Self::words_needed(frame_count), "bitmap buffer too small");
         bits.fill(u64::MAX);
-        let mut bitmap = FrameBitmap { bits, frame_count, free_frames: 0, usable_frames: 0, next_word: 0 };
+        let mut bitmap = FrameBitmap {
+            bits,
+            frame_count,
+            free_frames: 0,
+            usable_frames: 0,
+            next_word: 0,
+        };
         for region in usable {
             let start = align_up(region.base, PAGE_SIZE) / PAGE_SIZE;
             let end = align_down(region.base + region.length, PAGE_SIZE) / PAGE_SIZE;
@@ -149,7 +155,10 @@ pub(super) fn init() {
     let mut highest = 0;
     for entry in memmap.entries() {
         if entry.type_ == MEMMAP_USABLE && count < usable.len() {
-            usable[count] = Region { base: entry.base, length: entry.length };
+            usable[count] = Region {
+                base: entry.base,
+                length: entry.length,
+            };
             count += 1;
             highest = highest.max(entry.base + entry.length);
         }
@@ -213,7 +222,10 @@ impl Stats {
 }
 
 pub fn stats() -> Stats {
-    with_pmm(|p| Stats { usable_frames: p.usable_frames(), free_frames: p.free_frames() })
+    with_pmm(|p| Stats {
+        usable_frames: p.usable_frames(),
+        free_frames: p.free_frames(),
+    })
 }
 
 #[cfg(test)]
@@ -223,8 +235,14 @@ mod tests {
     /// A bitmap for a fake machine with 256 frames (1 MiB) and two usable regions.
     fn fake_bitmap(storage: &'static mut [u64; 4]) -> FrameBitmap {
         let regions = [
-            Region { base: 0x0000, length: 0x4000 },  // frames 0..4 (frame 0 stays reserved)
-            Region { base: 0x10800, length: 0x3000 }, // unaligned: only frames 0x11, 0x12 fully inside
+            Region {
+                base: 0x0000,
+                length: 0x4000,
+            }, // frames 0..4 (frame 0 stays reserved)
+            Region {
+                base: 0x10800,
+                length: 0x3000,
+            }, // unaligned: only frames 0x11, 0x12 fully inside
         ];
         FrameBitmap::new(storage, 256, &regions)
     }
@@ -277,7 +295,11 @@ mod tests {
     fn real_pmm_has_memory() {
         let s = stats();
         // QEMU runs with -m 256M; most of it must be usable
-        assert!(s.usable_bytes() > 200 * 1024 * 1024, "only {} bytes usable", s.usable_bytes());
+        assert!(
+            s.usable_bytes() > 200 * 1024 * 1024,
+            "only {} bytes usable",
+            s.usable_bytes()
+        );
         assert!(s.free_frames <= s.usable_frames);
     }
 

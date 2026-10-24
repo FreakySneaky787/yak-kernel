@@ -23,7 +23,12 @@ extern "x86-interrupt" fn test_double_fault(_frame: InterruptStackFrame, _code: 
     let cr2 = read_cr2();
     let guard = GUARD_PAGE.load(Ordering::Relaxed);
     let in_guard = (guard..guard + 4096).contains(&cr2);
-    serial_println!("double fault caught, cr2={:#x}, guard page={:#x}, hit guard: {}", cr2, guard, in_guard);
+    serial_println!(
+        "double fault caught, cr2={:#x}, guard page={:#x}, hit guard: {}",
+        cr2,
+        guard,
+        in_guard
+    );
     if in_guard {
         serial_println!("[ok]");
         exit(ExitCode::Success)
@@ -53,7 +58,8 @@ extern "C" fn kmain() -> ! {
     let idt = TEST_IDT.call_once(|| {
         let mut idt = Idt::new();
         install_exception_handlers(&mut idt);
-        idt.set_diverging_with_error_code(vector::DOUBLE_FAULT, test_double_fault).set_ist(DOUBLE_FAULT_IST);
+        idt.set_diverging_with_error_code(vector::DOUBLE_FAULT, test_double_fault)
+            .set_ist(DOUBLE_FAULT_IST);
         idt
     });
     idt.load();

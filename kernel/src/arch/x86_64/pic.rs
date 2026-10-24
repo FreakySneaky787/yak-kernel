@@ -60,4 +60,3 @@ pub fn init() {
 pub fn masks() -> (u8, u8) {
     unsafe { (inb(PIC1_DATA), inb(PIC2_DATA)) }
 }
-

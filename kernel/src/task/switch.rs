@@ -49,7 +49,15 @@ unsafe extern "C" {
 /// `[ret = trampoline] [rbp] [rbx] [r12 = arg] [r13] [r14] [r15]` <- RSP
 pub fn initial_stack(top: u64, arg: u64) -> u64 {
     assert!(top % 16 == 0);
-    let frame: [u64; 7] = [0, 0, 0, arg, 0, 0, kernel_thread_trampoline as unsafe extern "C" fn() as usize as u64];
+    let frame: [u64; 7] = [
+        0,
+        0,
+        0,
+        arg,
+        0,
+        0,
+        kernel_thread_trampoline as unsafe extern "C" fn() as usize as u64,
+    ];
     // frame[0] = r15 (lowest address) ... frame[6] = return address
     let rsp = top - frame.len() as u64 * 8;
     for (i, value) in frame.iter().enumerate() {

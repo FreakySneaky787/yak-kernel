@@ -55,8 +55,8 @@ pub const DEFAULT_BG: u32 = 0x00101018;
 
 /// The 16 standard terminal colours (normal 0-7, bright 8-15).
 const PALETTE: [u32; 16] = [
-    0x00101018, 0x00CC3333, 0x0033AA33, 0x00CCAA33, 0x003366CC, 0x00AA44AA, 0x0033AAAA, 0x00D0D0D0,
-    0x00666666, 0x00FF5555, 0x0055FF55, 0x00FFFF55, 0x005599FF, 0x00FF66FF, 0x0055FFFF, 0x00FFFFFF,
+    0x00101018, 0x00CC3333, 0x0033AA33, 0x00CCAA33, 0x003366CC, 0x00AA44AA, 0x0033AAAA, 0x00D0D0D0, 0x00666666,
+    0x00FF5555, 0x0055FF55, 0x00FFFF55, 0x005599FF, 0x00FF66FF, 0x0055FFFF, 0x00FFFFFF,
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -66,7 +66,11 @@ pub struct Cell {
     pub bg: u32,
 }
 
-const BLANK: Cell = Cell { ch: ' ', fg: DEFAULT_FG, bg: DEFAULT_BG };
+const BLANK: Cell = Cell {
+    ch: ' ',
+    fg: DEFAULT_FG,
+    bg: DEFAULT_BG,
+};
 
 /// Parser state for escape sequences.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -74,7 +78,10 @@ enum EscState {
     Normal,
     Escape,
     /// Inside `ESC [`, collecting up to 4 numeric parameters.
-    Csi { params: [u16; 4], count: usize },
+    Csi {
+        params: [u16; 4],
+        count: usize,
+    },
 }
 
 pub struct Console {
@@ -133,7 +140,11 @@ impl Console {
 
     /// Clears the screen and moves the cursor home.
     pub fn clear(&mut self) {
-        self.cells.fill(Cell { ch: ' ', fg: self.fg, bg: self.bg });
+        self.cells.fill(Cell {
+            ch: ' ',
+            fg: self.fg,
+            bg: self.bg,
+        });
         self.surface.fill_rows(0, self.surface.height, self.bg);
         self.cursor_drawn = false;
         self.col = 0;
@@ -166,7 +177,14 @@ impl Console {
         match self.esc {
             EscState::Normal => self.process_normal(c),
             EscState::Escape => {
-                self.esc = if c == '[' { EscState::Csi { params: [0; 4], count: 0 } } else { EscState::Normal };
+                self.esc = if c == '[' {
+                    EscState::Csi {
+                        params: [0; 4],
+                        count: 0,
+                    }
+                } else {
+                    EscState::Normal
+                };
             }
             EscState::Csi { mut params, mut count } => match c {
                 '0'..='9' => {
@@ -255,7 +273,11 @@ impl Console {
     }
 
     fn set_cell(&mut self, col: usize, row: usize, ch: char) {
-        let cell = Cell { ch, fg: self.fg, bg: self.bg };
+        let cell = Cell {
+            ch,
+            fg: self.fg,
+            bg: self.bg,
+        };
         self.cells[row * self.cols + col] = cell;
         self.draw_cell(col, row, cell.fg, cell.bg);
     }
@@ -321,7 +343,11 @@ impl Console {
         s.fill_rows(text_height - fh, text_height, self.bg);
         self.cells.copy_within(self.cols.., 0);
         let last_row = (self.rows - 1) * self.cols;
-        self.cells[last_row..].fill(Cell { ch: ' ', fg: self.fg, bg: self.bg });
+        self.cells[last_row..].fill(Cell {
+            ch: ' ',
+            fg: self.fg,
+            bg: self.bg,
+        });
     }
 }
 
@@ -337,7 +363,9 @@ pub static CONSOLE: Mutex<Option<Console>> = Mutex::new(None);
 /// Creates the console on the first Limine framebuffer (if present and 32 bpp).
 /// Needs the kernel heap for the character grid.
 pub fn init() {
-    let Some(resp) = crate::boot::FRAMEBUFFER.response() else { return };
+    let Some(resp) = crate::boot::FRAMEBUFFER.response() else {
+        return;
+    };
     let Some(fb) = resp.framebuffers().first() else { return };
     if fb.bpp != 32 {
         return;
@@ -388,7 +416,12 @@ mod tests {
     const H: usize = 64; // 4 rows of 16 px
 
     fn test_console(buf: &mut [u32; W * H]) -> Console {
-        let mut c = Console::new(Surface { base: buf.as_mut_ptr(), width: W, height: H, stride: W });
+        let mut c = Console::new(Surface {
+            base: buf.as_mut_ptr(),
+            width: W,
+            height: H,
+            stride: W,
+        });
         c.set_cursor_visible(false); // most tests check plain pixels
         c
     }
@@ -423,7 +456,10 @@ mod tests {
         let mut c = test_console(&mut buf);
         c.write_char('A');
         let s = c.surface;
-        let fg_pixels = (0..16).flat_map(|y| (0..8).map(move |x| (x, y))).filter(|&(x, y)| s.get(x, y) == DEFAULT_FG).count();
+        let fg_pixels = (0..16)
+            .flat_map(|y| (0..8).map(move |x| (x, y)))
+            .filter(|&(x, y)| s.get(x, y) == DEFAULT_FG)
+            .count();
         assert!(fg_pixels > 10, "'A' has only {} foreground pixels", fg_pixels);
     }
 

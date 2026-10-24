@@ -173,7 +173,11 @@ impl Decoder {
     }
 
     fn event(&self, key: Key) -> KeyEvent {
-        KeyEvent { key, ctrl: self.mods.ctrl, alt: self.mods.alt }
+        KeyEvent {
+            key,
+            ctrl: self.mods.ctrl,
+            alt: self.mods.alt,
+        }
     }
 
     fn translate(&self, code: u8) -> Option<char> {
@@ -183,7 +187,11 @@ impl Decoder {
         }
         let shift = self.mods.left_shift || self.mods.right_shift;
         // Caps Lock only affects letters (including umlauts), not digits/symbols
-        let upper = if normal.is_alphabetic() { shift ^ self.mods.caps_lock } else { shift };
+        let upper = if normal.is_alphabetic() {
+            shift ^ self.mods.caps_lock
+        } else {
+            shift
+        };
         Some(if upper { shifted } else { normal })
     }
 }
@@ -393,7 +401,14 @@ mod tests {
     fn ctrl_flag() {
         let mut d = Decoder::new(Layout::De);
         let e = feed_all(&mut d, &[0x1D, 0x2E]).unwrap();
-        assert_eq!(e, KeyEvent { key: Key::Char('c'), ctrl: true, alt: false });
+        assert_eq!(
+            e,
+            KeyEvent {
+                key: Key::Char('c'),
+                ctrl: true,
+                alt: false
+            }
+        );
         let e = feed_all(&mut d, &[0x9D, 0x2E]).unwrap();
         assert!(!e.ctrl);
     }

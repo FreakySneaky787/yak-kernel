@@ -46,7 +46,8 @@ pub fn install_exception_handlers(idt: &mut Idt) {
     idt.set(BOUND_RANGE, bound_range);
     idt.set(INVALID_OPCODE, invalid_opcode);
     idt.set(DEVICE_NOT_AVAILABLE, device_not_available);
-    idt.set_diverging_with_error_code(DOUBLE_FAULT, double_fault).set_ist(DOUBLE_FAULT_IST);
+    idt.set_diverging_with_error_code(DOUBLE_FAULT, double_fault)
+        .set_ist(DOUBLE_FAULT_IST);
     idt.set_with_error_code(INVALID_TSS, invalid_tss);
     idt.set_with_error_code(SEGMENT_NOT_PRESENT, segment_not_present);
     idt.set_with_error_code(STACK_SEGMENT_FAULT, stack_segment_fault);
@@ -96,7 +97,10 @@ extern "x86-interrupt" fn page_fault(frame: InterruptStackFrame, error_code: u64
 }
 
 extern "x86-interrupt" fn general_protection(frame: InterruptStackFrame, error_code: u64) {
-    panic!("EXCEPTION: GENERAL PROTECTION FAULT (Selector/Code {:#x})\n{:?}", error_code, frame);
+    panic!(
+        "EXCEPTION: GENERAL PROTECTION FAULT (Selector/Code {:#x})\n{:?}",
+        error_code, frame
+    );
 }
 
 extern "x86-interrupt" fn machine_check(frame: InterruptStackFrame) -> ! {
@@ -112,7 +116,10 @@ macro_rules! panicking_handler {
     };
     ($name:ident, $text:literal, error_code) => {
         extern "x86-interrupt" fn $name(frame: InterruptStackFrame, error_code: u64) {
-            panic!(concat!("EXCEPTION: ", $text, " (code {:#x})\n{:?}"), error_code, frame);
+            panic!(
+                concat!("EXCEPTION: ", $text, " (code {:#x})\n{:?}"),
+                error_code, frame
+            );
         }
     };
 }
@@ -142,7 +149,11 @@ impl core::fmt::Display for PageFaultError {
         write!(
             f,
             "{}, {}, {}",
-            if c & 1 != 0 { "protection violation" } else { "page not present" },
+            if c & 1 != 0 {
+                "protection violation"
+            } else {
+                "page not present"
+            },
             if c & 2 != 0 { "write" } else { "read" },
             if c & 4 != 0 { "user mode" } else { "kernel mode" },
         )?;
@@ -186,6 +197,9 @@ mod tests {
         }
         let mut b = Buf([0; 128], 0);
         write!(b, "{}", PageFaultError(0b10)).unwrap();
-        assert_eq!(core::str::from_utf8(&b.0[..b.1]).unwrap(), "page not present, write, kernel mode");
+        assert_eq!(
+            core::str::from_utf8(&b.0[..b.1]).unwrap(),
+            "page not present, write, kernel mode"
+        );
     }
 }

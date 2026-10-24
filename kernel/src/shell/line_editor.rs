@@ -69,7 +69,12 @@ impl LineEditor {
     }
 
     /// Processes one key. `complete` returns all candidates for a word prefix.
-    pub fn handle(&mut self, event: KeyEvent, out: &mut dyn Write, complete: &dyn Fn(&str) -> Vec<String>) -> EditResult {
+    pub fn handle(
+        &mut self,
+        event: KeyEvent,
+        out: &mut dyn Write,
+        complete: &dyn Fn(&str) -> Vec<String>,
+    ) -> EditResult {
         if event.ctrl {
             if let Key::Char(c) = event.key {
                 return self.handle_ctrl(c, out);
@@ -311,15 +316,27 @@ mod tests {
     use alloc::vec;
 
     fn key(k: Key) -> KeyEvent {
-        KeyEvent { key: k, ctrl: false, alt: false }
+        KeyEvent {
+            key: k,
+            ctrl: false,
+            alt: false,
+        }
     }
 
     fn ctrl(c: char) -> KeyEvent {
-        KeyEvent { key: Key::Char(c), ctrl: true, alt: false }
+        KeyEvent {
+            key: Key::Char(c),
+            ctrl: true,
+            alt: false,
+        }
     }
 
     fn commands(prefix: &str) -> Vec<String> {
-        ["help", "history", "echo", "clear"].iter().filter(|c| c.starts_with(prefix)).map(|c| String::from(*c)).collect()
+        ["help", "history", "echo", "clear"]
+            .iter()
+            .filter(|c| c.starts_with(prefix))
+            .map(|c| String::from(*c))
+            .collect()
     }
 
     /// Feeds a string as key presses; returns the final result.
@@ -370,7 +387,10 @@ mod tests {
         let mut ed = LineEditor::new();
         let mut out = String::new();
         ed.start("> ", &mut out);
-        assert_eq!(type_str(&mut ed, "echo hi\n", &mut out), EditResult::Line("echo hi".into()));
+        assert_eq!(
+            type_str(&mut ed, "echo hi\n", &mut out),
+            EditResult::Line("echo hi".into())
+        );
         assert_eq!(out, "> echo hi\n");
     }
 

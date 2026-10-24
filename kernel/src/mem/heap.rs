@@ -55,7 +55,11 @@ unsafe impl Send for LinkedListHeap {}
 
 impl LinkedListHeap {
     pub const fn empty() -> LinkedListHeap {
-        LinkedListHeap { head: null_mut(), total: 0, used: 0 }
+        LinkedListHeap {
+            head: null_mut(),
+            total: 0,
+            used: 0,
+        }
     }
 
     /// Adds a memory region to the heap.
@@ -188,7 +192,10 @@ pub struct KernelHeap {
 
 impl KernelHeap {
     const fn new() -> KernelHeap {
-        KernelHeap { inner: Mutex::new(LinkedListHeap::empty()), end: Mutex::new(HEAP_START) }
+        KernelHeap {
+            inner: Mutex::new(LinkedListHeap::empty()),
+            end: Mutex::new(HEAP_START),
+        }
     }
 
     /// Maps at least `bytes` more memory at the end of the heap.
@@ -223,7 +230,11 @@ unsafe impl GlobalAlloc for KernelHeap {
             }
             // Not enough space: grow by enough to fit size + worst-case alignment padding
             let needed = (block_size(layout) + layout.align()) as u64;
-            if self.grow(&mut heap, needed) { heap.alloc(layout) } else { null_mut() }
+            if self.grow(&mut heap, needed) {
+                heap.alloc(layout)
+            } else {
+                null_mut()
+            }
         })
     }
 
@@ -239,7 +250,10 @@ pub static HEAP: KernelHeap = KernelHeap::new();
 pub fn init() {
     without_interrupts(|| {
         let mut heap = HEAP.inner.lock();
-        assert!(HEAP.grow(&mut heap, HEAP_INITIAL_SIZE), "cannot map the initial kernel heap");
+        assert!(
+            HEAP.grow(&mut heap, HEAP_INITIAL_SIZE),
+            "cannot map the initial kernel heap"
+        );
     });
 }
 

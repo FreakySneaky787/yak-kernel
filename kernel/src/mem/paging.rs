@@ -141,7 +141,12 @@ pub enum UnmapError {
 /// Table indices for each level, PML4 first.
 pub fn table_indices(virt: VirtAddr) -> [usize; 4] {
     let v = virt.0;
-    [((v >> 39) & 0x1FF) as usize, ((v >> 30) & 0x1FF) as usize, ((v >> 21) & 0x1FF) as usize, ((v >> 12) & 0x1FF) as usize]
+    [
+        ((v >> 39) & 0x1FF) as usize,
+        ((v >> 30) & 0x1FF) as usize,
+        ((v >> 21) & 0x1FF) as usize,
+        ((v >> 12) & 0x1FF) as usize,
+    ]
 }
 
 pub fn read_cr3() -> PhysAddr {
@@ -270,9 +275,9 @@ pub fn unmap_page(virt: VirtAddr) -> Result<PhysAddr, UnmapError> {
 pub fn map_fresh(virt: VirtAddr, pages: usize, flags: Flags) -> Result<(), MapError> {
     for i in 0..pages {
         let page = VirtAddr(virt.0 + i as u64 * PAGE_SIZE);
-        let result = alloc_frame_zeroed().ok_or(MapError::OutOfMemory).and_then(|frame| {
-            map_page(page, frame, flags).inspect_err(|_| free_frame(frame))
-        });
+        let result = alloc_frame_zeroed()
+            .ok_or(MapError::OutOfMemory)
+            .and_then(|frame| map_page(page, frame, flags).inspect_err(|_| free_frame(frame)));
         if let Err(e) = result {
             unmap_and_free(virt, i);
             return Err(e);
@@ -334,7 +339,10 @@ mod tests {
 
     #[test_case]
     fn translate_hhdm_and_kernel() {
-        assert_eq!(translate(VirtAddr(hhdm_offset() + 0x10_0000)), Some(PhysAddr(0x10_0000)));
+        assert_eq!(
+            translate(VirtAddr(hhdm_offset() + 0x10_0000)),
+            Some(PhysAddr(0x10_0000))
+        );
         let code = crate::init as fn() as usize as u64;
         assert!(translate(VirtAddr(code)).is_some(), "kernel code not mapped?");
         assert_eq!(translate(VirtAddr(0x0000_4000_0000_0000)), None);
@@ -390,7 +398,10 @@ mod tests {
 
     #[test_case]
     fn misaligned_requests_rejected() {
-        assert_eq!(map_page(VirtAddr(TEST_AREA + 1), PhysAddr(0x1000), Flags::KERNEL_DATA), Err(MapError::NotAligned));
+        assert_eq!(
+            map_page(VirtAddr(TEST_AREA + 1), PhysAddr(0x1000), Flags::KERNEL_DATA),
+            Err(MapError::NotAligned)
+        );
         assert_eq!(unmap_page(VirtAddr(TEST_AREA + 1)), Err(UnmapError::NotAligned));
     }
 

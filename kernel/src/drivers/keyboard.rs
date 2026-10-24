@@ -5,9 +5,9 @@
 //! byte); translation happens outside of it in the `Decoder`.
 
 use super::scancode::{Decoder, KeyEvent, Layout};
-use crate::ringbuf::RingBuffer;
 use crate::arch::x86_64::port::inb;
 use crate::arch::x86_64::without_interrupts;
+use crate::ringbuf::RingBuffer;
 use spin::Mutex;
 
 const DATA_PORT: u16 = 0x60;

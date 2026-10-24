@@ -19,7 +19,10 @@ enum State {
     /// `ESC [` plus an optional numeric parameter (for `ESC [ 3 ~`)
     Csi(u8),
     /// Remaining continuation bytes and the code point collected so far
-    Utf8 { remaining: u8, acc: u32 },
+    Utf8 {
+        remaining: u8,
+        acc: u32,
+    },
 }
 
 pub struct TerminalDecoder {
@@ -28,12 +31,19 @@ pub struct TerminalDecoder {
 }
 
 fn plain(key: Key) -> KeyEvent {
-    KeyEvent { key, ctrl: false, alt: false }
+    KeyEvent {
+        key,
+        ctrl: false,
+        alt: false,
+    }
 }
 
 impl TerminalDecoder {
     pub const fn new() -> TerminalDecoder {
-        TerminalDecoder { state: State::Normal, last_was_cr: false }
+        TerminalDecoder {
+            state: State::Normal,
+            last_was_cr: false,
+        }
     }
 
     pub fn feed(&mut self, byte: u8) -> Option<KeyEvent> {
@@ -52,7 +62,11 @@ impl TerminalDecoder {
                     self.state = State::Escape;
                     None
                 }
-                0x01..=0x1A => Some(KeyEvent { key: Key::Char((b'a' + byte - 1) as char), ctrl: true, alt: false }),
+                0x01..=0x1A => Some(KeyEvent {
+                    key: Key::Char((b'a' + byte - 1) as char),
+                    ctrl: true,
+                    alt: false,
+                }),
                 0x20..=0x7E => Some(plain(Key::Char(byte as char))),
                 0xC0..=0xDF => self.start_utf8(1, byte & 0x1F),
                 0xE0..=0xEF => self.start_utf8(2, byte & 0x0F),
@@ -104,7 +118,10 @@ impl TerminalDecoder {
                     self.state = State::Normal;
                     char::from_u32(acc).map(|c| plain(Key::Char(c)))
                 } else {
-                    self.state = State::Utf8 { remaining: remaining - 1, acc };
+                    self.state = State::Utf8 {
+                        remaining: remaining - 1,
+                        acc,
+                    };
                     None
                 }
             }
@@ -112,7 +129,10 @@ impl TerminalDecoder {
     }
 
     fn start_utf8(&mut self, remaining: u8, bits: u8) -> Option<KeyEvent> {
-        self.state = State::Utf8 { remaining, acc: bits as u32 };
+        self.state = State::Utf8 {
+            remaining,
+            acc: bits as u32,
+        };
         None
     }
 }
@@ -168,7 +188,10 @@ mod tests {
     #[test_case]
     fn printable_and_enter_variants() {
         assert_eq!(keys(b"hi\r"), [Key::Char('h'), Key::Char('i'), Key::Enter]);
-        assert_eq!(keys(b"a\r\nb\n"), [Key::Char('a'), Key::Enter, Key::Char('b'), Key::Enter]);
+        assert_eq!(
+            keys(b"a\r\nb\n"),
+            [Key::Char('a'), Key::Enter, Key::Char('b'), Key::Enter]
+        );
         assert_eq!(keys(b"\r\r"), [Key::Enter, Key::Enter]);
     }
 
@@ -176,13 +199,26 @@ mod tests {
     fn backspace_tab_and_ctrl() {
         assert_eq!(keys(b"\x7f\x08\t"), [Key::Backspace, Key::Backspace, Key::Tab]);
         let e = decode(b"\x03");
-        assert_eq!(e[0], KeyEvent { key: Key::Char('c'), ctrl: true, alt: false });
+        assert_eq!(
+            e[0],
+            KeyEvent {
+                key: Key::Char('c'),
+                ctrl: true,
+                alt: false
+            }
+        );
     }
 
     #[test_case]
     fn ansi_sequences() {
-        assert_eq!(keys(b"\x1b[A\x1b[B\x1b[C\x1b[D"), [Key::Up, Key::Down, Key::Right, Key::Left]);
-        assert_eq!(keys(b"\x1b[H\x1b[F\x1b[3~\x1b[1~\x1b[4~"), [Key::Home, Key::End, Key::Delete, Key::Home, Key::End]);
+        assert_eq!(
+            keys(b"\x1b[A\x1b[B\x1b[C\x1b[D"),
+            [Key::Up, Key::Down, Key::Right, Key::Left]
+        );
+        assert_eq!(
+            keys(b"\x1b[H\x1b[F\x1b[3~\x1b[1~\x1b[4~"),
+            [Key::Home, Key::End, Key::Delete, Key::Home, Key::End]
+        );
         assert_eq!(keys(b"\x1bx"), [Key::Escape]);
     }
 
