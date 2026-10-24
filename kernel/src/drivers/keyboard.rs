@@ -5,6 +5,7 @@
 //! byte); translation happens outside of it in the `Decoder`.
 
 use super::scancode::{Decoder, KeyEvent, Layout};
+use crate::ringbuf::RingBuffer;
 use crate::arch::x86_64::port::inb;
 use crate::arch::x86_64::without_interrupts;
 use spin::Mutex;
@@ -12,53 +13,6 @@ use spin::Mutex;
 const DATA_PORT: u16 = 0x60;
 const STATUS_PORT: u16 = 0x64;
 const STATUS_OUTPUT_FULL: u8 = 0x01;
-
-/// Fixed-size ring buffer without heap. When full, new bytes are dropped.
-pub struct RingBuffer<const N: usize> {
-    buf: [u8; N],
-    head: usize,
-    len: usize,
-}
-
-impl<const N: usize> RingBuffer<N> {
-    pub const fn new() -> Self {
-        RingBuffer { buf: [0; N], head: 0, len: 0 }
-    }
-
-    /// Returns `false` if the buffer was full.
-    pub fn push(&mut self, byte: u8) -> bool {
-        if self.len == N {
-            return false;
-        }
-        self.buf[(self.head + self.len) % N] = byte;
-        self.len += 1;
-        true
-    }
-
-    pub fn pop(&mut self) -> Option<u8> {
-        if self.len == 0 {
-            return None;
-        }
-        let byte = self.buf[self.head];
-        self.head = (self.head + 1) % N;
-        self.len -= 1;
-        Some(byte)
-    }
-
-    pub fn len(&self) -> usize {
-        self.len
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len == 0
-    }
-}
-
-impl<const N: usize> Default for RingBuffer<N> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 static SCANCODES: Mutex<RingBuffer<128>> = Mutex::new(RingBuffer::new());
 static DECODER: Mutex<Decoder> = Mutex::new(Decoder::new(Layout::De));
@@ -111,6 +65,11 @@ pub fn read_key() -> KeyEvent {
     }
 }
 
+/// Whether unread scancodes are waiting (call with interrupts disabled for a race-free check).
+pub fn has_pending() -> bool {
+    !SCANCODES.lock().is_empty()
+}
+
 pub fn layout() -> Layout {
     DECODER.lock().layout()
 }
@@ -123,16 +82,6 @@ pub fn set_layout(layout: Layout) {
 mod tests {
     use super::super::scancode::Key;
     use super::*;
-
-    #[test_case]
-    fn ring_buffer_fifo_and_overflow() {
-        let mut rb: RingBuffer<3> = RingBuffer::new();
-        assert!(rb.push(1) && rb.push(2) && rb.push(3));
-        assert!(!rb.push(4)); // full
-        assert_eq!(rb.pop(), Some(1));
-        assert!(rb.push(5)); // wrap-around
-        assert_eq!((rb.pop(), rb.pop(), rb.pop(), rb.pop()), (Some(2), Some(3), Some(5), None));
-    }
 
     #[test_case]
     fn injected_scancodes_become_keys() {

@@ -6,6 +6,7 @@ use crate::time;
 
 pub const TIMER_IRQ: u8 = 0;
 pub const KEYBOARD_IRQ: u8 = 1;
+pub const COM1_IRQ: u8 = 4;
 
 pub const fn vector(irq: u8) -> u8 {
     PIC1_OFFSET + irq
@@ -14,6 +15,7 @@ pub const fn vector(irq: u8) -> u8 {
 pub fn install_irq_handlers(idt: &mut Idt) {
     idt.set(vector(TIMER_IRQ), timer);
     idt.set(vector(KEYBOARD_IRQ), keyboard);
+    idt.set(vector(COM1_IRQ), com1);
     idt.set(vector(7), spurious_master);
     idt.set(vector(15), spurious_slave);
 }
@@ -27,6 +29,7 @@ pub fn init() {
     pic::unmask(TIMER_IRQ);
     crate::drivers::keyboard::init();
     pic::unmask(KEYBOARD_IRQ);
+    pic::unmask(COM1_IRQ);
 }
 
 extern "x86-interrupt" fn timer(_frame: InterruptStackFrame) {
@@ -37,6 +40,11 @@ extern "x86-interrupt" fn timer(_frame: InterruptStackFrame) {
 extern "x86-interrupt" fn keyboard(_frame: InterruptStackFrame) {
     crate::drivers::keyboard::handle_interrupt();
     pic::end_of_interrupt(KEYBOARD_IRQ);
+}
+
+extern "x86-interrupt" fn com1(_frame: InterruptStackFrame) {
+    crate::serial::handle_interrupt();
+    pic::end_of_interrupt(COM1_IRQ);
 }
 
 // Spurious IRQs: the PIC reports IRQ 7/15 although nothing is pending. Then no
@@ -89,6 +97,6 @@ mod tests {
         let start = time::ticks();
         time::sleep_ms(50);
         let elapsed = time::ticks() - start;
-        assert!((5..=10).contains(&elapsed), "sleep_ms(50) dauerte {} Ticks", elapsed);
+        assert!((5..=10).contains(&elapsed), "sleep_ms(50) took {} ticks", elapsed);
     }
 }

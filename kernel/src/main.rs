@@ -43,7 +43,7 @@ extern "C" fn kernel_main() -> ! {
         match event.key {
             Key::Char(c) => print!("{}", c),
             Key::Enter => print!("\n> "),
-            Key::Backspace => print!("\x08"),
+            Key::Backspace => print!("\x08 \x08"),
             Key::Tab => print!("\t"),
             other => kernel::serial_println!("[key: {:?}]", other),
         }
