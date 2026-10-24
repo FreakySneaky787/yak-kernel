@@ -11,6 +11,7 @@
 //! SS = STAR.base + 8 and CS = STAR.base + 16 (see `syscall.rs`), so user
 //! data must come directly before user code.
 
+use super::smp::{self, MAX_CPUS};
 use core::arch::asm;
 use core::mem::size_of;
 use spin::Once;
@@ -86,13 +87,15 @@ fn tss_descriptor(tss: &'static TaskStateSegment) -> (u64, u64) {
     (low, high)
 }
 
+/// One TSS and one GDT per CPU (each CPU needs its own TSS: RSP0 and the
+/// IST stacks differ, and a TSS descriptor is marked busy once loaded).
 /// Not behind a lock: RSP0 is rewritten on every context switch (with
-/// interrupts disabled) and the CPU reads it on its own.
-static mut TSS: TaskStateSegment = TaskStateSegment::new();
-static GDT: Once<Gdt> = Once::new();
+/// interrupts disabled) by the CPU that owns it, and the CPU reads it on its own.
+static mut TSS: [TaskStateSegment; MAX_CPUS] = [const { TaskStateSegment::new() }; MAX_CPUS];
+static GDT: [Once<Gdt>; MAX_CPUS] = [const { Once::new() }; MAX_CPUS];
 
-fn tss() -> &'static TaskStateSegment {
-    unsafe { &*core::ptr::addr_of!(TSS) }
+fn tss(cpu: usize) -> &'static TaskStateSegment {
+    unsafe { &*core::ptr::addr_of!(TSS[cpu]) }
 }
 
 #[repr(C, packed)]
@@ -101,15 +104,21 @@ struct DescriptorTablePointer {
     base: u64,
 }
 
+/// GDT and TSS of the boot CPU (its double fault stack is static).
 pub fn init() {
-    let gdt = GDT.call_once(|| {
-        let stack_start = core::ptr::addr_of!(DOUBLE_FAULT_STACK) as u64;
-        // Stacks grow downwards -> store the end of the array
+    // Stacks grow downwards -> store the end of the array
+    let stack_top = core::ptr::addr_of!(DOUBLE_FAULT_STACK) as u64 + IST_STACK_SIZE as u64;
+    init_cpu(0, stack_top);
+}
+
+/// Builds and loads GDT + TSS of CPU `cpu`, with its own double fault stack.
+pub fn init_cpu(cpu: usize, double_fault_stack_top: u64) {
+    let gdt = GDT[cpu].call_once(|| {
         unsafe {
-            let tss = &mut *core::ptr::addr_of_mut!(TSS);
-            tss.interrupt_stacks[(DOUBLE_FAULT_IST - 1) as usize] = stack_start + IST_STACK_SIZE as u64;
+            let tss = &mut *core::ptr::addr_of_mut!(TSS[cpu]);
+            tss.interrupt_stacks[(DOUBLE_FAULT_IST - 1) as usize] = double_fault_stack_top;
         }
-        let (tss_low, tss_high) = tss_descriptor(tss());
+        let (tss_low, tss_high) = tss_descriptor(tss(cpu));
         Gdt([0, KERNEL_CODE, KERNEL_DATA, USER_DATA, USER_CODE, tss_low, tss_high])
     });
 
@@ -144,19 +153,21 @@ pub fn init() {
     }
 }
 
-/// Top of the double fault stack (for tests).
+/// Top of this CPU's double fault stack (for tests).
 pub fn double_fault_stack_top() -> u64 {
-    tss().interrupt_stacks[(DOUBLE_FAULT_IST - 1) as usize]
+    tss(smp::cpu_index()).interrupt_stacks[(DOUBLE_FAULT_IST - 1) as usize]
 }
 
-/// Sets RSP0: the stack the CPU loads when an interrupt or exception
-/// arrives while ring-3 code runs. Call with interrupts disabled.
+/// Sets RSP0 of this CPU: the stack the CPU loads when an interrupt or
+/// exception arrives while ring-3 code runs. Call with interrupts disabled.
 pub fn set_kernel_stack(top: u64) {
-    unsafe { core::ptr::addr_of_mut!((*core::ptr::addr_of_mut!(TSS)).privilege_stacks).write_unaligned([top, 0, 0]) };
+    let cpu = smp::cpu_index();
+    unsafe { core::ptr::addr_of_mut!(TSS[cpu].privilege_stacks).write_unaligned([top, 0, 0]) };
 }
 
 pub fn kernel_stack() -> u64 {
-    unsafe { core::ptr::addr_of!((*core::ptr::addr_of!(TSS)).privilege_stacks).read_unaligned()[0] }
+    let cpu = smp::cpu_index();
+    unsafe { core::ptr::addr_of!(TSS[cpu].privilege_stacks).read_unaligned()[0] }
 }
 
 #[cfg(test)]
@@ -191,12 +202,12 @@ mod tests {
     fn gdtr_points_to_our_gdt() {
         let (limit, base) = read_gdtr();
         assert_eq!(limit as usize, size_of::<Gdt>() - 1);
-        assert_eq!(base, GDT.get().unwrap() as *const _ as u64);
+        assert_eq!(base, GDT[0].get().unwrap() as *const _ as u64);
     }
 
     #[test_case]
     fn user_segments_have_dpl3() {
-        let gdt = GDT.get().unwrap();
+        let gdt = GDT[0].get().unwrap();
         for sel in [USER_DATA_SELECTOR, USER_CODE_SELECTOR] {
             let desc = gdt.0[(sel >> 3) as usize];
             assert_eq!((desc >> 45) & 3, 3, "selector {:#x} is not DPL3", sel);

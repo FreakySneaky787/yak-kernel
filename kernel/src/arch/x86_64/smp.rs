@@ -1,0 +1,419 @@
+//! Multiprocessor start: wakes the other CPU cores ("application
+//! processors", APs) and brings them into the kernel.
+//!
+//! After reset only the boot CPU (BSP) runs; the others wait for a startup
+//! signal from their local APIC. The classic sequence (Intel SDM Vol. 3, 9.4):
+//! INIT IPI, wait 10 ms, STARTUP IPI (SIPI) with a page number `v` - the AP
+//! then starts in 16-bit real mode at physical address `v << 12`. So the
+//! start code ("trampoline") must live below 1 MiB; `pmm` reserves one frame
+//! there at boot. The trampoline switches real mode -> protected mode ->
+//! long mode (PAE + EFER.LME + paging, using the kernel's own PML4, in which
+//! the trampoline page is temporarily identity-mapped) and jumps to `ap_main`
+//! on a fresh kernel stack. APs are started one after another.
+//!
+//! In `ap_main` every AP loads its own GDT/TSS, the shared IDT, enables its
+//! FPU/SSE, syscall MSRs and local APIC, reports in and then waits for jobs
+//! (`run_on`): it sleeps with `hlt` and is woken by a `WAKE_VECTOR` IPI.
+//! The scheduler still runs on the BSP only (M26 changes that), so jobs must
+//! not block or use the scheduler.
+
+use super::{gdt, interrupts, lapic};
+use crate::mem::paging::{self, Flags};
+use crate::mem::{PhysAddr, VirtAddr, pmm, stack};
+use crate::time;
+use alloc::boxed::Box;
+use alloc::sync::Arc;
+use alloc::vec::Vec;
+use core::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
+use spin::Mutex;
+
+/// Highest number of CPUs the kernel manages.
+pub const MAX_CPUS: usize = 16;
+/// IPI vector that wakes an idle AP (the handler only sends EOI).
+pub const WAKE_VECTOR: u8 = 0xF0;
+
+const NO_CPU: u8 = 0xFF;
+/// Local APIC ID -> CPU index (0 = boot CPU).
+static APIC_TO_CPU: [AtomicU8; 256] = [const { AtomicU8::new(NO_CPU) }; 256];
+static CPU_APIC_ID: [AtomicU8; MAX_CPUS] = [const { AtomicU8::new(NO_CPU) }; MAX_CPUS];
+static ONLINE: [AtomicBool; MAX_CPUS] = [const { AtomicBool::new(false) }; MAX_CPUS];
+static CPU_COUNT: AtomicUsize = AtomicUsize::new(1);
+
+type Job = Box<dyn FnOnce() + Send>;
+static JOBS: [Mutex<Option<Job>>; MAX_CPUS] = [const { Mutex::new(None) }; MAX_CPUS];
+
+/// Index of the CPU this code runs on (0 before the local APIC is set up).
+pub fn cpu_index() -> usize {
+    if !lapic::is_initialized() {
+        return 0;
+    }
+    match APIC_TO_CPU[lapic::id() as usize].load(Ordering::Relaxed) {
+        NO_CPU => 0,
+        i => i as usize,
+    }
+}
+
+/// Number of CPUs that are running (including the boot CPU).
+pub fn online_count() -> usize {
+    ONLINE.iter().filter(|o| o.load(Ordering::Acquire)).count()
+}
+
+/// Local APIC IDs of the online CPUs, by CPU index.
+pub fn online_apic_ids() -> Vec<u8> {
+    (0..CPU_COUNT.load(Ordering::Relaxed))
+        .filter(|&i| ONLINE[i].load(Ordering::Acquire))
+        .map(|i| CPU_APIC_ID[i].load(Ordering::Relaxed))
+        .collect()
+}
+
+// ---- the trampoline --------------------------------------------------------
+
+core::arch::global_asm!(
+    ".global ap_trampoline",
+    ".global ap_trampoline_end",
+    ".global ap_gdt_ptr",
+    ".global ap_far32",
+    ".global ap_far64",
+    ".global ap_cr3",
+    ".global ap_stack",
+    ".global ap_entry",
+    ".global ap_arg",
+    ".global ap_gdt",
+    ".global ap_pm32",
+    ".global ap_lm64",
+    ".code16",
+    "ap_trampoline:",
+    "cli",
+    "cld",
+    "mov ax, cs",
+    "mov ds, ax",
+    // ebx = physical base of the trampoline (CS * 16), kept through all modes
+    "xor ebx, ebx",
+    "mov bx, ax",
+    "shl ebx, 4",
+    // The assembler does not take label differences in memory operands, so the
+    // instructions that address trampoline data are encoded by hand.
+    // lgdt [disp16]: 0F 01 /2, ModRM 0x16
+    ".byte 0x0F, 0x01, 0x16",
+    ".word ap_gdt_ptr - ap_trampoline",
+    "mov eax, cr0",
+    "or eax, 1", // PE: protected mode
+    "mov cr0, eax",
+    // jmp far dword [ap_far32] (66 FF /5 with a 16-bit displacement)
+    ".byte 0x66, 0xFF, 0x2E",
+    ".word ap_far32 - ap_trampoline",
+    ".code32",
+    "ap_pm32:",
+    "mov ax, 0x10",
+    "mov ds, ax",
+    "mov es, ax",
+    "mov ss, ax",
+    "mov eax, cr4",
+    "or eax, 1 << 5", // PAE
+    "mov cr4, eax",
+    // mov eax, [ebx + disp32]: 8B /r, ModRM 0x83
+    ".byte 0x8B, 0x83",
+    ".long ap_cr3 - ap_trampoline",
+    "mov cr3, eax",
+    "mov ecx, 0xC0000080", // EFER
+    "rdmsr",
+    "or eax, (1 << 8) | (1 << 11)", // LME + NXE (our page tables use NX)
+    "wrmsr",
+    "mov eax, cr0",
+    "or eax, (1 << 31) | (1 << 16)", // PG + WP (like the boot CPU)
+    "mov cr0, eax",
+    // jmp far [ebx + ap_far64] (FF /5, [ebx + disp32])
+    ".byte 0xFF, 0xAB",
+    ".long ap_far64 - ap_trampoline",
+    ".code64",
+    "ap_lm64:",
+    "mov ax, 0x20",
+    "mov ds, ax",
+    "mov es, ax",
+    "mov ss, ax",
+    // mov rsp/rdi/rax, [rbx + disp32]: REX.W 8B /r, ModRM 0xA3 / 0xBB / 0x83
+    ".byte 0x48, 0x8B, 0xA3",
+    ".long ap_stack - ap_trampoline",
+    ".byte 0x48, 0x8B, 0xBB",
+    ".long ap_arg - ap_trampoline",
+    ".byte 0x48, 0x8B, 0x83",
+    ".long ap_entry - ap_trampoline",
+    "xor ebp, ebp",
+    "call rax",
+    "ud2",
+    ".align 16",
+    // null, code32, data32, code64, data64
+    "ap_gdt:",
+    ".quad 0",
+    ".quad 0x00CF9A000000FFFF",
+    ".quad 0x00CF92000000FFFF",
+    ".quad 0x00AF9A000000FFFF",
+    ".quad 0x00CF92000000FFFF",
+    "ap_gdt_ptr:",
+    ".word 5 * 8 - 1",
+    ".long 0", // patched: physical address of ap_gdt
+    "ap_far32:",
+    ".long 0", // patched: physical address of ap_pm32
+    ".word 0x08",
+    "ap_far64:",
+    ".long 0", // patched: physical address of ap_lm64
+    ".word 0x18",
+    ".align 8",
+    "ap_cr3: .quad 0",
+    "ap_stack: .quad 0",
+    "ap_entry: .quad 0",
+    "ap_arg: .quad 0",
+    "ap_trampoline_end:",
+);
+
+unsafe extern "C" {
+    static ap_trampoline: u8;
+    static ap_trampoline_end: u8;
+    static ap_gdt: u8;
+    static ap_gdt_ptr: u8;
+    static ap_far32: u8;
+    static ap_far64: u8;
+    static ap_pm32: u8;
+    static ap_lm64: u8;
+    static ap_cr3: u8;
+    static ap_stack: u8;
+    static ap_entry: u8;
+    static ap_arg: u8;
+}
+
+/// Offset of a trampoline symbol from its start.
+fn offset(sym: *const u8) -> usize {
+    sym as usize - (&raw const ap_trampoline) as usize
+}
+
+/// Writes `value` (little endian, `size` bytes) at `field` of the copy at `base`.
+fn patch(base: VirtAddr, field: *const u8, value: u64, size: usize) {
+    let dst = (base.as_u64() as usize + offset(field)) as *mut u8;
+    unsafe { core::ptr::copy_nonoverlapping(value.to_le_bytes().as_ptr(), dst, size) };
+}
+
+/// Where the AP lands in long mode, on its own stack.
+extern "C" fn ap_main(cpu: u64) -> ! {
+    let cpu = cpu as usize;
+    let df_stack = stack::alloc_stack(5).expect("no memory for a double fault stack");
+    gdt::init_cpu(cpu, df_stack.top.as_u64());
+    interrupts::kernel_idt().expect("IDT not built").load();
+    super::fpu::init();
+    super::syscall::init();
+    lapic::init_local();
+    APIC_TO_CPU[lapic::id() as usize].store(cpu as u8, Ordering::Relaxed);
+    ONLINE[cpu].store(true, Ordering::Release);
+    ap_idle(cpu)
+}
+
+/// Runs jobs, sleeps in between.
+fn ap_idle(cpu: usize) -> ! {
+    loop {
+        super::disable_interrupts();
+        let job = JOBS[cpu].lock().take();
+        match job {
+            Some(job) => {
+                super::enable_interrupts();
+                job();
+            }
+            // `sti; hlt` is atomic: a wake-up IPI right after the check still ends the `hlt`
+            None => unsafe { core::arch::asm!("sti; hlt", options(nomem, nostack)) },
+        }
+    }
+}
+
+/// Runs `f` on CPU `cpu` and waits for its result. `None` if that CPU is not
+/// online. `f` must not block (the AP has no scheduler yet).
+pub fn run_on<R: Send + 'static>(cpu: usize, f: impl FnOnce() -> R + Send + 'static) -> Option<R> {
+    if cpu >= MAX_CPUS || !ONLINE[cpu].load(Ordering::Acquire) {
+        return None;
+    }
+    if cpu == cpu_index() {
+        return Some(f());
+    }
+    let result: Arc<Mutex<Option<R>>> = Arc::new(Mutex::new(None));
+    let slot = result.clone();
+    let job: Job = Box::new(move || {
+        let r = f();
+        *slot.lock() = Some(r);
+    });
+    loop {
+        let mut mailbox = JOBS[cpu].lock();
+        if mailbox.is_none() {
+            *mailbox = Some(job);
+            break;
+        }
+        drop(mailbox);
+        crate::task::yield_now(); // another job is still pending there
+    }
+    lapic::send_fixed(CPU_APIC_ID[cpu].load(Ordering::Relaxed), WAKE_VECTOR);
+    loop {
+        if let Some(r) = result.lock().take() {
+            return Some(r);
+        }
+        crate::task::yield_now();
+    }
+}
+
+/// Waits up to `ms` milliseconds for CPU `cpu` to report in.
+fn wait_online(cpu: usize, ms: u64) -> bool {
+    let end = time::ticks() + ms.div_ceil(time::MS_PER_TICK) + 1;
+    while time::ticks() < end {
+        if ONLINE[cpu].load(Ordering::Acquire) {
+            return true;
+        }
+        core::hint::spin_loop();
+    }
+    ONLINE[cpu].load(Ordering::Acquire)
+}
+
+/// Starts every enabled CPU from the MADT. Needs the timer (interrupts on).
+pub fn init() {
+    let bsp = lapic::id();
+    APIC_TO_CPU[bsp as usize].store(0, Ordering::Relaxed);
+    CPU_APIC_ID[0].store(bsp, Ordering::Relaxed);
+    ONLINE[0].store(true, Ordering::Release);
+
+    let Some(madt) = crate::acpi::info().map(|a| &a.madt) else {
+        return;
+    };
+    let aps: Vec<u8> = madt
+        .local_apics
+        .iter()
+        .filter(|l| l.flags & 1 != 0 && l.apic_id != bsp)
+        .map(|l| l.apic_id)
+        .collect();
+    if aps.is_empty() {
+        return;
+    }
+    let Some(low) = pmm::low_frame() else {
+        crate::serial_println!("smp: no frame below 1 MiB, staying on one CPU");
+        return;
+    };
+    let root = paging::kernel_root();
+    assert!(
+        root.as_u64() < 1 << 32,
+        "kernel PML4 above 4 GiB: not reachable from 32-bit code"
+    );
+
+    // Copy the trampoline and fill in the physical addresses
+    let size = offset(&raw const ap_trampoline_end);
+    assert!(size <= 4096, "trampoline larger than a page");
+    let copy = low.to_virt();
+    unsafe { core::ptr::copy_nonoverlapping(&raw const ap_trampoline, copy.as_mut_ptr::<u8>(), size) };
+    let phys = |sym: *const u8| low.as_u64() + offset(sym) as u64;
+    patch(
+        copy,
+        (&raw const ap_gdt_ptr).wrapping_add(2),
+        phys(&raw const ap_gdt),
+        4,
+    );
+    patch(copy, &raw const ap_far32, phys(&raw const ap_pm32), 4);
+    patch(copy, &raw const ap_far64, phys(&raw const ap_lm64), 4);
+    patch(copy, &raw const ap_cr3, root.as_u64(), 8);
+    patch(
+        copy,
+        &raw const ap_entry,
+        ap_main as extern "C" fn(u64) -> ! as usize as u64,
+        8,
+    );
+
+    // The trampoline runs at its physical address once paging is on
+    let identity = VirtAddr(low.as_u64());
+    let mapped_here = paging::translate_in(root, identity).is_none();
+    if mapped_here {
+        paging::map_page_in(root, identity, low, Flags::PRESENT | Flags::WRITABLE).expect("cannot map the trampoline");
+    }
+
+    for apic_id in aps {
+        let cpu = CPU_COUNT.load(Ordering::Relaxed);
+        if cpu >= MAX_CPUS {
+            break;
+        }
+        let stack = stack::alloc_stack(stack::DEFAULT_STACK_PAGES).expect("no memory for an AP stack");
+        patch(copy, &raw const ap_stack, stack.top.as_u64(), 8);
+        patch(copy, &raw const ap_arg, cpu as u64, 8);
+        CPU_APIC_ID[cpu].store(apic_id, Ordering::Relaxed);
+        CPU_COUNT.store(cpu + 1, Ordering::Relaxed);
+
+        lapic::send_init(apic_id);
+        time::sleep_ms(10);
+        lapic::send_startup(apic_id, (low.as_u64() >> 12) as u8);
+        if !wait_online(cpu, 10) {
+            lapic::send_startup(apic_id, (low.as_u64() >> 12) as u8); // the spec sends it twice
+            if !wait_online(cpu, 200) {
+                crate::serial_println!("smp: CPU with APIC ID {} did not start", apic_id);
+                CPU_COUNT.store(cpu, Ordering::Relaxed);
+                stack::free_stack(stack);
+                continue;
+            }
+        }
+    }
+    if mapped_here {
+        let _ = paging::unmap_page_in(root, identity);
+    }
+}
+
+/// Physical address of the trampoline frame (for tests and `cpu`).
+pub fn trampoline_frame() -> Option<PhysAddr> {
+    pmm::low_frame()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test_case]
+    fn all_cpus_from_the_madt_are_online() {
+        let madt = &crate::acpi::info().unwrap().madt;
+        let enabled = madt.local_apics.iter().filter(|l| l.flags & 1 != 0).count();
+        assert_eq!(
+            online_count(),
+            enabled.min(MAX_CPUS),
+            "APIC IDs online: {:?}",
+            online_apic_ids()
+        );
+        assert!(online_count() >= 2, "the tests run with -smp 4");
+        assert_eq!(cpu_index(), 0, "tests run on the boot CPU");
+    }
+
+    #[test_case]
+    fn jobs_run_on_their_cpu() {
+        let mut seen = Vec::new();
+        for cpu in 0..online_count() {
+            let (apic, index, tr) = run_on(cpu, || {
+                let tr: u16;
+                unsafe { core::arch::asm!("str {0:x}", out(reg) tr) };
+                (lapic::id(), cpu_index(), tr)
+            })
+            .expect("CPU not online");
+            assert_eq!(index, cpu, "job ran on the wrong CPU");
+            assert_eq!(tr, gdt::TSS_SELECTOR, "CPU {} has no TSS loaded", cpu);
+            seen.push(apic);
+        }
+        seen.sort();
+        seen.dedup();
+        assert_eq!(seen.len(), online_count(), "two CPUs share an APIC ID");
+        assert!(run_on(MAX_CPUS - 1, || ()).is_none() || online_count() == MAX_CPUS);
+    }
+
+    #[test_case]
+    fn aps_have_their_own_fpu_and_heap_access() {
+        for cpu in 1..online_count() {
+            // the heap is shared (real lock), the FPU is enabled per CPU
+            let v = run_on(cpu, move || {
+                let v: Vec<u64> = (0..1000).map(|i| i * cpu as u64).collect();
+                (v.iter().sum::<u64>(), super::super::fpu::read_cr4() & (1 << 9) != 0)
+            });
+            assert_eq!(v, Some((499_500 * cpu as u64, true)));
+        }
+    }
+
+    #[test_case]
+    fn trampoline_page_is_below_1mib() {
+        let f = trampoline_frame().expect("no trampoline frame");
+        assert!(f.as_u64() < 0x10_0000 && f.as_u64() >= 0x1000);
+        // the identity mapping is gone again
+        assert!(paging::translate_in(paging::kernel_root(), VirtAddr(f.as_u64())).is_none_or(|p| p == f));
+    }
+}

@@ -68,7 +68,7 @@ else
 fi
 
 QEMU_ARGS=(
-    -M q35 -m 256M
+    -M q35 -m 256M -smp 4
     -cdrom "$ISO"
     -boot d
     -no-reboot

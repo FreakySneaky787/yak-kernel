@@ -28,6 +28,7 @@ pub fn install_irq_handlers(idt: &mut Idt) {
     idt.set(pic::PIC1_OFFSET + 7, pic_spurious);
     idt.set(pic::PIC2_OFFSET + 7, pic_spurious);
     idt.set(lapic::SPURIOUS_VECTOR, apic_spurious);
+    idt.set(super::smp::WAKE_VECTOR, wake);
 }
 
 /// Routes a legacy ISA IRQ through the I/O APIC to the current CPU,
@@ -81,6 +82,11 @@ extern "x86-interrupt" fn com1(_frame: InterruptStackFrame) {
     // 0x03 = Ctrl+C on a terminal
     crate::serial::handle_interrupt(|byte| byte == 0x03 && crate::process::interrupt_foreground());
     crate::task::wake_input_waiters();
+    lapic::eoi();
+}
+
+/// Wakes an idle CPU (it then looks for work); nothing else to do.
+extern "x86-interrupt" fn wake(_frame: InterruptStackFrame) {
     lapic::eoi();
 }
 

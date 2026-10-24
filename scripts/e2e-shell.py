@@ -46,7 +46,7 @@ STEPS = [
     ("mem\r", ["Physical:", "MiB usable", "Heap:"], []),
     ("memmap\r", ["usable", "kernel and modules"], []),
     ("uptime\r", ["up 00:", "ticks at 100 Hz"], []),
-    ("cpu\r", ["Vendor:", "Flags:", "lm"], []),
+    ("cpu\r", ["Vendor:", "Flags:", "lm", "CPUs:   4 online (APIC IDs 0 1 2 3)"], []),  # SMP (M25)
     ("acpi\r", ["APIC", "I/O APIC", "ISA IRQ 0 -> GSI 2"], []),
     ("layout us\r", ["keyboard layout: Us"], []),
     ("layout de\r", ["keyboard layout: De"], []),

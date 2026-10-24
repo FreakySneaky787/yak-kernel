@@ -11,6 +11,7 @@
 
 use super::{PAGE_SIZE, PhysAddr, align_down, align_up};
 use crate::arch::x86_64::without_interrupts;
+use core::sync::atomic::{AtomicU64, Ordering};
 use limine::memmap::MEMMAP_USABLE;
 use spin::Mutex;
 
@@ -114,6 +115,16 @@ impl FrameBitmap {
         None
     }
 
+    /// Takes the lowest free frame below `limit` (for hardware that needs low
+    /// memory, like the real-mode start code of other CPUs).
+    pub fn alloc_below(&mut self, limit: u64) -> Option<PhysAddr> {
+        let end = ((limit / PAGE_SIZE) as usize).min(self.frame_count);
+        let frame = (1..end).find(|&f| !self.is_used(f))?;
+        self.set_used(frame);
+        self.free_frames -= 1;
+        Some(PhysAddr(frame as u64 * PAGE_SIZE))
+    }
+
     pub fn free(&mut self, addr: PhysAddr) -> Result<(), FrameError> {
         if !addr.is_page_aligned() {
             return Err(FrameError::NotAligned);
@@ -178,7 +189,21 @@ pub(super) fn init() {
 
     let mut bitmap = FrameBitmap::new(bits, frame_count, usable);
     bitmap.reserve(bitmap_phys.0, bitmap_bytes);
+    // Before anything else takes them: one frame below 1 MiB for starting the other CPUs
+    if let Some(frame) = bitmap.alloc_below(0x10_0000) {
+        LOW_FRAME.store(frame.0, Ordering::Relaxed);
+    }
     *PMM.lock() = Some(bitmap);
+}
+
+/// The frame below 1 MiB reserved at boot (for the SMP trampoline), if any.
+static LOW_FRAME: AtomicU64 = AtomicU64::new(0);
+
+pub fn low_frame() -> Option<PhysAddr> {
+    match LOW_FRAME.load(Ordering::Relaxed) {
+        0 => None,
+        f => Some(PhysAddr(f)),
+    }
 }
 
 fn with_pmm<R>(f: impl FnOnce(&mut FrameBitmap) -> R) -> R {

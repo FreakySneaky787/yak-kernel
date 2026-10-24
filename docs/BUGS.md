@@ -58,4 +58,9 @@ Format: number · date · title, then symptom → cause → fix → test.
 - **rustc no longer accepts `+sse` / `-soft-float` on `x86_64-unknown-none`** ("must be disabled to ensure that the ABI of
   the current target can be implemented correctly", soon a hard error). Hard-float user programs need their own target JSON
   and `-Zbuild-std`; build scripts of `core`'s dependencies then need a host C toolchain (`gcc`, glibc headers/crt files).
+- **LLVM's assembler rejects label differences inside memory operands** in `global_asm!` (Intel syntax):
+  `mov eax, [ebx + (a - b)]` → "cannot use more than one symbol in memory operand". Encode such instructions with
+  `.byte` and put the difference into a `.word`/`.long` (see the SMP trampoline).
+- **The page allocator hands out the lowest frames first**, so memory below 1 MiB is gone after early boot. Hardware that
+  needs low memory (the SMP trampoline) must reserve it at `pmm::init` time.
 - **Limine's stack has no guard page** – a stack overflow silently corrupts memory instead of faulting (until M9 gives us our own stack).

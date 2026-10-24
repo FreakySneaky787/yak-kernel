@@ -20,6 +20,9 @@ const REG_TPR: u32 = 0x80;
 const REG_EOI: u32 = 0xB0;
 const REG_SPURIOUS: u32 = 0xF0;
 const REG_ERROR_STATUS: u32 = 0x280;
+/// Interrupt command register (low word triggers the IPI, high word = destination).
+const REG_ICR_LOW: u32 = 0x300;
+const REG_ICR_HIGH: u32 = 0x310;
 const REG_LVT_TIMER: u32 = 0x320;
 const REG_LVT_LINT0: u32 = 0x350;
 const REG_LVT_LINT1: u32 = 0x360;
@@ -62,12 +65,22 @@ pub fn is_enabled() -> bool {
 /// Maps the registers and enables the local APIC of the current CPU.
 /// `phys_base` comes from the MADT (it normally matches the MSR).
 pub fn init(phys_base: u64) {
-    let msr_value = msr::read(IA32_APIC_BASE);
-    unsafe { msr::write(IA32_APIC_BASE, msr_value | APIC_GLOBAL_ENABLE) };
-
     let virt =
         paging::ensure_hhdm_mapped(PhysAddr(phys_base), 0x1000, Flags::MMIO).expect("cannot map local APIC registers");
     BASE.store(virt.as_u64(), Ordering::Relaxed);
+    init_local();
+}
+
+/// Whether `init` has run (the register block is mapped).
+pub fn is_initialized() -> bool {
+    BASE.load(Ordering::Relaxed) != 0
+}
+
+/// Enables and configures the local APIC of the CPU this runs on (every CPU
+/// has its own; the registers are at the same address on all of them).
+pub fn init_local() {
+    let msr_value = msr::read(IA32_APIC_BASE);
+    unsafe { msr::write(IA32_APIC_BASE, msr_value | APIC_GLOBAL_ENABLE) };
 
     write(REG_TPR, 0); // accept all priorities
     write(REG_LVT_TIMER, LVT_MASKED);
@@ -81,6 +94,36 @@ pub fn init(phys_base: u64) {
 }
 
 /// APIC ID of the current CPU.
+// ICR low word: delivery mode (bits 8-10), level assert (bit 14), delivery status (bit 12)
+const ICR_FIXED: u32 = 0b000 << 8;
+const ICR_INIT: u32 = 0b101 << 8;
+const ICR_STARTUP: u32 = 0b110 << 8;
+const ICR_LEVEL_ASSERT: u32 = 1 << 14;
+const ICR_DELIVERY_PENDING: u32 = 1 << 12;
+
+fn send_ipi(apic_id: u8, low: u32) {
+    write(REG_ICR_HIGH, (apic_id as u32) << 24);
+    write(REG_ICR_LOW, low);
+    while read(REG_ICR_LOW) & ICR_DELIVERY_PENDING != 0 {
+        core::hint::spin_loop();
+    }
+}
+
+/// INIT IPI: resets the target CPU into its "wait for startup" state.
+pub fn send_init(apic_id: u8) {
+    send_ipi(apic_id, ICR_INIT | ICR_LEVEL_ASSERT);
+}
+
+/// Startup IPI: the target starts in real mode at physical `page << 12`.
+pub fn send_startup(apic_id: u8, page: u8) {
+    send_ipi(apic_id, ICR_STARTUP | ICR_LEVEL_ASSERT | page as u32);
+}
+
+/// A normal interrupt on `vector` at another CPU.
+pub fn send_fixed(apic_id: u8, vector: u8) {
+    send_ipi(apic_id, ICR_FIXED | ICR_LEVEL_ASSERT | vector as u32);
+}
+
 pub fn id() -> u8 {
     (read(REG_ID) >> 24) as u8
 }

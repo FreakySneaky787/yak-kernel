@@ -244,6 +244,16 @@ Short explanations of every subsystem: what it is and why we need it.
 - `fputest` proves it: four programs keep different values in all XMM registers while being preempted constantly; with the
   switch code removed they immediately see each other's values.
 
+## M25 – Waking the other CPU cores
+- At power-on only one core runs (the bootstrap processor). The others sleep until their local APIC receives an
+  **INIT** signal followed by a **STARTUP IPI** carrying a page number: the core then starts executing at that page in
+  16-bit **real mode** – just like a PC in 1985.
+- So we need start code below 1 MiB that walks through the history of the x86: real mode → protected mode (32 bit,
+  segment table) → long mode (64 bit, needs PAE paging and the EFER.LME bit) and finally jumps into our Rust kernel.
+- Each core needs its own stack, its own TSS (where its interrupt stacks are), and its own local APIC set up. Memory and
+  page tables are shared – that is what makes it one machine.
+- For now the extra cores only run small jobs we hand them; the scheduler learns to use them in the next milestone.
+
 ## Tooling – GNU ld and binutils
 - rustc compiles our code into object files; a **linker** combines them into the final ELF according to `kernel/linker.ld`
   (load address, section order, segments). We use **GNU ld** (`ld.bfd`) for that.

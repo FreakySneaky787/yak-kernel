@@ -204,6 +204,17 @@
 - `KernelHeap` wraps it in a spin lock (interrupts disabled while held) and grows by mapping ≥64 KiB at the heap end when an allocation fails.
 - Allocation failure → null → Rust's default alloc error handler panics.
 
+## SMP (multiple cores)
+- `arch::x86_64::smp::init` (end of `kernel::init`): every enabled MADT CPU except the BSP gets INIT, 10 ms, SIPI(s), one at
+  a time. Trampoline: one frame below 1 MiB reserved by `pmm` at boot (`pmm::low_frame`), identity-mapped in the kernel
+  PML4 only while APs start. It uses its own tiny GDT (code32/data32/code64/data64), sets PAE, CR3 = kernel PML4 (must be
+  < 4 GiB), EFER.LME + NXE, CR0.PG + WP, and calls `ap_main(cpu)` on a 64 KiB guarded stack.
+- CPU index: `smp::cpu_index()` maps the local APIC ID to 0..MAX_CPUS-1 (BSP = 0; 0 before the LAPIC is set up). Used for
+  the per-CPU TSS. (M26 will move this to a GS-based per-CPU block.)
+- APs (M25): own GDT/TSS (+ double fault IST stack), shared IDT, FPU/SSE, syscall MSRs, LAPIC (timer masked); they idle with
+  `sti; hlt` and run jobs from a per-CPU mailbox (`run_on`, woken by an IPI on `WAKE_VECTOR` 0xF0). The scheduler, the
+  timer and all device IRQs stay on the BSP.
+
 ## GDT / TSS
 | Selector | Entry |
 |---|---|
@@ -214,7 +225,7 @@
 | 0x20 | user code (64-bit, DPL 3), selector `0x23` |
 | 0x28 | TSS (16 bytes, occupies 2 slots) |
 
-The user data/code order is dictated by `sysret` (SS = STAR base + 8, CS = base + 16). IST1 (`gdt::DOUBLE_FAULT_IST`) =
+One GDT and TSS per CPU (`gdt::init_cpu`), same layout everywhere. The user data/code order is dictated by `sysret` (SS = STAR base + 8, CS = base + 16). IST1 (`gdt::DOUBLE_FAULT_IST`) =
 20 KiB static stack for double faults. RSP0 = kernel stack of the running thread, rewritten on every context switch.
 
 ## Interrupt vectors

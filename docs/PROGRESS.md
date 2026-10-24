@@ -46,8 +46,9 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 | # | Milestone | Status | Tests |
 |---|---|---|---|
 | 24 | FPU/SSE state per thread; user programs built with SSE2 hardware floating point | ✅ | 3 FPU unit tests (CR0/CR4, initial state, save/restore), `fputest` (4 preempted workers checking XMM0–15 + MXCSR, pi with f64) in integration + E2E; verified that it fails without the switch |
-| 25 | SMP: start the other CPU cores, per-CPU data, real locking | ⬜ | |
-| 26 | Network: virtio-net/e1000 driver, Ethernet/ARP/IPv4/ICMP/UDP, `ping` | ⬜ | |
+| 25 | SMP part 1: start the other cores ourselves (trampoline, INIT/SIPI), per-CPU GDT/TSS/LAPIC, jobs on APs | ✅ | 4 SMP unit tests (all MADT CPUs online, jobs run on the right CPU with its own TSS, FPU + heap on APs, trampoline page), E2E `cpu` shows 4 CPUs, BIOS + UEFI, 3 stable runs |
+| 26 | SMP part 2: scheduler on all cores (per-CPU data via GS/`swapgs`, per-CPU current thread, locking review) | ⬜ | |
+| 27 | Network: virtio-net/e1000 driver, Ethernet/ARP/IPv4/ICMP/UDP, `ping` | ⬜ | |
 
 ## Log
 - **2026-10-24** – Setup: Rust nightly 1.101 (rustup), target `x86_64-unknown-none`, Limine v11.x-binary.
@@ -187,6 +188,15 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   `user/x86_64-kerneltry-user.json` (SSE2, hard-float ABI, static, small code model, red zone allowed) with
   `-Zbuild-std=core,alloc`. New program `fputest`. Check: with the save/restore removed, all 4 workers report corrupted XMM.
 
+- **2026-10-24** – User chose our own INIT/SIPI start (not Limine's MP feature). M25 was split: M25 = starting the cores,
+  M26 = scheduling on them, M27 = network.
+- **2026-10-24** – M25: `arch/x86_64/smp.rs`. `pmm` reserves one frame below 1 MiB before anything else; the trampoline
+  (`global_asm!`, 16 → 32 → 64 bit, data accesses hand-encoded because the assembler rejects label differences in memory
+  operands) is copied there, patched with its physical addresses, the kernel PML4 and a per-AP stack, and temporarily
+  identity-mapped. INIT, 10 ms, SIPI (twice if needed) per AP via new LAPIC IPI functions. `ap_main`: own GDT/TSS (now arrays
+  per CPU) with its own double fault stack, shared IDT, FPU/SSE, syscall MSRs, local APIC, then `hlt` until a `WAKE_VECTOR`
+  IPI brings a job (`smp::run_on`). QEMU runs with `-smp 4`; `cpu` lists the online CPUs.
+
 ## Open items / later
 - AHCI uses polling; switching to completion interrupts (MSI or the PCI interrupt line) would free the CPU during I/O.
 - Thread-level sleeping mutex (today all shared state uses spin locks with interrupts disabled).
@@ -204,9 +214,10 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   write, append, echo, sleep, clear, help. Without `/bin` on the disk, the kernel shell has no `ls`/`cat`.
 
 ## Next step
-**M25 – SMP:** find the other CPUs in the MADT (already parsed), start them with INIT/SIPI through the local APIC
-(real-mode trampoline below 1 MiB → long mode → `ap_main`), give each its own GDT/TSS, IDT, LAPIC timer and per-CPU data
-(GS base), then let the scheduler run threads on all cores (per-CPU current thread, a shared or per-CPU run queue).
-Every global lock must then be a real lock (interrupts-off alone no longer protects across CPUs) – review `SCHEDULER`,
-`PROCESSES`, the syscall scratch slot (`USER_RSP` becomes per-CPU via `swapgs`), pipes, `fs::ROOT`.
-Tests: all CPUs report in (`cpu` command), parallel `demo` faster than on one core, full test suite with `-smp 4`.
+**M26 – scheduler on all cores:** per-CPU block (GS base: self pointer, CPU index, current thread, kernel stack for syscalls,
+user RSP scratch) with `swapgs` on every entry from ring 3 (syscall stub, interrupts/exceptions with CS.RPL = 3); per-CPU
+current thread and idle thread in the scheduler, a shared ready queue with real locking, LAPIC timer on every CPU, wake-ups
+across CPUs (IPI to an idle CPU when a thread becomes ready). Review every global that relied on "one CPU, interrupts off":
+`SCHEDULER`, `PROCESSES`, `FOREGROUND`, pipes, `fs::ROOT`, `DISK`, the console, `syscall::USER_RSP`. TLB shootdown when user
+page tables change (only the owning process's thread runs them, so mostly not needed yet) and when kernel mappings are removed.
+Tests: threads run on several CPUs at once (`demo` faster), the whole suite with `-smp 4` and `-smp 1`.

@@ -81,7 +81,7 @@ Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.s
 - `kernel/src/drivers/keyboard.rs` – PS/2 driver, ring buffer, `read_key()`; `drivers/scancode.rs` – decoder + layouts (DE/US)
 - `kernel/src/arch/x86_64/` – CPU specifics: `port.rs` (in/out), `gdt.rs` (GDT+TSS), `idt.rs` (IDT structure),
   `interrupts.rs` (exception handlers, kernel IDT), `syscall.rs` (syscall entry stub, MSRs, `enter_user`), `irq.rs` (IRQ routing + handlers), `lapic.rs` (local APIC + timer), `ioapic.rs`, `pic.rs` (legacy, masked), `pit.rs` (timer calibration), `msr.rs`, `cpu.rs` (cpuid), `power.rs` (reboot/poweroff),
-  `fpu.rs` (x87/SSE enable, FXSAVE areas), interrupt helpers in `mod.rs`
+  `fpu.rs` (x87/SSE enable, FXSAVE areas), `smp.rs` (AP trampoline, INIT/SIPI, `run_on`), interrupt helpers in `mod.rs`
 - `kernel/tests/` – integration tests (each one is a separate kernel)
 - `kernel/linker.ld` – higher-half layout at `0xffffffff80000000`
 - `scripts/run-qemu.sh` – cargo runner: builds the ISO and starts QEMU

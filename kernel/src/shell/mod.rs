@@ -530,6 +530,12 @@ fn cmd_cpu(_: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), Strin
         }
     }
     writeln!(out).ok();
+    let ids = crate::arch::x86_64::smp::online_apic_ids();
+    write!(out, "CPUs:   {} online (APIC IDs", ids.len()).ok();
+    for id in ids {
+        write!(out, " {}", id).ok();
+    }
+    writeln!(out, ")").ok();
     Ok(())
 }
 

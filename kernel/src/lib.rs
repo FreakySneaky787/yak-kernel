@@ -52,6 +52,7 @@ pub fn init() {
         serial_println!("fs: root not mounted: {}", e);
     }
     arch::x86_64::enable_interrupts();
+    arch::x86_64::smp::init(); // needs the timer for its delays
 }
 
 /// Reports a panic on the serial port and - if the console is not locked -
