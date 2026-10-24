@@ -203,6 +203,15 @@ Short explanations of every subsystem: what it is and why we need it.
   watches for it and marks the **foreground process** – the one the console currently belongs to – as killed. A process that
   is blocked (sleeping, waiting for input) is woken up so it notices immediately.
 
+## M20 – The shell becomes a program
+- In a real OS the shell is not part of the kernel: it is an ordinary program that reads lines, starts other programs and
+  waits for them. The kernel only starts the very first program, **init** – here `/bin/sh`.
+- Because the keyboard reaches programs as bytes, special keys must be encoded: the arrow keys become the same **escape
+  sequences** a serial terminal sends (`ESC [ D` = left). The shell decodes them again and edits the line.
+- The kernel shell's line editor and parser are plain logic without hardware access, so the very same source files are
+  compiled into the kernel *and* into `/bin/sh`.
+- If `/bin/sh` is missing or you type `exit`, the kernel shell takes over – a safety net while the user space grows.
+
 ## Tooling – GNU ld and binutils
 - rustc compiles our code into object files; a **linker** combines them into the final ELF according to `kernel/linker.ld`
   (load address, section order, segments). We use **GNU ld** (`ld.bfd`) for that.

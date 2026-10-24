@@ -33,7 +33,7 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 | 17 | Files for programs: fd table, `open`/`close`/`readdir`/`stat`/`getcwd`/`unlink`/`mkdir`, `cat`/`ls`/`cp` as programs | ✅ | `read_at` unit test, `fstest` (25 syscall checks incl. errors), integration test, mtools check of a `cp` copy, 6 E2E steps |
 | 18 | User heap: `brk`-style syscall + allocator in `ulib` (`alloc` in programs) | ✅ | 4 unit tests (grow/shrink, limits, release, rollback), `heaptest` (11 checks), `sort` in integration test, 6 E2E steps |
 | 19 | Processes from processes: `spawn`/`wait`/`kill` syscalls, Ctrl+C | ✅ | Ctrl+C unit tests (foreground, ignore, raw scancode tracker), `spawntest` (17 checks incl. orphans), 6 E2E steps (Ctrl+C over serial), PS/2 Ctrl+C checked via `sendkey` |
-| 20 | Shell as a user program (`/bin/sh` started as `init`, kernel shell as fallback) | ⬜ | |
+| 20 | Shell as a user program (`/bin/sh` started as `init`, kernel shell as fallback) | ✅ | `builtins_for_user_space`, scripted `/bin/sh` session in the integration test (injected serial input), whole E2E suite (72 steps) now against `/bin/sh` + `exit` fallback |
 
 ## Log
 - **2026-10-24** – Setup: Rust nightly 1.101 (rustup), target `x86_64-unknown-none`, Limine v11.x-binary.
@@ -138,6 +138,15 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   `ulib::process` (`spawn`, `wait`, `kill`, `run`), new program `spawntest`, `fault spin|sleep`.
   Found: empty user buffers come with dangling pointers (0x1) – zero-length ranges are now always accessible.
 
+- **2026-10-24** – M20: `/bin/sh` in user space (`user/src/bin/sh/`). It compiles the kernel shell's `line_editor.rs` and
+  `parser.rs` via `#[path]` (shared code, `shell/keys.rs` provides the key types on both sides) and decodes the terminal bytes
+  of `read` (which now delivers arrows/Home/End/Delete as VT100 sequences) with its own `keys::Decoder`. Built-ins cd (new
+  syscall 18 `chdir`), pwd, echo, run, history, help, exit; kernel built-ins through the transitional syscalls 19 `kshell` /
+  20 `kcommands`; programs via `spawn`/`wait`. The kernel starts `/bin/sh` as init (`process::run_init`: foreground, ignores
+  Ctrl+C) and falls back to the kernel shell when it is missing or exits. Bug #4 (foreground stolen by an orphan) found by the
+  E2E test and fixed: the console is lent to a child only while its parent waits for it.
+  **Stage 3 complete: 163 in-kernel tests + 6 test kernels + 72 E2E steps green (BIOS and UEFI), init is /bin/sh.**
+
 ## Open items / later
 - AHCI uses polling; switching to completion interrupts (MSI or the PCI interrupt line) would free the CPU during I/O.
 - Thread-level sleeping mutex (today all shared state uses spin locks with interrupts disabled).
@@ -147,13 +156,16 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 - `gcc` is not installed yet → `make limine-tool` (bios-install for USB/HDD images) is not available.
 - User space: no FPU/SSE state saving (everything is soft-float), no SMAP/SMEP, heap is mapped eagerly (no demand paging),
   only a single CPU, no signals beyond "kill", no pipes (a child always writes to its parent's output).
+- `kshell`/`kcommands` are a bridge: the information commands (mem, ps, cpu, acpi, lspci, ...) should become real syscalls
+  and programs. No pipes or redirection in `/bin/sh` yet, no scripts, no environment variables.
 - File syscalls: writes always append (no seek, no overwrite in the middle); `read` re-walks the cluster chain per call;
   directory handles are snapshots; no rename syscall yet. Without `/bin` on the disk, the kernel shell has no `ls`/`cat`.
 
 ## Next step
-**M20 – the shell as a user program:** `/bin/sh` in `user/` with its own line editor (needs arrow keys etc. from `read` as
-ANSI sequences), history, tab completion of `/bin`, built-ins `cd` (new syscall `chdir`), `pwd`, `exit`, `help`, `history`;
-programs run via `spawn`/`wait` in the foreground. The kernel starts `/bin/sh` as the first process (`init`, ignores Ctrl+C)
-and falls back to the kernel shell when it is missing or exits. Kernel-only commands (mem, cpu, acpi, lspci, ps, demo, write,
-mkdir, rm, mv, df, date, poweroff, ...) stay reachable from `/bin/sh` through a transitional system call that runs a kernel
-built-in in the caller's cwd. Tests: the whole E2E suite must pass against `/bin/sh`.
+**Stage 3 is complete.** Stage 4 still has to be agreed with the user. Proposal:
+- **M21 – pipes and redirection:** pipe file descriptors in the kernel, `spawn` with stdin/stdout from fds, `/bin/sh` gets
+  `a | b`, `> file`, `>> file`, `< file` (e.g. `ls /bin | sort -r > list.txt`).
+- **M22 – system information as syscalls:** replace `kshell` step by step (`sysinfo`, process list, disk/PCI info),
+  turn `ps`, `mem`, ... into programs; file operations (`rename`, seek/overwrite) as syscalls.
+- **M23 – a full-screen text editor** as a user program (cursor addressing on the console, load/save files).
+- Later candidates: SMP (more CPU cores), a network card driver (virtio-net/e1000) with a tiny IP stack, FPU/SSE state saving.

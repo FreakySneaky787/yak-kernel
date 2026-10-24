@@ -9,6 +9,7 @@
 //! processes in the shell's current directory and write directly to the
 //! console (`ls`, `cat`, `cp` are such programs since M17).
 
+pub mod keys;
 pub mod line_editor;
 pub mod parser;
 
@@ -282,6 +283,20 @@ pub fn complete_command(prefix: &str) -> Vec<String> {
 /// Where the shell looks for programs typed by name.
 pub const BIN_DIR: &str = "/bin";
 
+/// Built-ins that only make sense inside the kernel shell (they use its own
+/// state); `/bin/sh` has its own versions. All others are reachable from
+/// user space through the `kshell` system call.
+pub const KSHELL_EXCLUDED: &[&str] = &["cd", "pwd", "history", "run"];
+
+/// Names of the built-ins available through `kshell`.
+pub fn kshell_commands() -> Vec<&'static str> {
+    COMMANDS
+        .iter()
+        .map(|c| c.name)
+        .filter(|n| !KSHELL_EXCLUDED.contains(n))
+        .collect()
+}
+
 pub struct Shell {
     editor: LineEditor,
     /// Current directory (absolute, normalized).
@@ -304,6 +319,25 @@ impl Shell {
             cwd: String::from("/"),
             capture_programs: false,
         }
+    }
+
+    /// Runs `line` only if it is a built-in available to user programs (see
+    /// `KSHELL_EXCLUDED`). `None` = not such a built-in; otherwise success.
+    pub fn execute_builtin(&mut self, line: &str, out: &mut dyn Write) -> Option<bool> {
+        let words = parser::split(line).ok()?;
+        let command = find_command(words.first()?).filter(|c| !KSHELL_EXCLUDED.contains(&c.name))?;
+        Some(match (command.run)(self, &words[1..], out) {
+            Ok(()) => true,
+            Err(e) => {
+                writeln!(out, "\x1b[91merror:\x1b[0m {}", e).ok();
+                false
+            }
+        })
+    }
+
+    /// Sets the current directory (absolute, normalized).
+    pub fn set_cwd(&mut self, cwd: &str) {
+        self.cwd = String::from(cwd);
     }
 
     /// Parses and runs one command line. Returns `true` on success.
@@ -1082,6 +1116,27 @@ mod tests {
         let (ok, out) = run("run /bin/nothing");
         assert!(!ok && out.contains("no such file"), "{}", out);
         assert_eq!(process::count(), 0);
+    }
+
+    #[test_case]
+    fn builtins_for_user_space() {
+        let mut shell = Shell::new();
+        shell.set_cwd("/docs");
+        let mut out = String::new();
+        assert_eq!(shell.execute_builtin("echo from kshell", &mut out), Some(true));
+        assert_eq!(out, "from kshell\n");
+        assert_eq!(
+            shell.execute_builtin("stat hello.txt", &mut out),
+            Some(true),
+            "relative to the cwd"
+        );
+        assert_eq!(shell.execute_builtin("sleep x", &mut out), Some(false));
+        for excluded in ["cd /", "pwd", "history", "run /bin/hello", "nonexistent", "\"open"] {
+            assert_eq!(shell.execute_builtin(excluded, &mut out), None, "{}", excluded);
+        }
+        let names = kshell_commands();
+        assert!(names.contains(&"mem") && names.contains(&"poweroff"));
+        assert!(!names.contains(&"cd") && !names.contains(&"run"));
     }
 
     #[test_case]

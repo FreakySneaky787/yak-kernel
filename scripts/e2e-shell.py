@@ -9,6 +9,10 @@ the output between the two prompts. A PAUSE inside the keys waits a moment
 before typing the rest (e.g. Ctrl+C once a program runs). Each session ends
 with `poweroff`.
 
+The kernel starts /bin/sh as init, so the steps run against the user-space
+shell (prompt "sh:/path> "); the last steps of session 1 leave it with `exit`
+and continue in the kernel shell (prompt "kernel:/path> ").
+
 Two sessions run on the same scratch disk: the second one boots again and
 checks that files written in the first one survived. Finally `fsck.fat`
 validates the disk image.
@@ -21,7 +25,7 @@ import threading
 import time
 
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
-PROMPT = re.compile(r"kernel:(/[^>\n]*)> ")
+PROMPT = re.compile(r"(sh|kernel):(/[^>\n]*)> ")
 LEFT = "\x1b[D"
 RIGHT = "\x1b[C"
 UP = "\x1b[A"
@@ -70,7 +74,7 @@ STEPS = [
     ('echo "unterminated\r', ["unterminated"], []),
     ("echo Grüße äöü\r", ["Grüße äöü"], []),
     # user space: programs from /bin on the disk, running in ring 3
-    ("ls /bin\r", ["hello", "fault", "upper", "cat", "cp", "ls", "fstest"], []),
+    ("ls /bin\r", ["hello", "fault", "upper", "cat", "cp", "ls", "fstest", "sh"], []),
     ("fstest\r", ["fstest: all checks passed"], ["FAIL"]),
     ("heaptest\r", ["heaptest: all checks passed"], ["FAIL"]),
     ("spawntest\r", ["spawntest: all checks passed"], ["FAIL"]),
@@ -89,6 +93,10 @@ STEPS = [
     ("fault kernel\r", ["fault was killed: page fault at 0xffffffff80000000"], ["must never happen"]),
     ("run /bin/fault exit 3\r", ["fault exited with code 3"], []),
     ("echo kernel still alive\r", ["kernel still alive"], ["error"]),
+    # leaving /bin/sh: the kernel shell takes over
+    ("exit\r", ["/bin/sh exited with code 0 - falling back to the kernel shell"], []),
+    ("echo in the kernel shell\r", ["in the kernel shell"], ["error"]),
+    ("hello\r", ["Hello from user space!"], ["error"]),  # programs still run from there
 ]
 
 
@@ -150,7 +158,12 @@ def run_session(root, elf, extra_args, disk, steps, title):
     reader.start()
     failures = 0
     try:
-        pos = reader.wait_for_prompt(0, 30)[1]
+        first, pos = reader.wait_for_prompt(0, 30)
+        if reader.text(first, pos).startswith("sh:"):
+            print("ok    init is /bin/sh")
+        else:
+            failures += 1
+            print(f"FAIL  init: first prompt is {reader.text(first, pos)!r}, expected the /bin/sh prompt")
         for keys, expected, forbidden in steps:
             for i, part in enumerate(keys.split(PAUSE)):
                 if i > 0:

@@ -4,8 +4,9 @@ CARGO      := source $$HOME/.cargo/env && cd kernel && cargo
 LIMINE_DIR := vendor/limine
 LIMINE_BRANCH := v11.x-binary
 KERNEL_ELF := kernel/target/x86_64-unknown-none/debug/kernel
-# User programs (user/src/bin/*.rs) are copied to /bin on every disk image
-USER_PROGRAMS := $(basename $(notdir $(wildcard user/src/bin/*.rs)))
+# User programs (user/src/bin/<name>.rs or user/src/bin/<name>/main.rs) are copied to /bin on every disk image
+USER_PROGRAMS := $(basename $(notdir $(wildcard user/src/bin/*.rs))) \
+                 $(notdir $(patsubst %/,%,$(dir $(wildcard user/src/bin/*/main.rs))))
 USER_OUT   := user/target/x86_64-unknown-none/release
 USER_BIN   := build/user/bin
 OVMF       := /usr/share/edk2/ovmf/OVMF_CODE.fd

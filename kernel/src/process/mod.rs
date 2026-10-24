@@ -26,8 +26,10 @@
 //! Ctrl+C: one process is in the *foreground* (the one the console belongs
 //! to). The keyboard/serial interrupt handlers call `interrupt_foreground`,
 //! which kills it - unless it ignores interrupts (the shell), in which case
-//! the key is delivered as a normal byte (0x03). A child spawned by the
-//! foreground process takes over the foreground until it ends.
+//! the key is delivered as a normal byte (0x03). While the foreground process
+//! waits for a child (`wait_child`), the child is in the foreground; the
+//! console comes back when the wait ends. Children that nobody waits for
+//! (background, orphans) never get it.
 
 pub mod elf;
 pub mod syscall;
@@ -401,7 +403,16 @@ pub fn wait_child(pid: Pid) -> Result<ExitStatus, WaitError> {
     if !is_child {
         return Err(WaitError::NotAChild);
     }
-    if !task::join_or_abort(pid, kill_pending) {
+    // Hand the console to the child for the duration of the wait
+    let lend = FOREGROUND
+        .compare_exchange(me, pid, Ordering::Relaxed, Ordering::Relaxed)
+        .is_ok();
+    let joined = task::join_or_abort(pid, kill_pending);
+    if lend {
+        let _ = FOREGROUND.compare_exchange(pid, me, Ordering::Relaxed, Ordering::Relaxed);
+        let _ = FOREGROUND.compare_exchange(0, me, Ordering::Relaxed, Ordering::Relaxed);
+    }
+    if !joined {
         return Err(WaitError::Interrupted);
     }
     without_interrupts(|| PROCESSES.lock().remove(&pid))
@@ -412,6 +423,20 @@ pub fn wait_child(pid: Pid) -> Result<ExitStatus, WaitError> {
 /// Parent of process `pid`, if it is a process with a parent.
 pub fn parent_of(pid: Pid) -> Option<Pid> {
     without_interrupts(|| PROCESSES.lock().get(&pid).and_then(|p| p.parent))
+}
+
+/// Starts the first user process: `path` in `/`, in the foreground and
+/// immune to Ctrl+C (it is the shell). Waits until it ends.
+pub fn run_init(path: &str) -> Result<ExitStatus, alloc::string::String> {
+    let image = crate::fs::with_root(|fs| fs.read_file(path)).map_err(|e| alloc::format!("{}: {}", path, e))?;
+    let opts = Options {
+        foreground: true,
+        ignore_interrupt: true,
+        ..Options::new(Output::Console)
+    };
+    let name = path.rsplit('/').next().unwrap_or(path);
+    let pid = spawn_with(name, &image, "", opts).map_err(|e| alloc::format!("{}: {}", path, e))?;
+    Ok(wait(pid).expect("init vanished"))
 }
 
 /// Number of processes in the table (running or not yet waited for).

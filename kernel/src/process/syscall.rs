@@ -57,6 +57,14 @@ pub mod nr {
     pub const WAIT: u32 = 16;
     /// kill(pid) -> 0 (children only)
     pub const KILL: u32 = 17;
+    /// chdir(path, path_len) -> 0
+    pub const CHDIR: u32 = 18;
+    /// kshell(line, line_len) -> 0 (ok) / 1 (the command failed); runs a kernel
+    /// shell built-in in the caller's cwd with the caller's output. Transitional:
+    /// gives /bin/sh the kernel's information commands until they get real syscalls.
+    pub const KSHELL: u32 = 19;
+    /// kcommands(buf, len) -> length: NUL-separated names usable with `kshell`
+    pub const KCOMMANDS: u32 = 20;
 }
 
 pub mod errno {
@@ -209,6 +217,9 @@ pub extern "C" fn dispatch(frame: &mut SyscallFrame) {
         nr::SPAWN => sys_spawn(a0, a1, a2, a3),
         nr::WAIT => sys_wait(a0, a1),
         nr::KILL => sys_kill(a0),
+        nr::CHDIR => sys_chdir(a0, a1),
+        nr::KSHELL => sys_kshell(a0, a1),
+        nr::KCOMMANDS => sys_kcommands(a0, a1),
         _ => Err(errno::ENOSYS),
     };
     frame.rax = match result {
@@ -507,7 +518,7 @@ fn sys_spawn(path: u64, path_len: u64, args: u64, args_len: u64) -> SysResult {
         cwd: &cwd,
         stdout,
         parent: Some(me),
-        foreground: super::foreground() == me,
+        foreground: false, // the console is lent to a child only while we wait for it
         ignore_interrupt: false,
     };
     super::spawn_with(name, &image, args, opts).map_err(|e| match e {
@@ -557,6 +568,50 @@ fn sys_kill(pid: u64) -> SysResult {
     Ok(0)
 }
 
+fn sys_chdir(path: u64, path_len: u64) -> SysResult {
+    let path = user_path(path, path_len)?;
+    let entry = fs::with_root(|fs| fs.lookup(&path)).map_err(fs_errno)?;
+    if !entry.is_dir() {
+        return Err(errno::ENOTDIR);
+    }
+    with_current(|p| p.cwd = path);
+    Ok(0)
+}
+
+fn sys_kshell(line: u64, line_len: u64) -> SysResult {
+    if line_len > 4096 {
+        return Err(errno::E2BIG);
+    }
+    let bytes = copy_from_user(line, line_len)?;
+    let line = core::str::from_utf8(&bytes).map_err(|_| errno::EINVAL)?;
+    let (cwd, stdout) = with_current(|p| (p.cwd.clone(), p.stdout.clone())).ok_or(errno::ESRCH)?;
+    let mut shell = crate::shell::Shell::new();
+    shell.set_cwd(&cwd);
+    let ok = match stdout {
+        Output::Console => shell.execute_builtin(line, &mut crate::shell::Stdout),
+        Output::Capture(sink) => {
+            let mut text = String::new();
+            let ok = shell.execute_builtin(line, &mut text);
+            without_interrupts(|| sink.lock().extend_from_slice(text.as_bytes()));
+            ok
+        }
+    };
+    match ok {
+        None => Err(errno::ENOENT),
+        Some(true) => Ok(0),
+        Some(false) => Ok(1),
+    }
+}
+
+fn sys_kcommands(buf: u64, len: u64) -> SysResult {
+    let names = crate::shell::kshell_commands().join("\0");
+    if names.len() as u64 > len {
+        return Err(errno::ERANGE);
+    }
+    copy_to_user(buf, names.as_bytes())?;
+    Ok(names.len() as u64)
+}
+
 fn sys_getcwd(buf: u64, len: u64) -> SysResult {
     let cwd = with_current(|p| p.cwd.clone()).unwrap_or_default();
     if (cwd.len() as u64) > len {
@@ -575,7 +630,18 @@ fn key_bytes(event: KeyEvent, out: &mut Vec<u8>) {
         Key::Backspace => out.push(0x08),
         Key::Tab => out.push(b'\t'),
         Key::Escape => out.push(0x1B),
-        _ => {}
+        // like a VT100/xterm terminal
+        Key::Up => out.extend_from_slice(b"\x1b[A"),
+        Key::Down => out.extend_from_slice(b"\x1b[B"),
+        Key::Right => out.extend_from_slice(b"\x1b[C"),
+        Key::Left => out.extend_from_slice(b"\x1b[D"),
+        Key::Home => out.extend_from_slice(b"\x1b[H"),
+        Key::End => out.extend_from_slice(b"\x1b[F"),
+        Key::Insert => out.extend_from_slice(b"\x1b[2~"),
+        Key::Delete => out.extend_from_slice(b"\x1b[3~"),
+        Key::PageUp => out.extend_from_slice(b"\x1b[5~"),
+        Key::PageDown => out.extend_from_slice(b"\x1b[6~"),
+        Key::F(_) => {}
     }
 }
 
@@ -619,6 +685,6 @@ mod tests {
         ] {
             key_bytes(e, &mut out);
         }
-        assert_eq!(out, b"a\xC3\xA4\x03\n\x08");
+        assert_eq!(out, b"a\xC3\xA4\x03\n\x1b[D\x08");
     }
 }

@@ -15,6 +15,9 @@ extern "C" fn kmain() -> ! {
     unsafe { arch::x86_64::switch_stack(stack.top.as_u64(), kernel_main) }
 }
 
+/// The first user program.
+const INIT: &str = "/bin/sh";
+
 /// Runs on the guarded kernel stack.
 extern "C" fn kernel_main() -> ! {
     let mem = pmm::stats();
@@ -31,6 +34,11 @@ extern "C" fn kernel_main() -> ! {
         kernel::time::uptime_ms()
     );
     println!("Type 'help' for a list of commands.\n");
+    // The first user process is the shell; the kernel shell is the fallback
+    match kernel::process::run_init(INIT) {
+        Ok(status) => println!("\n{} {} - falling back to the kernel shell", INIT, status),
+        Err(e) => println!("cannot start {} ({}) - using the kernel shell", INIT, e),
+    }
     kernel::shell::Shell::new().run()
 }
 

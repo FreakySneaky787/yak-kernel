@@ -20,7 +20,13 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let text = match self.0 {
             ENOENT => "no such file or directory",
+            3 => "no such process",
+            4 => "interrupted",
             5 => "input/output error",
+            7 => "argument list too long",
+            8 => "not an executable (ELF) file",
+            10 => "no such child process",
+            12 => "out of memory",
             EBADF => "bad file descriptor",
             14 => "bad address",
             17 => "already exists",
@@ -138,6 +144,11 @@ impl Drop for Dir {
 pub fn stat(path: &str) -> Result<Stat, Error> {
     let mut st = Stat::default();
     check(sys::stat(path, &mut st)).map(|_| st)
+}
+
+/// Changes the current directory.
+pub fn chdir(path: &str) -> Result<(), Error> {
+    check(sys::chdir(path)).map(|_| ())
 }
 
 /// The current directory, written into `buf`.

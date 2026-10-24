@@ -28,6 +28,16 @@ Format: number · date · title, then symptom → cause → fix → test.
 - **Test:** `ahci::tests::probing_twice_is_refused`, `shell::tests::hexdump_shows_boot_signature`.
 - **Remember:** hardware state is global – a device must have exactly one driver instance.
 
+### #4 · 2026-10-24 · Ctrl+C stops working in /bin/sh after `spawntest`
+- **Symptom:** E2E step `fault spin` + Ctrl+C hung under `/bin/sh` – the spinner was never killed.
+- **Cause:** children of the foreground process inherited the foreground *at spawn*. `spawntest` starts an orphan (`hello`)
+  that nobody waits for; it took the foreground, and when it ended the foreground fell back to its dead parent → 0.
+  From then on nobody owned the console, so `sh`'s children were not foreground either and Ctrl+C arrived as a plain byte.
+- **Fix:** the console is *lent* only while a foreground process waits for a child (`process::wait_child`) and returned when
+  the wait ends – like a real shell's `tcsetpgrp`. `spawn` never changes the foreground.
+- **Test:** E2E `spawntest` followed by `fault spin<pause>^C`, `fault sleep<pause>^C`, `upper<pause>^C` (all under `/bin/sh`).
+- **Remember:** "who owns the console" must follow who is *waiting*, not who was started.
+
 ## Known pitfalls (not bugs, but worth remembering)
 - **The Limine host utility (`limine bios-install`) needs a C compiler** (`gcc`). It is not required for booting the ISO
   in QEMU with `-cdrom`; it is only needed to make the ISO bootable as a hard disk / USB image.

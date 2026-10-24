@@ -112,6 +112,25 @@ extern "C" fn kmain() -> ! {
     kernel::time::sleep_ms(300); // the orphan (hello sleeps 100 ms) ends and is cleaned up
     assert_eq!(process::count(), 0, "orphan left in the process table");
 
+    // M20: the shell as a user program, driven by injected serial input
+    kernel::serial::inject_rx(
+        b"echo hi from sh\rcd docs\rpwd\rls\reco\x1b[Dh\x1b[C edited\rmem\rnope\rfault exit 4\rexit 7\r",
+    );
+    let (status, out) = run("sh", "");
+    assert_eq!(status, ExitStatus::Exited(7), "{}", out);
+    for expected in [
+        "hi from sh\n",
+        "sh\x1b[0m:\x1b[94m/docs\x1b[0m> ", // prompt after cd
+        "/docs\n",
+        "hello.txt",
+        "edited\n",  // Left + insert + Right: eco -> echo
+        "Physical:", // kernel built-in through kshell
+        "unknown command 'nope'",
+        "fault exited with code 4",
+    ] {
+        assert!(out.contains(expected), "missing {:?} in:\n{}", expected, out);
+    }
+
     assert_eq!(process::count(), 0);
     serial_println!("[ok]");
     exit(ExitCode::Success)

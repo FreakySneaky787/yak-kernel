@@ -5,7 +5,8 @@
 //! console and on a serial terminal. It is pure logic and fully unit-tested
 //! with a `String` as output.
 
-use crate::drivers::scancode::{Key, KeyEvent};
+// `super::keys`: the kernel shell and /bin/sh both compile this file
+use super::keys::{Key, KeyEvent};
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt::Write;

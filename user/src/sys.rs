@@ -22,6 +22,9 @@ pub const BRK: u64 = 14;
 pub const SPAWN: u64 = 15;
 pub const WAIT: u64 = 16;
 pub const KILL: u64 = 17;
+pub const CHDIR: u64 = 18;
+pub const KSHELL: u64 = 19;
+pub const KCOMMANDS: u64 = 20;
 
 pub const STDIN: u64 = 0;
 pub const STDOUT: u64 = 1;
@@ -203,4 +206,19 @@ pub fn wait(pid: u64, status: &mut WaitStatus) -> i64 {
 
 pub fn kill(pid: u64) -> i64 {
     unsafe { syscall3(KILL, pid, 0, 0) }
+}
+
+pub fn chdir(path: &str) -> i64 {
+    unsafe { syscall3(CHDIR, path.as_ptr() as u64, path.len() as u64, 0) }
+}
+
+/// Runs a kernel shell built-in (transitional, see the kernel's `nr::KSHELL`):
+/// 0 = ok, 1 = the command failed, -ENOENT = no such built-in.
+pub fn kshell(line: &str) -> i64 {
+    unsafe { syscall3(KSHELL, line.as_ptr() as u64, line.len() as u64, 0) }
+}
+
+/// NUL-separated names of the kernel built-ins usable with `kshell`.
+pub fn kcommands(buf: &mut [u8]) -> i64 {
+    unsafe { syscall3(KCOMMANDS, buf.as_mut_ptr() as u64, buf.len() as u64, 0) }
 }

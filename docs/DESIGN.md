@@ -130,15 +130,25 @@
   | 15 | `spawn(path, len, args, args_len)` | 4th argument in R10; child inherits cwd and output; `-ENOENT`, `-ENOEXEC`, `-E2BIG` |
   | 16 | `wait(pid, *WaitStatus)` | children only (`-ECHILD`); 128-byte status: kind (1 exited, 2 killed), code, kill reason |
   | 17 | `kill(pid)` | children only (`-ESRCH`) |
+  | 18 | `chdir(path, len)` | `-ENOTDIR` for files |
+  | 19 | `kshell(line, len)` | transitional: runs a kernel shell built-in (not cd/pwd/history/run) in the caller's cwd and output |
+  | 20 | `kcommands(buf, len)` | NUL-separated names usable with `kshell` |
 - **Process tree**: `parent` (None = started by the kernel; only the kernel waits for those). When a process ends, finished
   children are dropped and running ones become orphans, removed from the table at their own exit (nobody waits for them).
 - **Kill / Ctrl+C**: `kill` stores a reason and `task::wake`s the target; blocking syscalls use abortable waits
   (`input::read_key_or_abort`, `task::join_or_abort`, sleep returns early) and the kill takes effect when the syscall returns or
   the timer interrupts user code. `FOREGROUND` = pid owning the console: set by the kernel shell for its programs, inherited by
-  children of the foreground process, handed back to the parent at exit. The keyboard and COM1 interrupt handlers recognise
+  `process::wait_child` while the foreground process waits for that child (handed back when the wait ends); `spawn` alone never
+  changes it (bug #4). The keyboard and COM1 interrupt handlers recognise
   Ctrl+C themselves (raw 0x03 / Ctrl tracker on set-1 scancodes, the C key is 0x2E on QWERTY and QWERTZ) and call
   `process::interrupt_foreground`: the key is swallowed and the process killed ("interrupted"), unless it has
   `ignore_interrupt` – then the key reaches it as byte 0x03.
+- **init**: `kernel_main` runs `process::run_init("/bin/sh")` (foreground, `ignore_interrupt`) and waits; when it is missing or
+  exits, the kernel shell runs on thread 0 as before.
+- **`/bin/sh`** (`user/src/bin/sh/`): compiles the kernel's `shell/line_editor.rs` and `shell/parser.rs` with `#[path]`; both
+  sides provide a `keys` module (`Key`, `KeyEvent`) next to them. `read(0)` delivers keys as terminal bytes (VT100 sequences
+  for arrows, Home/End, Delete, PageUp/Down, Insert); `keys::Decoder` turns them back into `KeyEvent`s. Order of lookup:
+  sh built-ins, kernel built-ins (`kshell`), program path / `/bin/<name>`.
 - **Files**: each process has a cwd (inherited from the spawner, paths are normalized against it) and up to 32 file descriptors
   (`process::Handle`): 0 stdin, 1/2 the process's `Output`, then files (path + read offset, writes append via `append_file`)
   and directories (snapshot of the entries at `open`). Handlers copy what they need out of the table, do the disk I/O
