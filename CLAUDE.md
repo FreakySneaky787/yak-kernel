@@ -51,7 +51,7 @@ Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.s
 - `kernel/src/console.rs` – framebuffer text console, macros `print!` / `println!` (screen + serial)
 - `kernel/src/testing.rs` – test runner, `Testable`, test panic handler
 - `kernel/src/qemu.rs` – exit QEMU (isa-debug-exit)
-- `kernel/src/mem/` – `mod.rs` (PhysAddr/VirtAddr, HHDM), `pmm.rs` (bitmap frame allocator), `paging.rs` (page tables: translate/map/unmap), `stack.rs` (guarded kernel stacks)
+- `kernel/src/mem/` – `mod.rs` (PhysAddr/VirtAddr, HHDM), `pmm.rs` (bitmap frame allocator), `paging.rs` (page tables: translate/map/unmap), `stack.rs` (guarded kernel stacks), `heap.rs` (linked-list `#[global_allocator]`)
 - `kernel/src/time.rs` – ticks, `uptime_ms`, `sleep_ms`
 - `kernel/src/drivers/keyboard.rs` – PS/2 driver, ring buffer, `read_key()`; `drivers/scancode.rs` – decoder + layouts (DE/US)
 - `kernel/src/arch/x86_64/` – CPU specifics: `port.rs` (in/out), `gdt.rs` (GDT+TSS), `idt.rs` (IDT structure),

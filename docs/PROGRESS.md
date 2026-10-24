@@ -15,7 +15,7 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 | 7 | PS/2 keyboard | ✅ | 13 unit tests + E2E via `sendkey` (QWERTZ, umlauts, AltGr, Caps) |
 | 8 | Physical frame allocator from the Limine memory map | ✅ | 9 tests: fake memory maps, real alloc/free, zeroing |
 | 9 | Paging: map/unmap, kernel stack with guard page | ✅ | 8 unit tests + real recursion overflow test |
-| 10 | Kernel heap → `alloc` | ⬜ | |
+| 10 | Kernel heap → `alloc` | ✅ | 9 tests: allocator core on a fixed arena + Box/Vec/String/BTreeMap, growth, reuse |
 | 11 | Shell | ⬜ | |
 
 ## Log
@@ -45,6 +45,9 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   `tests/stack_overflow.rs` now overflows for real via endless recursion and checks CR2 is inside the guard page.
   Observed: Limine sets EFER.NXE and CR0.WP; its HHDM maps RAM + framebuffer only, no MMIO (LAPIC needs `map_mmio`).
 
+- **2026-10-24** – M10: own linked-list allocator (`mem/heap.rs`: first fit, splitting, address-ordered free list with coalescing)
+  as `#[global_allocator]`. Heap in PML4 slot 508, 1 MiB initially, grows on demand up to 1 GiB. `alloc` crate enabled.
+
 ## Open items / later
 - Reclaim `BOOTLOADER_RECLAIMABLE` memory once we no longer use Limine's stack, page tables and responses.
 - Switch to local APIC + I/O APIC (needs MMIO mapping, i.e. after M9). Then remove `lapic::disable()`.
@@ -52,6 +55,6 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 - Automated E2E keyboard test: the runner would have to send `sendkey` through the monitor. Makes sense together with the shell (M11).
 
 ## Next step
-**M10:** kernel heap. Reserve a virtual heap area (PML4 slot 508), map pages on demand from the frame allocator, implement a
-linked-list allocator (first fit, splitting and coalescing of free blocks) as `#[global_allocator]`, enable the `alloc` crate
-(`Box`, `Vec`, `String`, `BTreeMap`). Tests: many allocations, reuse after free, alignment, large allocations that grow the heap.
+**M11:** shell. Visible cursor in the console, a line editor (insert, backspace, left/right, history with up/down),
+command parser (split into words, quotes), commands: `help`, `echo`, `clear`, `mem`, `uptime`, `ticks`, `layout de|us`, `reboot`, `panic`.
+Input from keyboard **and** serial (so tests can drive the shell). Tests: parser and line editor unit tests, E2E test via serial input.

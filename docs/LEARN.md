@@ -93,6 +93,15 @@ Short explanations of every subsystem: what it is and why we need it.
 - **Guard page**: we leave the page below each kernel stack unmapped. If the stack overflows, the CPU touches that page and faults
   immediately, instead of silently corrupting the memory below.
 
+## M10 – Heap
+- The frame allocator only hands out whole 4 KiB pages. Most kernel data is much smaller and has arbitrary sizes – that is the job of the **heap**.
+- Our **linked-list allocator** remembers all free gaps in a list. The list needs no extra memory: each free gap stores its size and a pointer
+  to the next gap inside itself.
+- **Allocate**: walk the list, take the first gap that is big enough (*first fit*), cut off what is not needed and put it back.
+- **Free**: put the block back into the list at its address position; if it touches a neighbouring gap, merge them (*coalescing*) –
+  otherwise the heap would crumble into many tiny unusable pieces (*fragmentation*).
+- Once a `#[global_allocator]` exists, Rust's `alloc` crate works: `Box`, `Vec`, `String`, `BTreeMap` – just like in normal programs.
+
 ## Tooling – GNU ld and binutils
 - rustc compiles our code into object files; a **linker** combines them into the final ELF according to `kernel/linker.ld`
   (load address, section order, segments). We use **GNU ld** (`ld.bfd`) for that.

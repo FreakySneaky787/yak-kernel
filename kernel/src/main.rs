@@ -31,6 +31,8 @@ extern "C" fn kernel_main() -> ! {
         mem.usable_bytes() / (1024 * 1024),
         mem.free_bytes() / (1024 * 1024)
     );
+    let heap = kernel::mem::heap::stats();
+    println!("Heap: {} KiB mapped, {} bytes used", heap.total / 1024, heap.used);
     println!("Uptime: {} ms, keyboard layout: {:?}", kernel::time::uptime_ms(), keyboard::layout());
     println!("Type something (echo mode, the shell arrives in M11):");
     print!("> ");

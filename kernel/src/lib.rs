@@ -8,6 +8,8 @@
 #![test_runner(crate::testing::runner)]
 #![reexport_test_harness_main = "test_main"]
 
+extern crate alloc;
+
 pub mod arch;
 pub mod boot;
 pub mod console;

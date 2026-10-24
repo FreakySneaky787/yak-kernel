@@ -31,6 +31,7 @@
 |---|---|---|
 | `0x0000_0000_0000_0000` – `0x0000_7FFF_FFFF_FFFF` | 0–255 | lower half, unused (reserved for user space later) |
 | `0xFFFF_8000_0000_0000` + phys | 256 | HHDM (Limine): all RAM + framebuffer, **no MMIO** |
+| `0xFFFF_FE00_0000_0000` | 508 | kernel heap (grows upward, max 1 GiB) |
 | `0xFFFF_FE80_0000_0000` | 509 | scratch area for paging unit tests |
 | `0xFFFF_FF00_0000_0000` | 510 | kernel stacks: `[guard page][stack pages]` per stack, never reused |
 | `0xFFFF_FFFF_8000_0000` | 511 | kernel image (linker script) |
@@ -38,6 +39,13 @@
 - Page tables: we modify Limine's tables (CR3) through the HHDM; intermediate tables come from the frame allocator and are not freed.
 - Limine enables EFER.NXE (so `NO_EXECUTE` is usable) and CR0.WP (the kernel cannot write read-only pages either).
 - `kmain` switches from Limine's stack to a 64 KiB guarded stack (`mem::stack`) immediately after `kernel::init()`.
+
+## Kernel heap
+- `mem::heap::LinkedListHeap`: free blocks form a singly linked list sorted by address; each free block stores `size` + `next` in its first 16 bytes.
+- First fit; a block is split into [front padding][allocation][rest], padding and rest go back to the list. Freeing inserts by address and merges neighbours.
+- All addresses and sizes are multiples of 16, so leftovers are either 0 or big enough for a header (no lost bytes).
+- `KernelHeap` wraps it in a spin lock (interrupts disabled while held) and grows by mapping ≥64 KiB at the heap end when an allocation fails.
+- Allocation failure → null → Rust's default alloc error handler panics.
 
 ## GDT / TSS
 | Selector | Entry |

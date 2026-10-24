@@ -1,6 +1,7 @@
 //! Memory management: address types, the higher-half direct map (HHDM),
 //! and the physical frame allocator.
 
+pub mod heap;
 pub mod paging;
 pub mod pmm;
 pub mod stack;
@@ -76,11 +77,12 @@ pub fn hhdm_offset() -> u64 {
     HHDM_OFFSET.load(Ordering::Relaxed)
 }
 
-/// Reads the HHDM offset from Limine and sets up the frame allocator.
+/// Reads the HHDM offset from Limine, sets up the frame allocator and the kernel heap.
 pub fn init() {
     let hhdm = crate::boot::HHDM.response().expect("Limine provided no HHDM response");
     HHDM_OFFSET.store(hhdm.offset, Ordering::Relaxed);
     pmm::init();
+    heap::init();
 }
 
 #[test_case]
