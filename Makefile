@@ -6,7 +6,7 @@ LIMINE_BRANCH := v11.x-binary
 KERNEL_ELF := kernel/target/x86_64-unknown-none/debug/kernel
 OVMF       := /usr/share/edk2/ovmf/OVMF_CODE.fd
 
-.PHONY: all limine limine-tool build run run-uefi debug gdb test e2e check \
+.PHONY: all limine limine-tool build run run-uefi debug gdb test e2e e2e-uefi check \
         disasm symbols sections addr2line clean distclean
 
 all: build
@@ -45,8 +45,12 @@ test: limine
 e2e: build
 	python3 -I scripts/e2e-shell.py $(KERNEL_ELF)
 
-# Everything: unit + integration tests, then the end-to-end shell test
-check: test e2e
+# Same, but booted through UEFI firmware (OVMF)
+e2e-uefi: build
+	python3 -I scripts/e2e-shell.py $(KERNEL_ELF) -drive if=pflash,format=raw,readonly=on,file=$(OVMF)
+
+# Everything: unit + integration tests, then the end-to-end shell test (BIOS and UEFI)
+check: test e2e e2e-uefi
 
 # ---- GNU binutils helpers ----------------------------------------------------
 

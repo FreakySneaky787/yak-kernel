@@ -18,6 +18,14 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 | 10 | Kernel heap → `alloc` | ✅ | 9 tests: allocator core on a fixed arena + Box/Vec/String/BTreeMap, growth, reuse |
 | 11 | Shell | ✅ | 37 unit tests (console, input, parser, line editor, commands) + 19-step E2E over serial |
 
+## Stage 2: multitasking, files, user space (agreed with the user on 2026-10-24)
+| # | Milestone | Status | Tests |
+|---|---|---|---|
+| 12 | APIC: ACPI/MADT, local APIC + timer, I/O APIC, 8259 masked | ✅ | 10 tests + E2E on BIOS and UEFI, timer vs. wall clock checked |
+| 13 | Multitasking: kernel threads, context switch, scheduler | ⬜ | |
+| 14 | Ramdisk filesystem (Limine module), `ls`/`cat` | ⬜ | |
+| 15 | User space: ring 3, syscalls, ELF loader | ⬜ | |
+
 ## Log
 - **2026-10-24** – Setup: Rust nightly 1.101 (rustup), target `x86_64-unknown-none`, Limine v11.x-binary.
   M1: kernel boots via BIOS and UEFI, prints "Hello from KernelTry!" on serial, colour bars on the framebuffer (1280×800×32).
@@ -55,15 +63,21 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   Panics are now also shown on screen. `scripts/e2e-shell.py` drives the real kernel over the serial port (`make e2e`, `make check`).
   **Stage 1 complete: 99 in-kernel tests + 19 E2E steps green.**
 
+- **2026-10-24** – User confirmed stage 2 in the proposed order (M12–M15) and asked to be consulted on open questions.
+- **2026-10-24** – M12: ACPI parser (`acpi.rs`: RSDP → XSDT/RSDT → MADT with CPUs, I/O APICs, overrides).
+  `paging::ensure_hhdm_mapped` maps ACPI tables / MMIO missing from Limine's HHDM. Local APIC enabled (`lapic.rs`), its timer
+  calibrated against PIT channel 2 (polled, no IRQ) and running periodic at 100 Hz on vector 32. I/O APIC (`ioapic.rs`) routes
+  keyboard (GSI 1) and COM1 (GSI 4); 8259 remapped + fully masked; PIT channel 0 unused. New shell command `acpi`.
+  `make check` now also runs the E2E test under UEFI. Timer accuracy: 6.00 s kernel vs. 6.00 s wall clock (BIOS), 5.99 s (UEFI).
+
 ## Open items / later
 - Reclaim `BOOTLOADER_RECLAIMABLE` memory once we no longer use Limine's stack, page tables and responses.
-- Switch to local APIC + I/O APIC (needs MMIO mapping, i.e. after M9). Then remove `lapic::disable()`.
 - Shell lines longer than one console row are not handled by the line editor (input is capped at 120 characters).
 - `gcc` is not installed yet → `make limine-tool` (bios-install for USB/HDD images) is not available.
 
 ## Next step
-Stage 1 is done. Proposed **stage 2** (to be confirmed with the user), in this order:
-1. **M12 – APIC:** map LAPIC/IOAPIC via `map_mmio`, parse ACPI (RSDP → MADT), LAPIC timer, route IRQs via the I/O APIC, drop the 8259.
-2. **M13 – Multitasking:** kernel threads, context switch, round-robin scheduler driven by the timer, `sleep` without busy-waiting.
-3. **M14 – Ramdisk filesystem:** Limine module (tar/initrd) → simple VFS with `ls`, `cat` in the shell.
-4. **M15 – User space:** ring 3, TSS RSP0, `syscall`/`sysret`, ELF loader, first user program.
+**M13 – Multitasking:** kernel threads with their own guarded stacks, context switch in assembly (callee-saved registers + RSP),
+round-robin scheduler with preemption from the LAPIC timer, `sleep_ms` that blocks instead of spinning, `thread::spawn`/`exit`/`yield`.
+Shell: `ps` command, a demo command that starts background threads. Tests: two threads interleave, sleeping threads wake up,
+exited threads release their stacks, preemption happens without explicit yields.
+Then **M14** (ramdisk filesystem) and **M15** (user space).

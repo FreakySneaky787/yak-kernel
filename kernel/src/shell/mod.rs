@@ -48,6 +48,7 @@ pub static COMMANDS: &[Command] = &[
     Command { name: "uptime", usage: "uptime", help: "time since boot", run: cmd_uptime },
     Command { name: "sleep", usage: "sleep <ms>", help: "wait for the given number of milliseconds", run: cmd_sleep },
     Command { name: "cpu", usage: "cpu", help: "processor vendor, model and features", run: cmd_cpu },
+    Command { name: "acpi", usage: "acpi", help: "ACPI tables, CPUs and interrupt routing", run: cmd_acpi },
     Command { name: "layout", usage: "layout [de|us]", help: "show or set the keyboard layout", run: cmd_layout },
     Command { name: "history", usage: "history", help: "previously entered commands", run: cmd_history },
     Command { name: "colors", usage: "colors", help: "show the console colour palette", run: cmd_colors },
@@ -219,6 +220,30 @@ fn cmd_cpu(_: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), Strin
     Ok(())
 }
 
+fn cmd_acpi(_: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), String> {
+    let info = crate::acpi::info().ok_or("ACPI was not initialized")?;
+    writeln!(out, "ACPI revision {} (OEM '{}')", info.revision, info.oem_id).ok();
+    write!(out, "Tables:").ok();
+    for t in &info.tables {
+        write!(out, " {}", t.signature_str()).ok();
+    }
+    writeln!(out).ok();
+    let madt = &info.madt;
+    writeln!(out, "Local APIC at {:#x}, legacy 8259 present: {}", madt.local_apic_address, madt.has_8259).ok();
+    for cpu in &madt.local_apics {
+        writeln!(out, "  CPU {}: APIC ID {}{}", cpu.processor_id, cpu.apic_id, if cpu.flags & 1 != 0 { "" } else { " (disabled)" }).ok();
+    }
+    for io in &madt.io_apics {
+        writeln!(out, "  I/O APIC {} at {:#x}, GSI base {}", io.id, io.address, io.gsi_base).ok();
+    }
+    for o in &madt.overrides {
+        writeln!(out, "  ISA IRQ {} -> GSI {}{}{}", o.source, o.gsi,
+            if o.active_low() { ", active low" } else { "" },
+            if o.level_triggered() { ", level" } else { "" }).ok();
+    }
+    Ok(())
+}
+
 fn cmd_layout(_: &mut Shell, args: &[String], out: &mut dyn Write) -> Result<(), String> {
     match args.first().map(|s| s.as_str()) {
         None => {}
@@ -322,7 +347,7 @@ mod tests {
 
     #[test_case]
     fn info_commands_produce_output() {
-        for cmd in ["mem", "memmap", "uptime", "cpu", "version", "colors"] {
+        for cmd in ["mem", "memmap", "uptime", "cpu", "acpi", "version", "colors"] {
             let (ok, out) = run(cmd);
             assert!(ok && !out.is_empty(), "'{}' failed: {}", cmd, out);
         }

@@ -36,6 +36,8 @@
 | `0xFFFF_FF00_0000_0000` | 510 | kernel stacks: `[guard page][stack pages]` per stack, never reused |
 | `0xFFFF_FFFF_8000_0000` | 511 | kernel image (linker script) |
 
+- `paging::ensure_hhdm_mapped(phys, size, flags)` maps pages Limine left out of the HHDM (ACPI tables, LAPIC `0xFEE0_0000`,
+  I/O APIC `0xFEC0_0000`) at their usual HHDM address, so every physical address is still reached as `phys + hhdm_offset`.
 - Page tables: we modify Limine's tables (CR3) through the HHDM; intermediate tables come from the frame allocator and are not freed.
 - Limine enables EFER.NXE (so `NO_EXECUTE` is usable) and CR0.WP (the kernel cannot write read-only pages either).
 - `kmain` switches from Limine's stack to a 64 KiB guarded stack (`mem::stack`) immediately after `kernel::init()`.
@@ -61,13 +63,18 @@ IST1 (`gdt::DOUBLE_FAULT_IST`) = 20 KiB static stack for double faults. User seg
 | Vector | What |
 |---|---|
 | 0–31 | CPU exceptions (`arch/x86_64/interrupts.rs`), double fault (8) on IST1 |
-| 32 | IRQ0 – PIT timer, 100 Hz |
-| 33 | IRQ1 – PS/2 keyboard |
-| 36 | IRQ4 – COM1 receive (serial input for the shell) |
-| 39 / 47 | IRQ7 / IRQ15 – spurious IRQ handling |
-| 34–47 (rest) | other PIC IRQs, masked |
+| 32 | local APIC timer, periodic 100 Hz (drives `time::tick`) |
+| 33 | ISA IRQ1 – PS/2 keyboard (I/O APIC GSI 1) |
+| 36 | ISA IRQ4 – COM1 receive (I/O APIC GSI 4) |
+| 39 / 47 | spurious IRQ 7 / 15 of the masked 8259 (ignored, no EOI) |
+| 0xFF | local APIC spurious vector (ignored, no EOI) |
 
-- Interrupt controller: legacy 8259 PIC. The **local APIC is disabled via MSR** (see BUGS #2) until we switch to the APIC.
+- Interrupt controllers: **local APIC + I/O APIC** (since M12). Information comes from the ACPI MADT (`acpi.rs`).
+  ISA IRQ `n` is delivered on vector `32 + n`; the GSI and polarity/trigger come from the MADT interrupt source overrides
+  (QEMU: IRQ0 → GSI 2). All handlers acknowledge with `lapic::eoi()`.
+- The 8259 PICs are remapped to 32–47 and then fully masked (never deliver anything). PIT channel 0 is not used;
+  PIT channel 2 (polled via port 0x61) only serves as the reference clock to calibrate the LAPIC timer at boot.
+- LAPIC LINT0 is masked (no ExtINT from the 8259), LINT1 = NMI. Registers are reached through the HHDM after `ensure_hhdm_mapped(.., Flags::MMIO)`.
 - `kernel::init()` enables interrupts with `sti` at the very end. Anything holding a lock that a handler also takes must use `without_interrupts`.
 - Handlers use `extern "x86-interrupt"` (nightly `abi_x86_interrupt`): the compiler saves registers and emits `iretq`.
   The IDT structure and all gate descriptors are our own code.

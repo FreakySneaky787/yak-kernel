@@ -2,6 +2,7 @@ pub mod cpu;
 pub mod gdt;
 pub mod idt;
 pub mod interrupts;
+pub mod ioapic;
 pub mod lapic;
 pub mod msr;
 pub mod irq;

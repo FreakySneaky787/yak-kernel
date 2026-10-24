@@ -1,81 +1,103 @@
-//! Hardware interrupts (IRQs) via the PIC: handlers and initialization.
+//! Hardware interrupts via the APIC: the I/O APIC routes device lines to
+//! vectors, the local APIC delivers them and its own timer drives `time`.
+//!
+//! The legacy 8259 PICs are remapped (so a stray interrupt can never land on
+//! an exception vector) and then fully masked.
 
 use super::idt::{Idt, InterruptStackFrame};
-use super::pic::{self, PIC1_OFFSET};
+use super::{ioapic, lapic, pic};
+use crate::acpi;
 use crate::time;
 
-pub const TIMER_IRQ: u8 = 0;
 pub const KEYBOARD_IRQ: u8 = 1;
 pub const COM1_IRQ: u8 = 4;
 
-pub const fn vector(irq: u8) -> u8 {
-    PIC1_OFFSET + irq
+pub const TIMER_VECTOR: u8 = 32;
+/// ISA IRQ `n` is delivered on vector `ISA_VECTOR_BASE + n`.
+pub const ISA_VECTOR_BASE: u8 = 32;
+
+pub const fn isa_vector(irq: u8) -> u8 {
+    ISA_VECTOR_BASE + irq
 }
 
 pub fn install_irq_handlers(idt: &mut Idt) {
-    idt.set(vector(TIMER_IRQ), timer);
-    idt.set(vector(KEYBOARD_IRQ), keyboard);
-    idt.set(vector(COM1_IRQ), com1);
-    idt.set(vector(7), spurious_master);
-    idt.set(vector(15), spurious_slave);
+    idt.set(TIMER_VECTOR, timer);
+    idt.set(isa_vector(KEYBOARD_IRQ), keyboard);
+    idt.set(isa_vector(COM1_IRQ), com1);
+    // A masked 8259 can still raise "spurious" IRQ 7/15 on its remapped vectors
+    idt.set(pic::PIC1_OFFSET + 7, pic_spurious);
+    idt.set(pic::PIC2_OFFSET + 7, pic_spurious);
+    idt.set(lapic::SPURIOUS_VECTOR, apic_spurious);
 }
 
-/// Set up PIC + PIT and unmask the IRQs we need.
+/// Routes a legacy ISA IRQ through the I/O APIC to the current CPU,
+/// honouring the MADT's interrupt source overrides.
+fn route_isa_irq(madt: &acpi::Madt, irq: u8, dest: u8) {
+    let (gsi, over) = madt.isa_irq(irq);
+    // ISA defaults: edge triggered, active high
+    let active_low = over.is_some_and(|o| o.active_low());
+    let level = over.is_some_and(|o| o.level_triggered());
+    ioapic::route(gsi, isa_vector(irq), dest, active_low, level);
+}
+
+/// Sets up local APIC, I/O APIC and the timer, and routes keyboard and COM1.
 /// Interrupts are **not** enabled here yet (`kernel::init` does that).
 pub fn init() {
-    super::lapic::disable();
-    pic::init();
-    super::pit::init(time::TIMER_HZ);
-    pic::unmask(TIMER_IRQ);
+    let info = acpi::init().expect("ACPI tables are required for the APIC");
+    let madt = &info.madt;
+
+    pic::init(); // remap + mask everything
+    lapic::init(madt.local_apic_address);
+    let io = madt.io_apics.first().expect("no I/O APIC in the MADT");
+    ioapic::init(io.address, io.gsi_base);
+
+    let cpu = lapic::id();
     crate::drivers::keyboard::init();
-    pic::unmask(KEYBOARD_IRQ);
-    pic::unmask(COM1_IRQ);
+    route_isa_irq(madt, KEYBOARD_IRQ, cpu);
+    route_isa_irq(madt, COM1_IRQ, cpu);
+
+    lapic::start_timer(TIMER_VECTOR, time::TIMER_HZ);
 }
 
 extern "x86-interrupt" fn timer(_frame: InterruptStackFrame) {
     time::tick();
-    pic::end_of_interrupt(TIMER_IRQ);
+    lapic::eoi();
 }
 
 extern "x86-interrupt" fn keyboard(_frame: InterruptStackFrame) {
     crate::drivers::keyboard::handle_interrupt();
-    pic::end_of_interrupt(KEYBOARD_IRQ);
+    lapic::eoi();
 }
 
 extern "x86-interrupt" fn com1(_frame: InterruptStackFrame) {
     crate::serial::handle_interrupt();
-    pic::end_of_interrupt(COM1_IRQ);
+    lapic::eoi();
 }
 
-// Spurious IRQs: the PIC reports IRQ 7/15 although nothing is pending. Then no
-// EOI may go to that PIC (for the slave the master still needs one, due to the cascade).
-extern "x86-interrupt" fn spurious_master(_frame: InterruptStackFrame) {
-    if pic::in_service() & (1 << 7) != 0 {
-        pic::end_of_interrupt(7);
-    }
-}
+/// Spurious interrupts must not be acknowledged (no EOI).
+extern "x86-interrupt" fn pic_spurious(_frame: InterruptStackFrame) {}
 
-extern "x86-interrupt" fn spurious_slave(_frame: InterruptStackFrame) {
-    if pic::in_service() & (1 << 15) != 0 {
-        pic::end_of_interrupt(15);
-    } else {
-        pic::end_of_interrupt(0); // master EOI only
-    }
-}
+extern "x86-interrupt" fn apic_spurious(_frame: InterruptStackFrame) {}
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test_case]
-    fn local_apic_disabled_for_pic_mode() {
-        assert!(!super::super::lapic::is_enabled());
+    fn legacy_pic_fully_masked() {
+        assert_eq!(pic::masks(), (0xFF, 0xFF));
     }
 
     #[test_case]
-    fn timer_irq_unmasked() {
-        let (master, _slave) = pic::masks();
-        assert_eq!(master & 1, 0, "IRQ0 is masked");
+    fn keyboard_and_com1_routed() {
+        let madt = &acpi::info().unwrap().madt;
+        for irq in [KEYBOARD_IRQ, COM1_IRQ] {
+            let gsi = madt.isa_irq(irq).0;
+            assert!(!ioapic::is_masked(gsi), "IRQ {} masked", irq);
+            assert_eq!(ioapic::vector_of(gsi), isa_vector(irq));
+        }
+        // the PIT is not used any more: its input stays masked
+        assert!(ioapic::is_masked(madt.isa_irq(0).0));
     }
 
     #[test_case]

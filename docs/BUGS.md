@@ -15,6 +15,7 @@ Format: number · date · title, then symptom → cause → fix → test.
   `info lapic` → `LVT0 0x00018700 … masked ExtINT`: Limine masks LINT0 of the local APIC, which is exactly where PIC interrupts enter.
 - **Fix:** `lapic::disable()` clears bit 11 (global enable) in MSR `IA32_APIC_BASE`, so PIC interrupts go directly to the CPU's INTR pin.
 - **Test:** `irq::tests::local_apic_disabled_for_pic_mode`, `timer_ticks_advance`, `sleep_waits_roughly`. Verified with BIOS and UEFI.
+- **Update (M12):** superseded – the kernel now uses the local APIC + I/O APIC and masks LINT0 on purpose; the 8259 is fully masked.
 - **Remember:** when interrupts do not arrive, look at `info pic` / `info lapic` first:
   `python3 -I scripts/qemu-monitor.py <elf> [s] -- "info pic" "info lapic"`.
 

@@ -10,6 +10,7 @@
 
 extern crate alloc;
 
+pub mod acpi;
 pub mod arch;
 pub mod boot;
 pub mod console;

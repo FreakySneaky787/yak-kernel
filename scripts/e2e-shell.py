@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """End-to-end test: boots the real kernel and drives the shell over the serial port.
 
-Usage: scripts/e2e-shell.py <kernel-elf>
+Usage: scripts/e2e-shell.py <kernel-elf> [extra QEMU arguments...]
 
 Each step types a line (exactly like a user on a serial terminal, including
 escape sequences for arrow keys and Tab), waits for the next prompt, and checks
@@ -33,6 +33,7 @@ STEPS = [
     ("memmap\r", ["usable", "kernel and modules"], []),
     ("uptime\r", ["up 00:", "ticks at 100 Hz"], []),
     ("cpu\r", ["Vendor:", "Flags:", "lm"], []),
+    ("acpi\r", ["APIC", "I/O APIC", "ISA IRQ 0 -> GSI 2"], []),
     ("layout us\r", ["keyboard layout: Us"], []),
     ("layout de\r", ["keyboard layout: De"], []),
     ("sleep 100\r", ["slept 100 ms"], []),
@@ -79,10 +80,10 @@ class Reader(threading.Thread):
 
 
 def main() -> int:
-    elf = sys.argv[1]
+    elf, extra_args = sys.argv[1], sys.argv[2:]
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     proc = subprocess.Popen(
-        [os.path.join(root, "scripts/run-qemu.sh"), elf, "-display", "none"],
+        [os.path.join(root, "scripts/run-qemu.sh"), elf, "-display", "none", *extra_args],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         env=dict(os.environ, KERNEL_MODE="run"))
     reader = Reader(proc.stdout)

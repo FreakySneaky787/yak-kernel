@@ -1,7 +1,7 @@
 //! Limine requests: static structures in a dedicated section that
 //! Limine finds while loading the kernel and fills with responses (framebuffer, memory map, ...).
 
-use limine::request::{FramebufferRequest, HhdmRequest, MemmapRequest};
+use limine::request::{FramebufferRequest, HhdmRequest, MemmapRequest, RsdpRequest};
 use limine::{BaseRevision, RequestsEndMarker, RequestsStartMarker};
 
 #[used]
@@ -23,6 +23,10 @@ pub static HHDM: HhdmRequest = HhdmRequest::new();
 #[used]
 #[unsafe(link_section = ".limine_requests")]
 pub static MEMMAP: MemmapRequest = MemmapRequest::new();
+
+#[used]
+#[unsafe(link_section = ".limine_requests")]
+pub static RSDP: RsdpRequest = RsdpRequest::new();
 
 #[used]
 #[unsafe(link_section = ".limine_requests_end")]

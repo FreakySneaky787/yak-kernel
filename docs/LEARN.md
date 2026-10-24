@@ -111,6 +111,18 @@ Short explanations of every subsystem: what it is and why we need it.
 - **Serial input** works like the keyboard: the UART raises IRQ4 when a byte arrives, the handler stores it in a ring buffer.
   This lets automated tests "type" into the real kernel through QEMU's stdin.
 
+## M12 – ACPI and the APIC
+- **ACPI** tables are a description of the machine provided by the firmware. Limine gives us the **RSDP**, which points to the
+  **XSDT** – a list of all other tables. Each table starts with a 4-letter signature and a checksum (all bytes add up to 0).
+- The **MADT** (signature "APIC") lists every CPU's **local APIC**, the **I/O APIC**s, and *overrides* such as "the timer (ISA IRQ 0)
+  is actually wired to I/O APIC input 2".
+- The **I/O APIC** replaces the old PIC: for every input line it has a *redirection entry* saying which vector to raise on which CPU,
+  and whether the line is edge/level triggered and active high/low.
+- The **local APIC** sits in each CPU. It receives the interrupts, needs an **EOI** after each one, and has its own **timer**.
+  Its speed is unknown, so we measure it once against the PIT (whose frequency is fixed at 1.193182 MHz) and then program it for 100 Hz.
+- APIC registers are **memory-mapped I/O (MMIO)**: reading/writing special physical addresses talks to hardware, not RAM.
+  Such pages must be mapped **uncached**, otherwise the CPU might serve stale values from its cache.
+
 ## Tooling – GNU ld and binutils
 - rustc compiles our code into object files; a **linker** combines them into the final ELF according to `kernel/linker.ld`
   (load address, section order, segments). We use **GNU ld** (`ld.bfd`) for that.

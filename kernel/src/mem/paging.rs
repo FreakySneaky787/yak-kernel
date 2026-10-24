@@ -290,6 +290,24 @@ pub fn unmap_and_free(virt: VirtAddr, pages: usize) {
     }
 }
 
+/// Makes sure the physical range `[phys, phys + size)` is reachable through
+/// the HHDM and returns its virtual address there. Limine's HHDM only covers
+/// RAM and the framebuffer; ACPI tables and device registers (MMIO) may be
+/// missing, so absent pages are mapped with `flags` (use `Flags::MMIO` for devices).
+pub fn ensure_hhdm_mapped(phys: PhysAddr, size: u64, flags: Flags) -> Result<VirtAddr, MapError> {
+    let start = super::align_down(phys.0, PAGE_SIZE);
+    let end = super::align_up(phys.0 + size.max(1), PAGE_SIZE);
+    let mut page = start;
+    while page < end {
+        let virt = PhysAddr(page).to_virt();
+        if translate(virt).is_none() {
+            map_page(virt, PhysAddr(page), flags)?;
+        }
+        page += PAGE_SIZE;
+    }
+    Ok(phys.to_virt())
+}
+
 /// Maps a physical MMIO range (e.g. device registers) uncached at `virt`.
 pub fn map_mmio(virt: VirtAddr, phys: PhysAddr, size: u64) -> Result<(), MapError> {
     let pages = size.div_ceil(PAGE_SIZE);
@@ -357,6 +375,17 @@ mod tests {
         assert_eq!(crate::mem::pmm::stats().free_frames, before - 8);
         unmap_and_free(virt, 8);
         assert_eq!(crate::mem::pmm::stats().free_frames, before);
+    }
+
+    #[test_case]
+    fn ensure_hhdm_mapped_maps_missing_pages() {
+        // 0xFEC0_0000 (I/O APIC) is MMIO and not part of Limine's HHDM
+        let phys = PhysAddr(0xFEC0_0000);
+        let virt = ensure_hhdm_mapped(phys, 0x20, Flags::MMIO).unwrap();
+        assert_eq!(virt, phys.to_virt());
+        assert_eq!(translate(virt), Some(phys));
+        // already mapped RAM is left alone
+        assert!(ensure_hhdm_mapped(PhysAddr(0x10_0000), 4096, Flags::KERNEL_DATA).is_ok());
     }
 
     #[test_case]

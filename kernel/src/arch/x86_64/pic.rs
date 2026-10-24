@@ -4,6 +4,9 @@
 //! CPU as interrupt vectors. By default IRQ 0-7 map to vectors
 //! 8-15 - exactly where CPU exceptions live (8 = double fault!).
 //! That is why we remap them to 32-47.
+//!
+//! Since M12 the I/O APIC delivers all interrupts; the PICs are only remapped
+//! (so a stray interrupt never hits an exception vector) and then masked.
 
 use super::port::{inb, outb};
 
@@ -18,8 +21,6 @@ const PIC2_DATA: u16 = 0xA1;
 const ICW1_INIT: u8 = 0x10;
 const ICW1_ICW4: u8 = 0x01;
 const ICW4_8086: u8 = 0x01;
-const CMD_EOI: u8 = 0x20;
-const CMD_READ_ISR: u8 = 0x0B;
 
 /// Short delay: a write to the unused port 0x80 takes about 1 us.
 fn io_wait() {
@@ -55,45 +56,8 @@ pub fn init() {
     }
 }
 
-fn data_port(irq: u8) -> (u16, u8) {
-    if irq < 8 { (PIC1_DATA, irq) } else { (PIC2_DATA, irq - 8) }
-}
-
-pub fn unmask(irq: u8) {
-    let (port, bit) = data_port(irq);
-    unsafe { outb(port, inb(port) & !(1 << bit)) };
-    if irq >= 8 {
-        unmask(2); // the cascade line to the slave must be open
-    }
-}
-
-pub fn mask(irq: u8) {
-    let (port, bit) = data_port(irq);
-    unsafe { outb(port, inb(port) | (1 << bit)) };
-}
-
 /// Current masks (master, slave) - a set bit means the IRQ is masked.
 pub fn masks() -> (u8, u8) {
     unsafe { (inb(PIC1_DATA), inb(PIC2_DATA)) }
 }
 
-/// "End of interrupt": tell the PIC the IRQ has been handled.
-/// Without an EOI it sends no further interrupts of this or lower priority.
-pub fn end_of_interrupt(irq: u8) {
-    unsafe {
-        if irq >= 8 {
-            outb(PIC2_CMD, CMD_EOI);
-        }
-        outb(PIC1_CMD, CMD_EOI);
-    }
-}
-
-/// In-service register: which IRQs are currently being handled. Used to detect
-/// spurious IRQ 7/15 (glitches without a real interrupt).
-pub fn in_service() -> u16 {
-    unsafe {
-        outb(PIC1_CMD, CMD_READ_ISR);
-        outb(PIC2_CMD, CMD_READ_ISR);
-        (inb(PIC2_CMD) as u16) << 8 | inb(PIC1_CMD) as u16
-    }
-}

@@ -18,7 +18,8 @@ The conversation with the user happens in German.
 | `make run-uefi` | same, with OVMF/UEFI firmware |
 | `make test` | all in-kernel tests headless in QEMU, exit status 0 = green |
 | `make e2e` | boot the real kernel and drive the shell over serial (`scripts/e2e-shell.py`) |
-| `make check` | `make test` + `make e2e` – run this before every commit |
+| `make e2e-uefi` | same E2E test, booted through OVMF/UEFI |
+| `make check` | `make test` + `make e2e` + `make e2e-uefi` – run this before every commit |
 | `make debug` + `make gdb` | QEMU waits for gdb on :1234 |
 | `make disasm` / `make symbols` / `make sections` | GNU objdump / nm / readelf on the kernel ELF |
 | `make addr2line ADDR=0xffffffff8000...` | map a code address (e.g. RIP from a panic) to file:line |
@@ -48,6 +49,7 @@ Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.s
 - `kernel/src/lib.rs` – kernel as a library, `init()`, unit test entry point
 - `kernel/src/main.rs` – `kmain` and panic handler of the boot binary
 - `kernel/src/boot.rs` – Limine requests
+- `kernel/src/acpi.rs` – ACPI parser (RSDP → XSDT → MADT)
 - `kernel/src/serial.rs` – COM1, macros `serial_print!` / `serial_println!`
 - `kernel/src/font.rs` – PSF2 parser, built-in font from `kernel/assets/`
 - `kernel/src/console.rs` – framebuffer text console, macros `print!` / `println!` (screen + serial)
@@ -59,7 +61,7 @@ Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.s
 - `kernel/src/time.rs` – ticks, `uptime_ms`, `sleep_ms`
 - `kernel/src/drivers/keyboard.rs` – PS/2 driver, ring buffer, `read_key()`; `drivers/scancode.rs` – decoder + layouts (DE/US)
 - `kernel/src/arch/x86_64/` – CPU specifics: `port.rs` (in/out), `gdt.rs` (GDT+TSS), `idt.rs` (IDT structure),
-  `interrupts.rs` (exception handlers, kernel IDT), `irq.rs` (hardware IRQs), `pic.rs`, `pit.rs`, `lapic.rs`, `msr.rs`, `cpu.rs` (cpuid), `power.rs` (reboot/poweroff),
+  `interrupts.rs` (exception handlers, kernel IDT), `irq.rs` (IRQ routing + handlers), `lapic.rs` (local APIC + timer), `ioapic.rs`, `pic.rs` (legacy, masked), `pit.rs` (timer calibration), `msr.rs`, `cpu.rs` (cpuid), `power.rs` (reboot/poweroff),
   interrupt helpers in `mod.rs`
 - `kernel/tests/` – integration tests (each one is a separate kernel)
 - `kernel/linker.ld` – higher-half layout at `0xffffffff80000000`

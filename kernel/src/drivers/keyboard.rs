@@ -94,10 +94,4 @@ mod tests {
         assert_eq!(read_key().key, Key::Enter);
         assert!(try_read_key().is_none());
     }
-
-    #[test_case]
-    fn keyboard_irq_unmasked() {
-        let (master, _) = crate::arch::x86_64::pic::masks();
-        assert_eq!(master & 0b10, 0);
-    }
 }
