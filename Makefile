@@ -6,8 +6,8 @@ LIMINE_BRANCH := v11.x-binary
 KERNEL_ELF := kernel/target/x86_64-unknown-none/debug/kernel
 OVMF       := /usr/share/edk2/ovmf/OVMF_CODE.fd
 
-.PHONY: all limine limine-tool build run run-uefi debug gdb test e2e e2e-uefi check \
-        disasm symbols sections addr2line clean distclean
+.PHONY: all limine limine-tool build run run-uefi debug gdb test e2e e2e-uefi check fmt \
+        disk disk-reset disasm symbols sections addr2line clean distclean
 
 all: build
 
@@ -51,6 +51,20 @@ e2e-uefi: build
 
 # Everything: unit + integration tests, then the end-to-end shell test (BIOS and UEFI)
 check: test e2e e2e-uefi
+
+# Format all kernel code (rustfmt, see kernel/rustfmt.toml)
+fmt:
+	$(CARGO) fmt
+
+# Persistent FAT32 disk used by `make run` (created from rootfs/ if missing)
+DISK_IMG := build/disk.img
+disk: $(DISK_IMG)
+$(DISK_IMG):
+	scripts/mkdisk.sh $(DISK_IMG) 64
+
+# Throw away all changes made on the disk and recreate it from rootfs/
+disk-reset:
+	scripts/mkdisk.sh $(DISK_IMG) 64
 
 # ---- GNU binutils helpers ----------------------------------------------------
 

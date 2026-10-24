@@ -19,8 +19,19 @@ Format: number · date · title, then symptom → cause → fix → test.
 - **Remember:** when interrupts do not arrive, look at `info pic` / `info lapic` first:
   `python3 -I scripts/qemu-monitor.py <elf> [s] -- "info pic" "info lapic"`.
 
+### #3 · 2026-10-24 · `hexdump 0` shows IDENTIFY data instead of the boot sector
+- **Symptom:** in the test run, reading sector 0 through the global disk returned the drive's IDENTIFY data ("QM0000 1" serial number).
+- **Cause:** AHCI unit tests called `ahci::probe()` again. Re-initializing port 0 pointed its command-list/FIS registers at the
+  test's new frames; the global `AhciDisk` kept filling its old (now ignored) command list, so the HBA executed stale commands and
+  the data landed in another bounce buffer.
+- **Fix:** `probe()` refuses to run twice (`PROBED` flag); tests use the global `drivers::DISK`.
+- **Test:** `ahci::tests::probing_twice_is_refused`, `shell::tests::hexdump_shows_boot_signature`.
+- **Remember:** hardware state is global – a device must have exactly one driver instance.
+
 ## Known pitfalls (not bugs, but worth remembering)
 - **The Limine host utility (`limine bios-install`) needs a C compiler** (`gcc`). It is not required for booting the ISO
   in QEMU with `-cdrom`; it is only needed to make the ISO bootable as a hard disk / USB image.
 - **`sudo` does not work through `!` in Claude Code** because there is no TTY for the password prompt. The user runs installs in a separate terminal.
+- **`cargo fmt -- <file>` formats the whole crate**, not just the file. Format deliberately with `make fmt`, and commit pure
+  formatting separately from functional changes.
 - **Limine's stack has no guard page** – a stack overflow silently corrupts memory instead of faulting (until M9 gives us our own stack).

@@ -40,6 +40,9 @@ STEPS = [
     ("int3\r", ["breakpoint handled"], []),
     ("ps\r", ["TID", "main", "idle"], []),
     ("demo 3\r", ["worker 1", "worker 2", "worker 3", "found 3245 primes", "all workers done"], []),
+    ("lspci\r", ["SATA controller", "host bridge"], []),
+    ("disk\r", ["QEMU HARDDISK", "64 MiB", "Atapi"], []),
+    ("hexdump 0\r", ["FAT32", "55 aa"], []),
     ("history\r", ["echo hello from e2e", "version"], []),
     ("does-not-exist\r", ["unknown command 'does-not-exist'"], []),
     ('echo "unterminated\r', ["unterminated"], []),
@@ -84,10 +87,13 @@ class Reader(threading.Thread):
 def main() -> int:
     elf, extra_args = sys.argv[1], sys.argv[2:]
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # Never touch the user's persistent build/disk.img: use a fresh scratch disk
+    disk = os.path.join(root, "build", "e2e-disk.img")
+    subprocess.run([os.path.join(root, "scripts/mkdisk.sh"), disk, "64"], check=True, stderr=subprocess.DEVNULL)
     proc = subprocess.Popen(
         [os.path.join(root, "scripts/run-qemu.sh"), elf, "-display", "none", *extra_args],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        env=dict(os.environ, KERNEL_MODE="run"))
+        env=dict(os.environ, KERNEL_MODE="run", KERNEL_DISK=disk))
     reader = Reader(proc.stdout)
     reader.start()
     failures = 0

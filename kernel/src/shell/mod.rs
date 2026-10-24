@@ -95,6 +95,24 @@ pub static COMMANDS: &[Command] = &[
         run: cmd_acpi,
     },
     Command {
+        name: "lspci",
+        usage: "lspci",
+        help: "list PCI devices",
+        run: cmd_lspci,
+    },
+    Command {
+        name: "disk",
+        usage: "disk",
+        help: "storage controller and disk information",
+        run: cmd_disk,
+    },
+    Command {
+        name: "hexdump",
+        usage: "hexdump <sector> [count]",
+        help: "show raw disk sectors",
+        run: cmd_hexdump,
+    },
+    Command {
         name: "layout",
         usage: "layout [de|us]",
         help: "show or set the keyboard layout",
@@ -195,7 +213,9 @@ impl Shell {
                 return false;
             }
         };
-        let Some(name) = words.first() else { return true };
+        let Some(name) = words.first() else {
+            return true;
+        };
         let Some(command) = find_command(name) else {
             writeln!(out, "\x1b[91merror:\x1b[0m unknown command '{}' (try 'help')", name).ok();
             return false;
@@ -417,6 +437,76 @@ fn cmd_acpi(_: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), Stri
     Ok(())
 }
 
+fn cmd_lspci(_: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), String> {
+    for d in crate::drivers::pci::enumerate() {
+        writeln!(
+            out,
+            "  {:?}  {:04x}:{:04x}  class {:02x}.{:02x}.{:02x}  {}",
+            d.location,
+            d.vendor_id,
+            d.device_id,
+            d.class,
+            d.subclass,
+            d.prog_if,
+            d.class_name()
+        )
+        .ok();
+    }
+    Ok(())
+}
+
+fn cmd_disk(_: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), String> {
+    use crate::drivers::block::BlockDevice;
+    for p in crate::drivers::STORAGE_PORTS.lock().iter() {
+        writeln!(out, "  AHCI port {}: {:?}", p.port, p.kind).ok();
+    }
+    let disk = crate::drivers::DISK.lock();
+    let d = disk.as_ref().ok_or("no disk found")?;
+    let bytes = d.sector_count() * 512;
+    writeln!(
+        out,
+        "Disk: '{}' on port {}, {} sectors ({} MiB)",
+        d.model(),
+        d.port(),
+        d.sector_count(),
+        bytes / (1024 * 1024)
+    )
+    .ok();
+    Ok(())
+}
+
+fn cmd_hexdump(_: &mut Shell, args: &[String], out: &mut dyn Write) -> Result<(), String> {
+    use crate::drivers::block::BlockDevice;
+    let lba: u64 = args
+        .first()
+        .ok_or("usage: hexdump <sector> [count]")?
+        .parse()
+        .map_err(|_| "bad sector number")?;
+    let count: usize = args.get(1).map_or(Ok(1), |c| c.parse()).map_err(|_| "bad count")?;
+    if !(1..=8).contains(&count) {
+        return Err(String::from("count must be 1..8"));
+    }
+    let mut buf = alloc::vec![0u8; count * 512];
+    crate::drivers::DISK
+        .lock()
+        .as_mut()
+        .ok_or("no disk found")?
+        .read(lba, &mut buf)
+        .map_err(|e| format!("read failed: {:?}", e))?;
+    for (i, line) in buf.chunks(16).enumerate() {
+        write!(out, "{:08x}  ", lba * 512 + i as u64 * 16).ok();
+        for b in line {
+            write!(out, "{:02x} ", b).ok();
+        }
+        let text: String = line
+            .iter()
+            .map(|&b| if (0x20..0x7F).contains(&b) { b as char } else { '.' })
+            .collect();
+        writeln!(out, " {}", text).ok();
+    }
+    Ok(())
+}
+
 fn cmd_layout(_: &mut Shell, args: &[String], out: &mut dyn Write) -> Result<(), String> {
     match args.first().map(|s| s.as_str()) {
         None => {}
@@ -603,7 +693,9 @@ mod tests {
 
     #[test_case]
     fn info_commands_produce_output() {
-        for cmd in ["mem", "memmap", "uptime", "cpu", "acpi", "version", "colors", "ps"] {
+        for cmd in [
+            "mem", "memmap", "uptime", "cpu", "acpi", "version", "colors", "ps", "lspci", "disk",
+        ] {
             let (ok, out) = run(cmd);
             assert!(ok && !out.is_empty(), "'{}' failed: {}", cmd, out);
         }
@@ -630,6 +722,15 @@ mod tests {
         assert!(ok, "{}", out);
         assert!(out.contains("all workers done"));
         assert!(!run("demo 99").0);
+    }
+
+    #[test_case]
+    fn hexdump_shows_boot_signature() {
+        let (ok, out) = run("hexdump 0");
+        assert!(ok, "{}", out);
+        assert!(out.contains("000001f0") && out.contains("55 aa"), "{}", out);
+        assert!(!run("hexdump").0);
+        assert!(!run("hexdump 0 99").0);
     }
 
     #[test_case]

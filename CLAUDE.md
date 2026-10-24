@@ -20,6 +20,8 @@ The conversation with the user happens in German.
 | `make e2e` | boot the real kernel and drive the shell over serial (`scripts/e2e-shell.py`) |
 | `make e2e-uefi` | same E2E test, booted through OVMF/UEFI |
 | `make check` | `make test` + `make e2e` + `make e2e-uefi` – run this before every commit |
+| `make fmt` | rustfmt over the kernel (commit formatting separately) |
+| `make disk` / `make disk-reset` | create / recreate the persistent FAT32 disk `build/disk.img` from `rootfs/` |
 | `make debug` + `make gdb` | QEMU waits for gdb on :1234 |
 | `make disasm` / `make symbols` / `make sections` | GNU objdump / nm / readelf on the kernel ELF |
 | `make addr2line ADDR=0xffffffff8000...` | map a code address (e.g. RIP from a panic) to file:line |
@@ -59,6 +61,9 @@ Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.s
 - `kernel/src/input.rs` – merged keyboard + serial input, `TerminalDecoder`; `kernel/src/ringbuf.rs` – IRQ-safe byte ring buffer
 - `kernel/src/shell/` – `mod.rs` (commands, `Shell::run`), `line_editor.rs`, `parser.rs`
 - `kernel/src/task/` – threads + preemptive scheduler (`mod.rs`), context switch assembly (`switch.rs`)
+- `kernel/src/drivers/pci.rs` – PCI enumeration; `drivers/ahci.rs` – SATA driver; `drivers/block.rs` – `BlockDevice`, `RamDisk`;
+  `drivers/mod.rs` – global `DISK`
+- `rootfs/` – initial contents of the FAT32 disk image; `scripts/mkdisk.sh` – builds the image
 - `kernel/src/time.rs` – ticks, `uptime_ms`, `sleep_ms`
 - `kernel/src/drivers/keyboard.rs` – PS/2 driver, ring buffer, `read_key()`; `drivers/scancode.rs` – decoder + layouts (DE/US)
 - `kernel/src/arch/x86_64/` – CPU specifics: `port.rs` (in/out), `gdt.rs` (GDT+TSS), `idt.rs` (IDT structure),

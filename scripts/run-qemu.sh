@@ -7,6 +7,7 @@
 #   KERNEL_MODE=test   (automatic for `cargo test` binaries, see below)
 #                      headless, timeout, isa-debug-exit status is evaluated
 #   KERNEL_DEBUG=1     QEMU waits for gdb (-s -S)
+#   KERNEL_DISK=<img>  use this disk image instead of the default one
 set -euo pipefail
 
 ELF="$1"; shift || true
@@ -51,12 +52,27 @@ if [[ -x "$LIMINE/limine" ]]; then
     "$LIMINE/limine" bios-install "$ISO" >/dev/null 2>&1
 fi
 
+# Hard disk (SATA, AHCI port 0):
+#   run mode:  the persistent build/disk.img (created from rootfs/ on first use), or $KERNEL_DISK
+#   test mode: a fresh image per test binary, so tests can write to it freely
+if [[ -n "${KERNEL_DISK:-}" ]]; then
+    DISK="$KERNEL_DISK"
+elif [[ "$KERNEL_MODE" == test ]]; then
+    DISK="$BUILD/test-disks/$NAME.img"
+    "$ROOT/scripts/mkdisk.sh" "$DISK" 64 2>/dev/null
+else
+    DISK="$BUILD/disk.img"
+    [[ -f "$DISK" ]] || "$ROOT/scripts/mkdisk.sh" "$DISK" 64 2>/dev/null
+fi
+
 QEMU_ARGS=(
     -M q35 -m 256M
     -cdrom "$ISO"
     -boot d
     -no-reboot
     -device isa-debug-exit,iobase=0xf4,iosize=0x04
+    -drive "file=$DISK,format=raw,if=none,id=disk0"
+    -device ide-hd,drive=disk0,bus=ide.0
 )
 [[ "${KERNEL_DEBUG:-0}" == 1 ]] && QEMU_ARGS+=(-s -S)
 

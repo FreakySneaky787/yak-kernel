@@ -134,6 +134,15 @@ Short explanations of every subsystem: what it is and why we need it.
 - The classic trap is the **lost wake-up**: check "no input yet", then the key arrives, then we go to sleep – and never wake up.
   We avoid it by checking and blocking with interrupts disabled.
 
+## M14 – PCI and the SATA disk
+- **PCI** devices are found by reading their *configuration space*: vendor/device ID, class (storage, network, ...) and **BARs**
+  (base address registers) that tell where the device's registers are mapped in physical memory.
+- **AHCI** is the standard interface of SATA controllers. The kernel prepares command structures in RAM and the controller fetches
+  them by itself – **DMA** (direct memory access). That is why the buffers must be real *physical* frames, and why the device needs
+  "bus mastering" enabled.
+- A disk is just a long array of **sectors** (512 bytes). `READ DMA EXT` / `WRITE DMA EXT` move sectors between disk and RAM,
+  addressed by their number (**LBA**, logical block address). File systems are built on top of this.
+
 ## Tooling – GNU ld and binutils
 - rustc compiles our code into object files; a **linker** combines them into the final ELF according to `kernel/linker.ld`
   (load address, section order, segments). We use **GNU ld** (`ld.bfd`) for that.

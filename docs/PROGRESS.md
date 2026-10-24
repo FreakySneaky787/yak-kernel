@@ -23,8 +23,9 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 |---|---|---|---|
 | 12 | APIC: ACPI/MADT, local APIC + timer, I/O APIC, 8259 masked | ✅ | 10 tests + E2E on BIOS and UEFI, timer vs. wall clock checked |
 | 13 | Multitasking: kernel threads, context switch, scheduler | ✅ | 7 scheduler tests + shell tests + E2E (`ps`, `demo`), 3× stable |
-| 14 | Ramdisk filesystem (Limine module), `ls`/`cat` | ⬜ | |
-| 15 | User space: ring 3, syscalls, ELF loader | ⬜ | |
+| 14 | Storage: PCI enumeration, AHCI SATA driver, block device layer | ✅ | 11 tests + E2E (`lspci`, `disk`, `hexdump`) |
+| 15 | FAT32 file system (read/write, long names), persistent across reboots | ⬜ | |
+| 16 | User space: ring 3, syscalls, ELF loader | ⬜ | |
 
 ## Log
 - **2026-10-24** – Setup: Rust nightly 1.101 (rustup), target `x86_64-unknown-none`, Limine v11.x-binary.
@@ -76,7 +77,17 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   instead of spinning. Timer handler sends EOI *before* calling `task::on_tick` (which may switch threads).
   Shell: `ps` and `demo [n]` (parallel prime-counting workers).
 
+- **2026-10-24** – User decided: the file system must be a **real persistent disk** (not a RAM fs). Roadmap changed:
+  M14 = storage driver, M15 = FAT32, M16 = user space.
+- **2026-10-24** – Code base formatted with rustfmt (`kernel/rustfmt.toml`, max_width 120) in a separate commit.
+- **2026-10-24** – M14: PCI config space enumeration (`drivers/pci.rs`), AHCI driver (`drivers/ahci.rs`: port init, IDENTIFY,
+  READ/WRITE DMA EXT, FLUSH, polled, 4 KiB bounce frame → max 8 sectors per command), `BlockDevice` trait + `RamDisk`
+  (`drivers/block.rs`). Global `drivers::DISK` probed once at boot. QEMU gets a SATA disk on AHCI port 0: persistent
+  `build/disk.img` in run mode, a fresh image per test binary, a scratch image for E2E. `scripts/mkdisk.sh` builds FAT32 images
+  from `rootfs/`. Shell: `lspci`, `disk`, `hexdump`. Bug #3 (double probe) found and fixed.
+
 ## Open items / later
+- AHCI uses polling; switching to completion interrupts (MSI or the PCI interrupt line) would free the CPU during I/O.
 - Thread-level sleeping mutex (today all shared state uses spin locks with interrupts disabled).
 - `ps` CPU percentages only cover threads that still exist (dead threads are reaped with their counters).
 - Reclaim `BOOTLOADER_RECLAIMABLE` memory once we no longer use Limine's stack, page tables and responses.
@@ -84,7 +95,8 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 - `gcc` is not installed yet → `make limine-tool` (bios-install for USB/HDD images) is not available.
 
 ## Next step
-**M14 – Ramdisk filesystem:** pass a tar archive as a Limine module (built by the Makefile from a `rootfs/` directory),
-parse the USTAR format, a small VFS layer (path lookup, directories, file read), shell commands `ls`, `cat`, `stat`, `cd`/`pwd`.
-Tests: tar parser with an in-memory archive, path resolution, reading real files from the module, E2E `ls`/`cat`.
-Then **M15** (user space).
+**M15 – FAT32:** parse the BPB (superfloppy, MBR partition later), FAT cluster chains, directories with 8.3 + long file names (LFN),
+read files; then writing: allocate clusters, create/extend/truncate files, create directories, delete, update FSInfo.
+Shell: `ls`, `cd`, `pwd`, `cat`, `write <file> <text>`, `mkdir`, `rm`, `df`. Tests: against `RamDisk` images and the real disk,
+`fsck.fat -n` on the image after the kernel wrote to it (no errors allowed), persistence E2E (write, power off, boot again, read).
+Then **M16** (user space).

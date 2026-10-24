@@ -43,6 +43,7 @@ pub fn init() {
     arch::x86_64::irq::init();
     console::init();
     task::init();
+    drivers::init_storage();
     arch::x86_64::enable_interrupts();
 }
 

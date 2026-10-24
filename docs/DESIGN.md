@@ -54,6 +54,17 @@
   Wake-ups: timer (`Until`), keyboard/COM1 IRQ (`Input`), `exit` (`Join`).
 - Dead threads are reaped (stack unmapped and frames freed) by a later `schedule()` call – never while running on their stack.
 
+## Storage
+- PCI: legacy configuration mechanism (ports 0xCF8/0xCFC), brute-force scan of all bus/device/function numbers.
+- AHCI (q35's ICH9 controller, BAR5): one driver instance per port, probed **once** at boot into `drivers::DISK`.
+  Per port: one frame for command list + received FIS, one for the command table (FIS + 1 PRD), one 4 KiB DMA bounce frame.
+  Commands are polled (no interrupts yet) and limited to 8 sectors; larger requests are split.
+- `drivers::DISK` is a spin lock held with interrupts enabled during I/O – never use it from interrupt handlers.
+- File systems only see the `BlockDevice` trait (512-byte sectors); tests use `RamDisk`.
+- Disk images: FAT32 without partition table ("superfloppy"), 64 MiB, 512-byte clusters (FAT32 needs ≥ 65525 clusters),
+  created by `scripts/mkdisk.sh` from `rootfs/`. QEMU: `-device ide-hd,bus=ide.0` = AHCI port 0 (the boot CD is ATAPI on port 2).
+  Run mode uses the persistent `build/disk.img`; every test binary and the E2E test get fresh images.
+
 ## Kernel heap
 - `mem::heap::LinkedListHeap`: free blocks form a singly linked list sorted by address; each free block stores `size` + `next` in its first 16 bytes.
 - First fit; a block is split into [front padding][allocation][rest], padding and rest go back to the list. Freeing inserts by address and merges neighbours.
