@@ -178,6 +178,31 @@ extern "C" fn kmain() -> ! {
     assert_eq!(run("rm", "/m22/b.txt /m22").0, ExitStatus::Exited(0));
     assert!(fs::with_root(|fs| fs.lookup("/m22")).is_err());
 
+    // M23: the text editor
+    let (status, out) = run("edit", "--selftest");
+    assert_eq!(status, ExitStatus::Exited(0), "{}", out);
+    let read = |p: &str| fs::with_root(|fs| fs.read_file(p)).unwrap();
+    kernel::serial::inject_rx(b"Hello\rWorld\x13\x11"); // type, Enter, Ctrl+S, Ctrl+Q
+    assert_eq!(run("edit", "/ed.txt").0, ExitStatus::Exited(0));
+    assert_eq!(read("/ed.txt"), b"Hello\nWorld\n");
+    kernel::serial::inject_rx(b"\x1b[B\x1b[F!\x1b[A\x1b[H>\x13\x11"); // Down End ! Up Home > save quit
+    let (_, out) = run("edit", "/ed.txt");
+    assert!(out.contains("saved 14 bytes"), "{}", out);
+    assert_eq!(read("/ed.txt"), b">Hello\nWorld!\n");
+    kernel::serial::inject_rx(b"\x7f\x7fzz\x03\x11\x11"); // edit, Ctrl+C is harmless, quit twice without saving
+    let (status, out) = run("edit", "/ed.txt");
+    assert_eq!(status, ExitStatus::Exited(0));
+    assert!(
+        out.contains("use ^Q to quit") && out.contains("press ^Q again"),
+        "{}",
+        out
+    );
+    assert_eq!(
+        read("/ed.txt"),
+        b">Hello\nWorld!\n",
+        "unsaved changes must not be written"
+    );
+
     assert_eq!(process::count(), 0);
     serial_println!("[ok]");
     exit(ExitCode::Success)

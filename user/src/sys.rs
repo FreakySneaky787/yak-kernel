@@ -33,6 +33,8 @@ pub const SYSINFO: u64 = 25;
 pub const PROCLIST: u64 = 26;
 pub const RENAME: u64 = 27;
 pub const SEEK: u64 = 28;
+pub const TERMSIZE: u64 = 29;
+pub const IGNORE_INTERRUPT: u64 = 30;
 
 pub const STDIN: u64 = 0;
 pub const STDOUT: u64 = 1;
@@ -336,4 +338,14 @@ pub const SEEK_END: u64 = 2;
 /// Moves the read/write position of a file; returns the new offset or -errno.
 pub fn seek(fd: u64, offset: i64, whence: u64) -> i64 {
     unsafe { syscall3(SEEK, fd, offset as u64, whence) }
+}
+
+/// Console size: rows << 32 | columns.
+pub fn termsize() -> u64 {
+    unsafe { syscall3(TERMSIZE, 0, 0, 0) as u64 }
+}
+
+/// With `true`, Ctrl+C arrives as byte 0x03 instead of killing the process.
+pub fn ignore_interrupt(on: bool) {
+    unsafe { syscall3(IGNORE_INTERRUPT, on as u64, 0, 0) };
 }

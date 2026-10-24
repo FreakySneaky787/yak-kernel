@@ -174,6 +174,12 @@ pub struct Process {
     ignore_interrupt: bool,
 }
 
+impl Process {
+    pub fn set_ignore_interrupt(&mut self, on: bool) {
+        self.ignore_interrupt = on;
+    }
+}
+
 /// How to start a process (see `spawn_with`).
 pub struct Options<'a> {
     /// Absolute, normalized current directory of the new process.

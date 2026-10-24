@@ -40,7 +40,7 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 |---|---|---|---|
 | 21 | Pipes and redirection (`a \| b`, `>`, `>>`, `<`) | ✅ | 4 pipe unit tests (EOF, EPIPE, full pipe with a writer thread, abort), `pipetest` (17 checks incl. 200 KB from a child), scripted `sh` pipeline session, 8 E2E steps |
 | 22 | System information as syscalls (replace `kshell`), `ps`/`mem`/... as programs, `rename` + seek | ✅ | `write_at` unit test, `fstest` +17 checks (seek, gaps, APPEND, rename, ESPIPE), integration test for all 10 programs, 5 E2E steps |
-| 23 | Full-screen text editor as a user program | ⬜ | |
+| 23 | Full-screen text editor as a user program | ✅ | `edit --selftest` (19 buffer checks), console SGR 7 test, 3 scripted editor sessions in the integration test, 5 E2E steps, screenshot |
 
 ## Log
 - **2026-10-24** – Setup: Rust nightly 1.101 (rustup), target `x86_64-unknown-none`, Limine v11.x-binary.
@@ -167,6 +167,12 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   new `open` flag APPEND (used by `>>`). New programs `ps`, `mem`, `uptime`, `df`, `date`, `mkdir`, `rm`, `touch`, `stat`, `mv`;
   these names are no longer offered through `kshell` (the kernel shell keeps its built-ins as fallback).
 
+- **2026-10-24** – M23: `/bin/edit` (`user/src/bin/edit/`): `buffer.rs` (lines of chars, cursor with remembered column,
+  insert/newline/backspace/delete joining lines; checked by `edit --selftest`) and a VT100 screen with horizontal and vertical
+  scrolling, inverted status bar, partial redraw of the cursor line. ^S saves, ^Q quits (twice with unsaved changes).
+  Kernel: syscalls 29 `termsize` and 30 `ignore_interrupt` (the editor takes Ctrl+C itself), console SGR 7/27 (inverse video).
+  **Stage 4 complete: 169 in-kernel tests + 6 test kernels + 90 E2E steps green (BIOS and UEFI), 26 programs in /bin.**
+
 ## Open items / later
 - AHCI uses polling; switching to completion interrupts (MSI or the PCI interrupt line) would free the CPU during I/O.
 - Thread-level sleeping mutex (today all shared state uses spin locks with interrupts disabled).
@@ -184,7 +190,9 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   write, append, echo, sleep, clear, help. Without `/bin` on the disk, the kernel shell has no `ls`/`cat`.
 
 ## Next step
-**M23 – full-screen text editor (`/bin/edit`):** a user program that loads a file into a line buffer, draws it with cursor
-addressing (needs ANSI cursor positioning `ESC[row;colH` and a "screen size" query in the console/syscall), moves with the
-arrow keys, inserts/deletes text, saves with Ctrl+S (write + truncate) and quits with Ctrl+Q. Tests: buffer logic as pure
-functions inside the program's own test mode (`edit --selftest`), E2E: open, type, save, `cat` the result.
+**Stage 4 is complete.** Stage 5 still has to be agreed with the user. Proposal:
+- **M24 – FPU/SSE state per thread** (`fxsave`/`fxrstor` or lazy switching via CR0.TS), so programs may be built with SSE
+  (faster `core` code, floating point in programs).
+- **M25 – SMP:** start the other CPU cores (INIT/SIPI via the local APIC), per-CPU data and run queues, real locking.
+- **M26 – network:** a virtio-net (or e1000) driver, Ethernet/ARP/IPv4/ICMP/UDP, `ping` as a program.
+- Smaller items: shell scripts and environment variables, `2>`, demand paging for the heap, reclaiming bootloader memory.

@@ -141,6 +141,12 @@
   | 26 | `proclist(*[ProcInfo], max)` | one 64-byte entry per thread (tid, cpu ticks, parent, state, user?, name) |
   | 27 | `rename(from, len, to, len)` | |
   | 28 | `seek(fd, offset, whence)` | SET/CUR/END for files, `-ESPIPE` otherwise; past the end is allowed (gap = zeros on write) |
+  | 29 | `termsize()` | console rows << 32 \| columns (the serial side has no size; programs draw for the console) |
+  | 30 | `ignore_interrupt(on)` | Ctrl+C arrives as 0x03 instead of killing the caller (the editor) |
+- **`/bin/edit`**: `buffer.rs` is pure logic (tested by `edit --selftest`), `main.rs` draws with `ESC[r;cH`, `ESC[K`, SGR 7.
+  The text area is all rows but the last; the cursor line and the status bar are redrawn per key, the whole screen only after
+  scrolling or when lines are inserted/removed. Writing the bottom-right cell is safe: the console wraps lazily (only when the
+  next character comes).
 - **Pipes** (`process::pipe`): bounded queue (64 KiB) + reader/writer counts. A descriptor holds a `PipeEnd`; `Clone`
   (dup, dup2, spawn) increments, `Drop` (close, process exit) decrements and notifies. Read blocks while empty with writers,
   returns 0 without; write blocks while full with readers, `EPIPE` without. Waiters sleep on `Wait::Pipe(id)`; the pipe lock is

@@ -29,6 +29,9 @@ PROMPT = re.compile(r"(sh|kernel):(/[^>\n]*)> ")
 LEFT = "\x1b[D"
 RIGHT = "\x1b[C"
 UP = "\x1b[A"
+DOWN = "\x1b[B"
+HOME = "\x1b[H"
+END = "\x1b[F"
 CTRL_C = "\x03"
 PAUSE = "\0"  # never typed: splits the keys of a step
 
@@ -102,6 +105,12 @@ STEPS = [
     ("stat /docs/t1.txt\r", ["type:      file", "size:      0 bytes"], ["error"]),
     ("rm /docs/t1.txt\r", [], ["error"]),
     ("ls /docs\r", ["hello.txt"], ["t1.txt"]),
+    # the text editor (M23): create, change, save (^S = 0x13), quit (^Q = 0x11)
+    ("edit /notes.txt\rFirst line\rsecond\x13\x11", ["new file", "saved 18 bytes"], ["error"]),
+    ("cat /notes.txt\r", ["First line\r\nsecond"], ["error"]),
+    ("edit /notes.txt\r" + DOWN + END + " line" + UP + HOME + "The \x13\x11", ["saved 27 bytes"], ["error"]),
+    ("cat /notes.txt\r", ["The First line\r\nsecond line"], ["error"]),
+    ("edit --selftest\r", ["edit selftest: all checks passed"], ["FAIL"]),
     ("hello e2e world\r", ["Hello from user space! I am process", "arg 1: e2e", "arg 2: world", "Bye!"], ["error"]),
     ("upp\t\rhello Welt äöü\r", ["Type a line: hello Welt äöü", "HELLO WELT ÄÖÜ"], ["error"]),  # completion + stdin
     ("fault null\r", ["fault was killed: page fault at 0x0"], []),

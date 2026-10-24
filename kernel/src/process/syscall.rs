@@ -82,6 +82,10 @@ pub mod nr {
     pub const RENAME: u32 = 27;
     /// seek(fd, offset, whence: 0 = start, 1 = current, 2 = end) -> new offset
     pub const SEEK: u32 = 28;
+    /// termsize() -> rows << 32 | columns of the console
+    pub const TERMSIZE: u32 = 29;
+    /// ignore_interrupt(on) -> 0: Ctrl+C is delivered as a byte (0x03) instead of killing us
+    pub const IGNORE_INTERRUPT: u32 = 30;
 }
 
 pub mod errno {
@@ -249,6 +253,14 @@ pub extern "C" fn dispatch(frame: &mut SyscallFrame) {
         nr::PROCLIST => sys_proclist(a0, a1),
         nr::RENAME => sys_rename(a0, a1, a2, a3),
         nr::SEEK => sys_seek(a0, a1 as i64, a2),
+        nr::TERMSIZE => {
+            let (cols, rows) = crate::console::with_console(|c| c.size()).unwrap_or((80, 25));
+            Ok((rows as u64) << 32 | cols as u64)
+        }
+        nr::IGNORE_INTERRUPT => {
+            with_current(|p| p.set_ignore_interrupt(a0 != 0));
+            Ok(0)
+        }
         _ => Err(errno::ENOSYS),
     };
     frame.rax = match result {

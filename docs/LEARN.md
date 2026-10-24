@@ -228,6 +228,13 @@ Short explanations of every subsystem: what it is and why we need it.
 - An open file has one **position**: `read` and `write` continue there, `seek` moves it. Writing in the middle overwrites,
   writing at the end grows the file, and writing after seeking past the end leaves a gap that reads as zeros.
 
+## M23 – A full-screen editor
+- A terminal is not only a stream of lines: escape sequences can move the cursor anywhere (`ESC [ row ; col H`), erase the
+  rest of a line (`ESC [ K`) or swap colours (`ESC [ 7 m`). A full-screen program draws its whole picture with them.
+- The editor keeps the text as a list of lines in memory and only writes the file on Ctrl+S. Separating the **text model**
+  (insert, delete, cursor movement) from the **drawing** makes the model testable without a screen (`edit --selftest`).
+- Redrawing everything on every key would be slow; the editor redraws only the line that changed unless it had to scroll.
+
 ## Tooling – GNU ld and binutils
 - rustc compiles our code into object files; a **linker** combines them into the final ELF according to `kernel/linker.ld`
   (load address, section order, segments). We use **GNU ld** (`ld.bfd`) for that.

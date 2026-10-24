@@ -75,7 +75,7 @@ Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.s
   `fs.rs` (`File`, `Dir`, `stat`), `heap.rs` (allocator on `brk`),
   `process.rs` (`spawn`/`wait`/`kill`), `src/bin/*.rs` (one program each: tools cat, ls, cp, mv, rm, mkdir, touch, stat,
   sort, wc, grep, ps, mem, uptime, df, date, upper, hello; self-tests fault, fstest, heaptest, spawntest, pipetest),
-  `src/bin/sh/` (the shell, started as init), `linker.ld`
+  `src/bin/sh/` (the shell, started as init), `src/bin/edit/` (full-screen editor), `linker.ld`
 - `kernel/src/time.rs` – ticks, `uptime_ms`, `sleep_ms`
 - `kernel/src/drivers/keyboard.rs` – PS/2 driver, ring buffer, `read_key()`; `drivers/scancode.rs` – decoder + layouts (DE/US)
 - `kernel/src/arch/x86_64/` – CPU specifics: `port.rs` (in/out), `gdt.rs` (GDT+TSS), `idt.rs` (IDT structure),

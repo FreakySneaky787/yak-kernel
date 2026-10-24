@@ -94,6 +94,8 @@ pub struct Console {
     pub fg: u32,
     pub bg: u32,
     bold: bool,
+    /// SGR 7: foreground and background are swapped.
+    inverse: bool,
     cells: Vec<Cell>,
     cursor_visible: bool,
     /// Whether the cursor is currently drawn (inverted) on the screen.
@@ -116,6 +118,7 @@ impl Console {
             fg: DEFAULT_FG,
             bg: DEFAULT_BG,
             bold: false,
+            inverse: false,
             cells: vec![BLANK; cols * rows],
             cursor_visible: true,
             cursor_drawn: false,
@@ -252,8 +255,13 @@ impl Console {
                 self.fg = DEFAULT_FG;
                 self.bg = DEFAULT_BG;
                 self.bold = false;
+                self.inverse = false;
             }
             1 => self.bold = true,
+            7 | 27 if (p == 7) != self.inverse => {
+                core::mem::swap(&mut self.fg, &mut self.bg);
+                self.inverse = p == 7;
+            }
             22 => self.bold = false,
             30..=37 => self.fg = PALETTE[(p - 30) as usize + if self.bold { 8 } else { 0 }],
             39 => self.fg = DEFAULT_FG,
@@ -517,6 +525,20 @@ mod tests {
         c.write_str("\x1b[2J").unwrap();
         assert_eq!(c.cursor(), (0, 0));
         assert_eq!(row_text(&c, 0).trim_end(), "");
+    }
+
+    #[test_case]
+    fn ansi_inverse_video() {
+        let mut buf = [0u32; W * H];
+        let mut c = test_console(&mut buf);
+        c.write_str("\x1b[7m").unwrap();
+        assert_eq!((c.fg, c.bg), (DEFAULT_BG, DEFAULT_FG));
+        c.write_str("\x1b[7m").unwrap(); // twice changes nothing
+        assert_eq!((c.fg, c.bg), (DEFAULT_BG, DEFAULT_FG));
+        c.write_str("\x1b[27m").unwrap();
+        assert_eq!((c.fg, c.bg), (DEFAULT_FG, DEFAULT_BG));
+        c.write_str("\x1b[7m\x1b[0m").unwrap();
+        assert_eq!((c.fg, c.bg), (DEFAULT_FG, DEFAULT_BG));
     }
 
     #[test_case]
