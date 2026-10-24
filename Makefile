@@ -6,7 +6,7 @@ LIMINE_BRANCH := v11.x-binary
 KERNEL_ELF := kernel/target/x86_64-unknown-none/debug/kernel
 OVMF       := /usr/share/edk2/ovmf/OVMF_CODE.fd
 
-.PHONY: all limine limine-tool build run run-uefi debug gdb test \
+.PHONY: all limine limine-tool build run run-uefi debug gdb test e2e check \
         disasm symbols sections addr2line clean distclean
 
 all: build
@@ -40,6 +40,13 @@ gdb:
 # All in-kernel tests in QEMU, exit status 0 = all green
 test: limine
 	$(CARGO) test
+
+# End-to-end: boot the real kernel and drive the shell over the serial port
+e2e: build
+	python3 -I scripts/e2e-shell.py $(KERNEL_ELF)
+
+# Everything: unit + integration tests, then the end-to-end shell test
+check: test e2e
 
 # ---- GNU binutils helpers ----------------------------------------------------
 

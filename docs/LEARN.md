@@ -102,6 +102,15 @@ Short explanations of every subsystem: what it is and why we need it.
   otherwise the heap would crumble into many tiny unusable pieces (*fragmentation*).
 - Once a `#[global_allocator]` exists, Rust's `alloc` crate works: `Box`, `Vec`, `String`, `BTreeMap` – just like in normal programs.
 
+## M11 – Shell
+- A **shell** is a loop: print a prompt, read a line, split it into words, look up the first word as a command, run it.
+- The **line editor** lets you move the cursor and edit in the middle of the line. Because we only use the backspace character
+  (`\x08`) to move left and simply overwrite characters, the same output works on our screen and on any serial terminal.
+- **Terminals talk in escape sequences**: an arrow key on a serial terminal arrives as three bytes `ESC [ A`, colours are sent as
+  `ESC [ 31 m`. Our console understands a small subset, and the input decoder turns incoming sequences back into keys.
+- **Serial input** works like the keyboard: the UART raises IRQ4 when a byte arrives, the handler stores it in a ring buffer.
+  This lets automated tests "type" into the real kernel through QEMU's stdin.
+
 ## Tooling – GNU ld and binutils
 - rustc compiles our code into object files; a **linker** combines them into the final ELF according to `kernel/linker.ld`
   (load address, section order, segments). We use **GNU ld** (`ld.bfd`) for that.

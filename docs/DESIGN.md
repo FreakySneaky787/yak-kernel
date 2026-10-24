@@ -63,6 +63,7 @@ IST1 (`gdt::DOUBLE_FAULT_IST`) = 20 KiB static stack for double faults. User seg
 | 0–31 | CPU exceptions (`arch/x86_64/interrupts.rs`), double fault (8) on IST1 |
 | 32 | IRQ0 – PIT timer, 100 Hz |
 | 33 | IRQ1 – PS/2 keyboard |
+| 36 | IRQ4 – COM1 receive (serial input for the shell) |
 | 39 / 47 | IRQ7 / IRQ15 – spurious IRQ handling |
 | 34–47 (rest) | other PIC IRQs, masked |
 
@@ -80,9 +81,20 @@ IST1 (`gdt::DOUBLE_FAULT_IST`) = 20 KiB static stack for double faults. User seg
   QEMU forwards physical keys, so the kernel layout must match the user's real keyboard.
 - `keyboard::inject_scancode()` feeds bytes without hardware (tests, later e.g. serial input).
 
+## Input and shell
+- Two input sources, one API: `input::read_key()` returns `KeyEvent`s from the PS/2 keyboard (scancode decoder) or from COM1
+  (`TerminalDecoder`: UTF-8, CR/LF, DEL, Ctrl+letter, ANSI arrows/Home/End/Delete). It sleeps race-free with `sti; hlt`.
+- The line editor only emits a terminal-compatible byte stream (`\x08` = cursor left, characters overwrite), so the same output
+  works on the framebuffer console and on a serial terminal. No cursor-addressing escape sequences are needed.
+- Commands are a static table (`shell::COMMANDS`) of `fn(&mut Shell, &[String], &mut dyn Write) -> Result<(), String>`;
+  unit tests run them against a `String`. Errors are printed in red by the shell, not by the commands.
+- `poweroff`: ACPI PM1a control port 0x604 (QEMU q35), fallback isa-debug-exit. `reboot`: 8042 reset line, fallback triple fault.
+
 ## Output
 - `serial_println!`: COM1 only. `println!`: console **and** COM1. Both disable interrupts while holding their lock (`without_interrupts`).
-- Panic handlers only use serial, because the console lock might still be held when the panic happens.
+- The boot binary's panic handler (`kernel::panic_report`) prints to serial and, if `CONSOLE.try_lock()` succeeds, in red on the screen.
+- Console: keeps a `Vec<Cell>` character grid (char + colours) for redrawing the cursor cell; cursor = inverted cell.
+  ANSI subset: `ESC[2J`, `ESC[H`, `ESC[row;colH`, `ESC[K`, `ESC[..m` (0, 1, 22, 30–37, 39, 40–47, 49, 90–97).
 - Console: works on a `Surface` (32 bpp, stride in pixels). Scrolling copies pixel rows inside the framebuffer
   (slow on real hardware, fine in QEMU). Font: Terminus 8×16 (PSF2) via `include_bytes!`; Latin-1 characters through the
   Unicode table, unknown characters become `?`.
@@ -95,3 +107,5 @@ IST1 (`gdt::DOUBLE_FAULT_IST`) = 20 KiB static stack for double faults. User seg
 - `scripts/run-qemu.sh` is the cargo runner. A hash suffix in the ELF name means test binary → headless QEMU with a timeout.
 - Result via the `isa-debug-exit` device on port 0xF4: value 0x10 → QEMU exit status 33 = PASS, 0x11 → 35 = FAIL.
 - All test output goes through COM1 (`serial_println!`).
+- `scripts/e2e-shell.py` (`make e2e`) boots the real kernel with stdin/stdout on COM1, types commands (incl. escape sequences)
+  and checks the output between prompts; the final `poweroff` must end QEMU. `make check` = `make test` + `make e2e`.

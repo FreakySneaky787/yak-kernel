@@ -20,6 +20,7 @@ pub mod mem;
 pub mod qemu;
 pub mod ringbuf;
 pub mod serial;
+pub mod shell;
 pub mod testing;
 pub mod time;
 
@@ -40,6 +41,21 @@ pub fn init() {
     arch::x86_64::irq::init();
     console::init();
     arch::x86_64::enable_interrupts();
+}
+
+/// Reports a panic on the serial port and - if the console is not locked -
+/// on the screen, then halts. Used by the boot binary's panic handler.
+pub fn panic_report(info: &core::panic::PanicInfo) -> ! {
+    arch::x86_64::disable_interrupts();
+    serial_println!("KERNEL PANIC: {}", info);
+    // try_lock: the panic may have happened while the console was locked
+    if let Some(mut guard) = console::CONSOLE.try_lock() {
+        if let Some(console) = guard.as_mut() {
+            use core::fmt::Write;
+            write!(console, "\n\x1b[1;37;41m KERNEL PANIC \x1b[0m \x1b[91m{}\x1b[0m\nSystem halted.\n", info).ok();
+        }
+    }
+    arch::x86_64::halt_loop()
 }
 
 /// Entry point for `cargo test --lib`.

@@ -17,6 +17,8 @@ The conversation with the user happens in German.
 | `make run` | QEMU with a window (BIOS), serial output in the terminal |
 | `make run-uefi` | same, with OVMF/UEFI firmware |
 | `make test` | all in-kernel tests headless in QEMU, exit status 0 = green |
+| `make e2e` | boot the real kernel and drive the shell over serial (`scripts/e2e-shell.py`) |
+| `make check` | `make test` + `make e2e` – run this before every commit |
 | `make debug` + `make gdb` | QEMU waits for gdb on :1234 |
 | `make disasm` / `make symbols` / `make sections` | GNU objdump / nm / readelf on the kernel ELF |
 | `make addr2line ADDR=0xffffffff8000...` | map a code address (e.g. RIP from a panic) to file:line |
@@ -34,7 +36,7 @@ Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.s
 
 ## Workflow (mandatory)
 - Small milestones from `docs/PROGRESS.md`, one after another.
-- Per step: implement → `make test` green → update docs → commit `M<n>: <what>` → push.
+- Per step: implement → `make check` green → update docs → commit `M<n>: <what>` → push.
 - Every milestone gets at least one test. Every bug fix gets an entry in `docs/BUGS.md` and, if possible, a regression test.
 - At the end of a session, `docs/PROGRESS.md` must say under "Next step" where to continue.
 - Claude implements everything itself (the user decided this); new subsystems get a short explanation in `docs/LEARN.md`.
@@ -52,10 +54,12 @@ Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.s
 - `kernel/src/testing.rs` – test runner, `Testable`, test panic handler
 - `kernel/src/qemu.rs` – exit QEMU (isa-debug-exit)
 - `kernel/src/mem/` – `mod.rs` (PhysAddr/VirtAddr, HHDM), `pmm.rs` (bitmap frame allocator), `paging.rs` (page tables: translate/map/unmap), `stack.rs` (guarded kernel stacks), `heap.rs` (linked-list `#[global_allocator]`)
+- `kernel/src/input.rs` – merged keyboard + serial input, `TerminalDecoder`; `kernel/src/ringbuf.rs` – IRQ-safe byte ring buffer
+- `kernel/src/shell/` – `mod.rs` (commands, `Shell::run`), `line_editor.rs`, `parser.rs`
 - `kernel/src/time.rs` – ticks, `uptime_ms`, `sleep_ms`
 - `kernel/src/drivers/keyboard.rs` – PS/2 driver, ring buffer, `read_key()`; `drivers/scancode.rs` – decoder + layouts (DE/US)
 - `kernel/src/arch/x86_64/` – CPU specifics: `port.rs` (in/out), `gdt.rs` (GDT+TSS), `idt.rs` (IDT structure),
-  `interrupts.rs` (exception handlers, kernel IDT), `irq.rs` (hardware IRQs), `pic.rs`, `pit.rs`, `lapic.rs`, `msr.rs`,
+  `interrupts.rs` (exception handlers, kernel IDT), `irq.rs` (hardware IRQs), `pic.rs`, `pit.rs`, `lapic.rs`, `msr.rs`, `cpu.rs` (cpuid), `power.rs` (reboot/poweroff),
   interrupt helpers in `mod.rs`
 - `kernel/tests/` – integration tests (each one is a separate kernel)
 - `kernel/linker.ld` – higher-half layout at `0xffffffff80000000`
