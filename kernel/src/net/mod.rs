@@ -77,7 +77,7 @@ const MAX_UDP_PAYLOAD: usize = 1472; // 1500 - IPv4 - UDP header
 static NIC: Mutex<Option<E1000>> = Mutex::new(None);
 static CONFIG: Once<Config> = Once::new();
 static ARP_CACHE: Mutex<BTreeMap<Ipv4Addr, Mac>> = Mutex::new(BTreeMap::new());
-/// (id, sequence) of received echo replies -> uptime in ms when they arrived
+/// (id, sequence) of received echo replies -> uptime in µs when they arrived
 static PING_REPLIES: Mutex<BTreeMap<(u16, u16), u64>> = Mutex::new(BTreeMap::new());
 static SOCKETS: Mutex<BTreeMap<u16, Arc<Mutex<VecDeque<Datagram>>>>> = Mutex::new(BTreeMap::new());
 static NEXT_IP_ID: AtomicU16 = AtomicU16::new(1);
@@ -197,7 +197,7 @@ fn handle_icmp(cfg: &Config, from_mac: Mac, ip: &Ipv4Packet) {
         let packet = build_ipv4(cfg.ip, ip.src, PROTO_ICMP, id, &reply);
         let _ = send_frame(&build_eth(from_mac, cfg.mac, ETHERTYPE_IPV4, &packet));
     } else if echo.id == PING_ID {
-        let now = time::uptime_ms();
+        let now = time::uptime_us();
         without_interrupts(|| PING_REPLIES.lock().insert((echo.id, echo.seq), now));
         task::notify(Wait::Net);
     }
@@ -268,9 +268,9 @@ pub fn send_ipv4(dst: Ipv4Addr, protocol: u8, payload: &[u8]) -> Result<(), NetE
 }
 
 /// Sends an ICMP echo request and waits for the reply. Returns the round
-/// trip time in milliseconds (10 ms resolution).
+/// trip time in microseconds (receive time = when the net thread polled it).
 pub fn ping(dst: Ipv4Addr, seq: u16, timeout_ms: u64) -> Result<u64, NetError> {
-    let start = time::uptime_ms();
+    let start = time::uptime_us();
     let data: Vec<u8> = (0..32u8).collect();
     send_ipv4(
         dst,
@@ -347,7 +347,7 @@ mod tests {
         let mac = resolve([10, 0, 2, 2]).expect("gateway did not answer ARP");
         assert_ne!(mac, [0; 6]);
         let rtt = ping([10, 0, 2, 2], 1, 2000).expect("gateway did not answer the ping");
-        assert!(rtt < 2000);
+        assert!(rtt < 2_000_000);
     }
 
     #[test_case]

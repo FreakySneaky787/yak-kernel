@@ -155,10 +155,11 @@
   | 29 | `termsize()` | console rows << 32 \| columns (the serial side has no size; programs draw for the console) |
   | 30 | `ignore_interrupt(on)` | Ctrl+C arrives as 0x03 instead of killing the caller (the editor) |
   | 31 | `net_info(*NetInfo)` | 40 bytes: MAC, link, IPv4, netmask, gateway, frame counters; `-ENODEV` without a card |
-  | 32 | `ping(ip, seq, timeout_ms)` | round trip in ms; `-ETIMEDOUT`, `-EHOSTUNREACH` |
+  | 32 | `ping(ip, seq, timeout_ms)` | round trip in µs; `-ETIMEDOUT`, `-EHOSTUNREACH` |
   | 33 | `udp_socket(port)` | 0 = ephemeral (≥ 0xC000); `-EADDRINUSE` |
   | 34 | `sendto(fd, buf, len, ip, port)` | ≤ 1472 bytes, `-EMSGSIZE` above |
   | 35 | `recvfrom(fd, buf, len, *SockAddr, timeout_ms)` | 5th argument in R8; `-ETIMEDOUT`, `-EINTR` |
+  | 36 | `clock_us()` | microseconds since boot (TSC) |
 - **`/bin/edit`**: `buffer.rs` is pure logic (tested by `edit --selftest`), `main.rs` draws with `ESC[r;cH`, `ESC[K`, SGR 7.
   The text area is all rows but the last; the cursor line and the status bar are redrawn per key, the whole screen only after
   scrolling or when lines are inserted/removed. Writing the bottom-right cell is safe: the console wraps lazily (only when the
@@ -212,6 +213,10 @@
   thread's state right before `kernel_switch_context`. No lazy switching (CR0.TS stays clear), no XSAVE/AVX.
 - Limitations: no AVX state;
   no Ctrl+C for a running program (`kill` exists in the kernel API only); a program blocked in `read` is only killed after its next key.
+
+## Time
+- `time::ticks` (100 Hz, boot CPU's LAPIC timer) for sleeping and timeouts; `time::uptime_us` from the TSC (frequency measured
+  at boot against PIT channel 2) for precise time stamps. All CPUs' TSCs are assumed to run in step.
 
 ## Network
 - **Driver** (`drivers/e1000.rs`): Intel 82540EM as emulated by QEMU, BAR0 MMIO (128 KiB, mapped via `ensure_hhdm_mapped`).

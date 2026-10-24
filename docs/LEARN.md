@@ -274,6 +274,11 @@ Short explanations of every subsystem: what it is and why we need it.
 - QEMU emulates a whole small network for us: a router at 10.0.2.2 that answers pings and forwards UDP to the host, which
   is how the E2E test talks to the kernel over UDP.
 
+## M28 – A fine clock
+- The timer interrupt comes every 10 ms – too coarse to measure a ping. Every x86 core also has a **time stamp counter**
+  that counts up at a fixed, high rate (GHz). We only have to find out *how* fast: count TSC ticks while the PIT (whose
+  frequency is known exactly) measures 50 ms. After that, `TSC difference / frequency` gives microseconds.
+
 ## Tooling – GNU ld and binutils
 - rustc compiles our code into object files; a **linker** combines them into the final ELF according to `kernel/linker.ld`
   (load address, section order, segments). We use **GNU ld** (`ld.bfd`) for that.

@@ -50,6 +50,16 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 | 26 | SMP part 2: scheduler on all cores (per-CPU current/idle thread, lock held across switches, no lost wake-ups, `swapgs` in the syscall stub) | ✅ | new test: spinning threads seen on ≥ 2 CPUs; whole suite green with `KERNEL_SMP=1`, `2` and `4`; `demo 4`: 760 ms on 1 core → 200 ms on 4 |
 | 27 | Network: e1000 driver, Ethernet/ARP/IPv4/ICMP/UDP, `ping`, `netinfo`, `udpecho` | ✅ | 4 packet unit tests (checksum, IPv4/ARP/ICMP/UDP round trips), 4 network tests (config, ARP + ping to the gateway, UDP ports, receive path), integration test (ping/netinfo/unreachable), E2E: ping + UDP echo through a host server |
 
+## Stage 6: a complete small system (agreed with the user on 2026-10-24: "all of it")
+| # | Milestone | Status | Tests |
+|---|---|---|---|
+| 28 | Microsecond clock from the TSC, `time` program, ping in µs | ✅ | 2 TSC unit tests (calibration, agreement with the tick clock), `time hello` in integration test + E2E |
+| 29 | TCP: connect/listen/accept, retransmission, flow control; client and server programs | ⬜ | |
+| 30 | DHCP and a DNS client; HTTP client (`wget`) and server (`httpd`) | ⬜ | |
+| 31 | Shell: scripts, environment variables, `2>`, background jobs (`&`, `jobs`, `wait`) | ⬜ | |
+| 32 | Storage speed: sector cache for FAT32, AHCI completion interrupts (MSI) | ⬜ | |
+| 33 | Memory: reclaim bootloader memory, demand paging for user heaps | ⬜ | |
+
 ## Log
 - **2026-10-24** – Setup: Rust nightly 1.101 (rustup), target `x86_64-unknown-none`, Limine v11.x-binary.
   M1: kernel boots via BIOS and UEFI, prints "Hello from KernelTry!" on serial, colour bars on the framebuffer (1280×800×32).
@@ -213,6 +223,11 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   `udpecho`. QEMU gets `-netdev user -device e1000` (`KERNEL_NETDEV_OPTS` for extras). Bug #5 (`run_on` could starve the
   target CPU's idle thread) fixed. **Stage 5 complete: 185 in-kernel tests + 6 test kernels + 94 E2E steps (BIOS + UEFI).**
 
+- **2026-10-24** – User wants all of the stage 6 ideas; order M28–M33 chosen by dependencies.
+- **2026-10-24** – M28: `arch/x86_64/tsc.rs` calibrates the time stamp counter against PIT channel 2 (50 ms, after the LAPIC
+  calibration); `time::uptime_us`. Syscall 36 `clock_us`. Ping replies are time-stamped in µs (`ping` prints ms with three
+  decimals – the receive time is still when the net thread polls, i.e. up to 10 ms late). New program `time <program>`.
+
 ## Open items / later
 - AHCI uses polling; switching to completion interrupts (MSI or the PCI interrupt line) would free the CPU during I/O.
 - Thread-level sleeping mutex (today all shared state uses spin locks with interrupts disabled).
@@ -232,9 +247,8 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   write, append, echo, sleep, clear, help. Without `/bin` on the disk, the kernel shell has no `ls`/`cat`.
 
 ## Next step
-**Stage 5 is complete.** The next stage still has to be agreed with the user. Ideas:
-- **TCP** (connect/listen/accept, retransmission, windows) and a tiny HTTP client/server program; DHCP and a DNS client.
-- **A real-time clock and fine timers:** TSC calibration for µs time stamps (ping times, profiling).
-- **Shell scripts**, environment variables, `2>`, job control (`&`, `fg`).
-- **Storage:** an ext2-like own file system or FAT32 long-file performance (cluster cache), AHCI interrupts.
-- **Reclaim bootloader memory**, demand paging for user heaps, copy-on-write.
+**M29 – TCP:** connection state machine (SYN/SYN-ACK/ACK, FIN handshakes, RST), sequence numbers, a send buffer with
+retransmission (timeout from the measured RTT, µs clock from M28), receive buffer and advertised window, MSS 1460.
+Syscalls `tcp_connect(ip, port)`, `tcp_listen(port)`, `tcp_accept(fd)`; `read`/`write`/`close` on the connection fds.
+Programs: `nc` (netcat-like client), `echod` (echo server). Tests: connect to a Python TCP echo server on the host via
+10.0.2.2, an E2E transfer of 100 KB, `hostfwd=tcp::<port>-:7` so the host connects to `echod` in the guest.

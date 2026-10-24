@@ -58,6 +58,7 @@ pub fn init() {
     route_isa_irq(madt, COM1_IRQ, cpu);
 
     lapic::start_timer(TIMER_VECTOR, time::TIMER_HZ);
+    super::tsc::init(); // uses PIT channel 2 too, so after the LAPIC calibration
 }
 
 extern "x86-interrupt" fn timer(frame: InterruptStackFrame) {

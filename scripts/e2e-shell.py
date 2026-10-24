@@ -119,6 +119,7 @@ STEPS = [
     ("fault spin | cat\r" + PAUSE + CTRL_C, ["fault was killed: interrupted"], []),
     ("pipetest\r", ["pipetest: all checks passed"], ["FAIL"]),
     ("netinfo\r", ["IPv4     10.0.2.15", "link up"], ["error"]),  # network (M27)
+    ("time hello\r", ["Hello from user space", "real 0.1"], ["error"]),  # TSC clock (M28)
     ("ping 10.0.2.2 2\r", ["reply from 10.0.2.2: seq=1", "2 packets sent, 2 received"], ["error"]),
     (f"udpecho 10.0.2.2 {UDP_PORT} hello over UDP\r", [f"reply from 10.0.2.2:{UDP_PORT}: hello over UDP"], ["error"]),
     ("fputest\r", ["fputest: all checks passed"], ["registers changed", "MXCSR changed", "is wrong", "error"]),  # SSE registers per thread (M24)

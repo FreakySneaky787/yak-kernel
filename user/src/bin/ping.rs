@@ -17,9 +17,18 @@ fn main(mut args: ulib::Args) -> i32 {
     let mut received = 0;
     for seq in 1..=count {
         match sys::ping(ip, seq, 2000) {
-            ms if ms >= 0 => {
+            us if us >= 0 => {
                 received += 1;
-                println!("reply from {}.{}.{}.{}: seq={} time={} ms", a, b, c, d, seq, ms);
+                println!(
+                    "reply from {}.{}.{}.{}: seq={} time={}.{:03} ms",
+                    a,
+                    b,
+                    c,
+                    d,
+                    seq,
+                    us / 1000,
+                    us % 1000
+                );
             }
             e => println!(
                 "no reply from {}.{}.{}.{}: seq={} ({})",

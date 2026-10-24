@@ -40,6 +40,7 @@ pub const PING: u64 = 32;
 pub const UDP_SOCKET: u64 = 33;
 pub const SENDTO: u64 = 34;
 pub const RECVFROM: u64 = 35;
+pub const CLOCK_US: u64 = 36;
 
 pub const STDIN: u64 = 0;
 pub const STDOUT: u64 = 1;
@@ -408,7 +409,12 @@ pub fn net_info(info: &mut NetInfo) -> i64 {
     unsafe { syscall3(NET_INFO, info as *mut NetInfo as u64, 0, 0) }
 }
 
-/// One ICMP echo; returns the round trip time in ms or -errno.
+/// Microseconds since boot (time stamp counter).
+pub fn clock_us() -> u64 {
+    unsafe { syscall3(CLOCK_US, 0, 0, 0) as u64 }
+}
+
+/// One ICMP echo; returns the round trip time in µs or -errno.
 pub fn ping(ip: [u8; 4], seq: u16, timeout_ms: u64) -> i64 {
     unsafe { syscall3(PING, u32::from_be_bytes(ip) as u64, seq as u64, timeout_ms) }
 }

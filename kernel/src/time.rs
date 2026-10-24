@@ -16,6 +16,11 @@ pub fn ticks() -> u64 {
     TICKS.load(Ordering::Relaxed)
 }
 
+/// Microseconds since boot (from the time stamp counter, see `arch::x86_64::tsc`).
+pub fn uptime_us() -> u64 {
+    crate::arch::x86_64::tsc::uptime_us()
+}
+
 pub fn uptime_ms() -> u64 {
     ticks() * MS_PER_TICK
 }

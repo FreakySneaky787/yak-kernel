@@ -485,13 +485,14 @@ fn cmd_uptime(_: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), St
     let (h, m, s) = (ms / 3_600_000, ms / 60_000 % 60, ms / 1000 % 60);
     writeln!(
         out,
-        "up {:02}:{:02}:{:02}.{:03} ({} ticks at {} Hz)",
+        "up {:02}:{:02}:{:02}.{:03} ({} ticks at {} Hz, TSC {} MHz)",
         h,
         m,
         s,
         ms % 1000,
         time::ticks(),
-        time::TIMER_HZ
+        time::TIMER_HZ,
+        crate::arch::x86_64::tsc::hz() / 1_000_000
     )
     .ok();
     Ok(())

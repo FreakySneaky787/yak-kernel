@@ -77,13 +77,13 @@ Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.s
 - `user/` – user programs: `src/lib.rs` (`ulib`: `_start`, `Args`), `sys.rs` (syscalls), `io.rs` (`print!`, `read_line`),
   `fs.rs` (`File`, `Dir`, `stat`), `heap.rs` (allocator on `brk`),
   `process.rs` (`spawn`/`wait`/`kill`), `src/bin/*.rs` (one program each: tools cat, ls, cp, mv, rm, mkdir, touch, stat,
-  sort, wc, grep, ps, mem, uptime, df, date, upper, hello, ping, netinfo, udpecho; self-tests fault, fstest, heaptest, spawntest, pipetest),
+  sort, wc, grep, ps, mem, uptime, df, date, upper, hello, ping, netinfo, udpecho, time; self-tests fault, fstest, heaptest, spawntest, pipetest),
   `src/bin/sh/` (the shell, started as init), `src/bin/edit/` (full-screen editor), `linker.ld`
 - `kernel/src/time.rs` – ticks, `uptime_ms`, `sleep_ms`
 - `kernel/src/drivers/keyboard.rs` – PS/2 driver, ring buffer, `read_key()`; `drivers/scancode.rs` – decoder + layouts (DE/US)
 - `kernel/src/arch/x86_64/` – CPU specifics: `port.rs` (in/out), `gdt.rs` (GDT+TSS), `idt.rs` (IDT structure),
   `interrupts.rs` (exception handlers, kernel IDT), `syscall.rs` (syscall entry stub, MSRs, `enter_user`), `irq.rs` (IRQ routing + handlers), `lapic.rs` (local APIC + timer), `ioapic.rs`, `pic.rs` (legacy, masked), `pit.rs` (timer calibration), `msr.rs`, `cpu.rs` (cpuid), `power.rs` (reboot/poweroff),
-  `fpu.rs` (x87/SSE enable, FXSAVE areas), `smp.rs` (AP trampoline, INIT/SIPI, `run_on`), interrupt helpers in `mod.rs`
+  `fpu.rs` (x87/SSE enable, FXSAVE areas), `smp.rs` (AP trampoline, INIT/SIPI, `run_on`), `tsc.rs` (µs clock), interrupt helpers in `mod.rs`
 - `kernel/tests/` – integration tests (each one is a separate kernel)
 - `kernel/linker.ld` – higher-half layout at `0xffffffff80000000`
 - `scripts/run-qemu.sh` – cargo runner: builds the ISO and starts QEMU

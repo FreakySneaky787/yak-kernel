@@ -89,7 +89,7 @@ pub mod nr {
     pub const IGNORE_INTERRUPT: u32 = 30;
     /// net_info(*mut NetInfo) -> 0
     pub const NET_INFO: u32 = 31;
-    /// ping(ipv4 as u32, seq, timeout_ms) -> round trip time in ms
+    /// ping(ipv4 as u32, seq, timeout_ms) -> round trip time in µs
     pub const PING: u32 = 32;
     /// udp_socket(port, 0 = any) -> fd
     pub const UDP_SOCKET: u32 = 33;
@@ -97,6 +97,8 @@ pub mod nr {
     pub const SENDTO: u32 = 34;
     /// recvfrom(fd, buf, len, *mut SockAddr or 0, timeout_ms) -> bytes received
     pub const RECVFROM: u32 = 35;
+    /// clock_us() -> microseconds since boot
+    pub const CLOCK_US: u32 = 36;
 }
 
 pub mod errno {
@@ -274,6 +276,7 @@ pub extern "C" fn dispatch(frame: &mut SyscallFrame) {
             Ok((rows as u64) << 32 | cols as u64)
         }
         nr::NET_INFO => sys_net_info(a0),
+        nr::CLOCK_US => Ok(time::uptime_us()),
         nr::PING => net::ping((a0 as u32).to_be_bytes(), a1 as u16, a2.min(10_000)).map_err(net_errno),
         nr::UDP_SOCKET => sys_udp_socket(a0),
         nr::SENDTO => sys_sendto(a0, a1, a2, a3, a4),

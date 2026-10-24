@@ -13,6 +13,7 @@ pub mod port;
 pub mod power;
 pub mod smp;
 pub mod syscall;
+pub mod tsc;
 
 use core::arch::asm;
 

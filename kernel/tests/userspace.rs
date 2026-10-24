@@ -226,6 +226,19 @@ extern "C" fn kmain() -> ! {
         out
     );
 
+    // M28: microsecond clock
+    let (status, out) = run("time", "hello");
+    assert_eq!(status, ExitStatus::Exited(0), "{}", out);
+    let real: f64 = out
+        .split("real ")
+        .nth(1)
+        .and_then(|r| r.split(' ').next())
+        .and_then(|r| r.parse().ok())
+        .expect("no time printed");
+    // hello sleeps 100 ms (10 ticks: 90-110 ms depending on where in a tick it starts)
+    assert!(out.contains("Bye!") && (0.085..0.2).contains(&real), "{}", out);
+    assert!(run("ping", "10.0.2.2 1").1.contains(" ms\n"));
+
     assert_eq!(process::count(), 0);
     serial_println!("[ok]");
     exit(ExitCode::Success)
