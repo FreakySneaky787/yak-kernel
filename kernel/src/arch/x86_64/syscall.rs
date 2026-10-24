@@ -7,12 +7,20 @@
 //! off). It does **not** switch stacks: the entry stub swaps RSP to the
 //! running thread's kernel stack itself.
 //!
+//! The stub needs two per-CPU slots (user RSP scratch, kernel stack top).
+//! It reaches them through GS: IA32_KERNEL_GS_BASE points at this CPU's
+//! `CpuLocal`, `swapgs` makes it the active GS base. The stub swaps back
+//! right after it has the kernel stack, so GS is in its "user" state
+//! whenever interrupts are enabled - a thread may continue on another CPU
+//! after being preempted inside a system call.
+//!
 //! Register convention (like Linux): RAX = number, arguments in RDI, RSI,
 //! RDX, R10, R8, R9; result in RAX. RCX and R11 are clobbered by the CPU,
 //! every other register is preserved.
 
 use super::gdt::{KERNEL_CODE_SELECTOR, KERNEL_DATA_SELECTOR, USER_CODE_SELECTOR, USER_DATA_SELECTOR};
 use super::msr;
+use super::smp::MAX_CPUS;
 use core::sync::atomic::{AtomicU64, Ordering};
 
 /// Everything the entry stub saves, lowest address first. The dispatcher may
@@ -34,10 +42,21 @@ pub struct SyscallFrame {
     pub rsp: u64,
 }
 
-/// Kernel stack top of the running thread (same value as TSS.RSP0).
-static KERNEL_RSP: AtomicU64 = AtomicU64::new(0);
-/// Scratch slot for the user RSP until it is pushed (single CPU, IF = 0).
-static USER_RSP: AtomicU64 = AtomicU64::new(0);
+/// Per-CPU data of the syscall stub, reached through GS (see module docs).
+#[repr(C)]
+struct CpuLocal {
+    /// Scratch slot for the user RSP until it is pushed (gs:[0]).
+    user_rsp: AtomicU64,
+    /// Kernel stack top of the thread running on this CPU, same as TSS.RSP0 (gs:[8]).
+    kernel_rsp: AtomicU64,
+}
+
+static CPU_LOCAL: [CpuLocal; MAX_CPUS] = [const {
+    CpuLocal {
+        user_rsp: AtomicU64::new(0),
+        kernel_rsp: AtomicU64::new(0),
+    }
+}; MAX_CPUS];
 
 const RFLAGS_IF: u64 = 1 << 9;
 const RFLAGS_TF: u64 = 1 << 8;
@@ -47,10 +66,12 @@ const RFLAGS_AC: u64 = 1 << 18;
 core::arch::global_asm!(
     ".global syscall_entry",
     "syscall_entry:",
-    "mov [rip + {user_rsp}], rsp",
-    "mov rsp, [rip + {kernel_rsp}]",
+    "swapgs", // GS base = this CPU's CpuLocal
+    "mov gs:[0], rsp",
+    "mov rsp, gs:[8]",
     // build a SyscallFrame (pushed in reverse order)
-    "push qword ptr [rip + {user_rsp}]",
+    "push qword ptr gs:[0]",
+    "swapgs", // back to the user's GS before interrupts can happen
     "push rcx",
     "push r11",
     "push rax",
@@ -102,8 +123,6 @@ core::arch::global_asm!(
     "xor r14d, r14d",
     "xor r15d, r15d",
     "iretq",
-    user_rsp = sym USER_RSP,
-    kernel_rsp = sym KERNEL_RSP,
     dispatch = sym crate::process::syscall::dispatch,
     user_ss = const USER_DATA_SELECTOR as u64,
     user_cs = const USER_CODE_SELECTOR as u64,
@@ -115,9 +134,12 @@ unsafe extern "C" {
     fn enter_user_mode(rip: u64, rsp: u64, arg0: u64, arg1: u64) -> !;
 }
 
-/// Enables `syscall` and points it at our entry stub.
-pub fn init() {
+/// Enables `syscall` on CPU `cpu` and points it at our entry stub.
+pub fn init(cpu: usize) {
     unsafe {
+        // GS stays 0 for user code; the stub swaps this in for itself
+        msr::write(msr::IA32_KERNEL_GS_BASE, &CPU_LOCAL[cpu] as *const CpuLocal as u64);
+        msr::write(msr::IA32_GS_BASE, 0);
         msr::write(msr::IA32_EFER, msr::read(msr::IA32_EFER) | 1);
         // sysret: CS = base + 16, SS = base + 8 (both with RPL 3), see gdt.rs
         let star = (KERNEL_DATA_SELECTOR as u64) << 48 | (KERNEL_CODE_SELECTOR as u64) << 32;
@@ -131,7 +153,9 @@ pub fn init() {
 /// to the thread that runs next. Call with interrupts disabled.
 pub fn set_kernel_stack(top: u64) {
     super::gdt::set_kernel_stack(top);
-    KERNEL_RSP.store(top, Ordering::Relaxed);
+    CPU_LOCAL[super::smp::cpu_index()]
+        .kernel_rsp
+        .store(top, Ordering::Relaxed);
 }
 
 /// Drops to ring 3 at `rip` with stack `rsp`; `arg0`/`arg1` arrive in RDI/RSI.

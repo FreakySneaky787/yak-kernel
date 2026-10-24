@@ -140,6 +140,16 @@ pub fn eoi() {
 /// Measures how fast the LAPIC timer counts, using PIT channel 2 as a
 /// reference clock (works with interrupts disabled), then starts the timer
 /// in periodic mode: `hz` interrupts per second on `vector`.
+/// Starts this CPU's timer with the period measured by `start_timer` on the
+/// boot CPU (all local APIC timers run at the same bus frequency).
+pub fn start_timer_calibrated(vector: u8) {
+    let per_period = TICKS_PER_PERIOD.load(Ordering::Relaxed);
+    assert!(per_period != 0, "the timer was not calibrated yet");
+    write(REG_TIMER_DIVIDE, TIMER_DIVIDE_BY_16);
+    write(REG_LVT_TIMER, vector as u32 | LVT_TIMER_PERIODIC);
+    write(REG_TIMER_INITIAL, per_period);
+}
+
 pub fn start_timer(vector: u8, hz: u32) {
     const CALIBRATION_MS: u32 = 50;
     write(REG_TIMER_DIVIDE, TIMER_DIVIDE_BY_16);

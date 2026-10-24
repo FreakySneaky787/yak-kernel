@@ -84,17 +84,7 @@ pub fn read_key() -> KeyEvent {
         if let Some(event) = try_read_key() {
             return event;
         }
-        // Check and sleep atomically: otherwise the IRQ could arrive between the
-        // check and `hlt`, and we would hang until the next interrupt.
-        crate::arch::x86_64::disable_interrupts();
-        if !SCANCODES.lock().is_empty() {
-            crate::arch::x86_64::enable_interrupts();
-        } else if crate::task::is_running() {
-            crate::task::block_current(crate::task::Wait::Input);
-            crate::arch::x86_64::enable_interrupts();
-        } else {
-            unsafe { core::arch::asm!("sti; hlt", options(nomem, nostack)) };
-        }
+        crate::task::wait_for(crate::task::Wait::Input, has_pending);
     }
 }
 

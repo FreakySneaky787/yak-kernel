@@ -43,7 +43,7 @@ pub fn init() {
     arch::x86_64::fpu::init();
     arch::x86_64::interrupts::init();
     mem::init();
-    arch::x86_64::syscall::init();
+    arch::x86_64::syscall::init(0);
     arch::x86_64::irq::init();
     console::init();
     task::init();

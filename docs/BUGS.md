@@ -63,4 +63,7 @@ Format: number · date · title, then symptom → cause → fix → test.
   `.byte` and put the difference into a `.word`/`.long` (see the SMP trampoline).
 - **The page allocator hands out the lowest frames first**, so memory below 1 MiB is gone after early boot. Hardware that
   needs low memory (the SMP trampoline) must reserve it at `pmm::init` time.
+- **`spin` 0.12's `Mutex` has no `as_mut_ptr`.** To use the data of a lock you own without a guard (the scheduler lock is
+  released by the *next* thread after a switch), keep the address of the data from a guard taken at init
+  (`task::SCHEDULER_DATA`) and call `force_unlock` afterwards.
 - **Limine's stack has no guard page** – a stack overflow silently corrupts memory instead of faulting (until M9 gives us our own stack).

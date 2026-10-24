@@ -61,7 +61,10 @@ pub fn init() {
 }
 
 extern "x86-interrupt" fn timer(frame: InterruptStackFrame) {
-    time::tick();
+    // every CPU has a timer; the clock is driven by the boot CPU's only
+    if super::smp::cpu_index() == 0 {
+        time::tick();
+    }
     // EOI before scheduling: we may switch to another thread here and only
     // return to this handler much later; the LAPIC must accept new ticks.
     lapic::eoi();
@@ -86,8 +89,12 @@ extern "x86-interrupt" fn com1(_frame: InterruptStackFrame) {
 }
 
 /// Wakes an idle CPU (it then looks for work); nothing else to do.
-extern "x86-interrupt" fn wake(_frame: InterruptStackFrame) {
+extern "x86-interrupt" fn wake(frame: InterruptStackFrame) {
     lapic::eoi();
+    crate::task::on_wake_ipi();
+    if frame.cs & 3 == 3 {
+        crate::process::check_killed();
+    }
 }
 
 /// Spurious interrupts must not be acknowledged (no EOI).

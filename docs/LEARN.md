@@ -254,6 +254,16 @@ Short explanations of every subsystem: what it is and why we need it.
   page tables are shared – that is what makes it one machine.
 - For now the extra cores only run small jobs we hand them; the scheduler learns to use them in the next milestone.
 
+## M26 – One scheduler, many cores
+- With several cores, "interrupts off" no longer means "nobody else runs": the other cores keep going. Every shared
+  structure needs a real lock, and the order of operations suddenly matters.
+- **Switching threads**: a core must not let go of the old thread before its registers are saved, or another core could
+  start running it with stale registers. So the scheduler lock is held *through* the switch and released by the new thread.
+- **Lost wake-ups**: "check if there is input, then go to sleep" breaks if the input arrives on another core between the
+  two steps. The fix is to announce the sleep first ("I am waiting for input"), then check, then sleep – a waker that comes
+  in between simply cancels the sleep.
+- Idle cores sleep with `hlt`; when work appears, another core wakes them with an inter-processor interrupt.
+
 ## Tooling – GNU ld and binutils
 - rustc compiles our code into object files; a **linker** combines them into the final ELF according to `kernel/linker.ld`
   (load address, section order, segments). We use **GNU ld** (`ld.bfd`) for that.

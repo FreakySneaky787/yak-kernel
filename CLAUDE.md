@@ -30,6 +30,7 @@ The conversation with the user happens in German.
 | `python3 -I scripts/screenshot.py <elf> <out.png> [s] [keys…]` | boot headless, optionally send keys (QEMU `sendkey` names = US key positions), save screenshot + serial log |
 
 Tests run headless and abort after 30 s (`KERNEL_TEST_TIMEOUT`), so Claude can run them unattended.
+QEMU runs with 4 cores; `KERNEL_SMP=1 make test` (or 2, …) checks other core counts – worth doing after scheduler changes.
 Interrupt problems: QEMU monitor `info pic`, `info lapic`, `info registers`.
 Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.sh` invocation.
 
@@ -65,7 +66,7 @@ Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.s
 - `kernel/src/input.rs` – merged keyboard + serial input, `TerminalDecoder`; `kernel/src/ringbuf.rs` – IRQ-safe byte ring buffer
 - `kernel/src/shell/` – kernel shell (fallback when `/bin/sh` is missing): `mod.rs` (commands, `Shell::run`, `execute_builtin` for `kshell`),
   `line_editor.rs`, `parser.rs` (both also compiled into `/bin/sh`), `keys.rs`
-- `kernel/src/task/` – threads + preemptive scheduler (`mod.rs`), context switch assembly (`switch.rs`)
+- `kernel/src/task/` – threads + preemptive SMP scheduler (`mod.rs`, `wait_for` for blocking), context switch assembly (`switch.rs`)
 - `kernel/src/drivers/pci.rs` – PCI enumeration; `drivers/ahci.rs` – SATA driver; `drivers/block.rs` – `BlockDevice`, `RamDisk`;
   `drivers/mod.rs` – global `DISK`; `drivers/rtc.rs` – CMOS real-time clock
 - `kernel/src/fs/` – `mod.rs` (root mount `fs::ROOT`, `SystemDisk`, path `normalize`), `fat32.rs` (FAT32 read/write, LFN, `format`)

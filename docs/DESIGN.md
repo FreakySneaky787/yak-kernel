@@ -48,15 +48,24 @@
 - `kmain` switches from Limine's stack to a 64 KiB guarded stack (`mem::stack`) immediately after `kernel::init()`.
 
 ## Threads and scheduling
+- **SMP (since M26)**: `current[cpu]` / `idle[cpu]` per CPU, one shared ready queue, every CPU's LAPIC timer preempts. Each
+  thread has `on_cpu` (set while a CPU executes it or is still switching away from it). `schedule()` takes the scheduler lock,
+  picks the next thread, *forgets the guard* and switches; the next thread calls `finish_switch()`, which clears the previous
+  thread's `on_cpu` and releases the lock (`force_unlock`). New threads do that first thing in `thread_start`.
+- **Blocking**: `wait_for(reason, ready)` marks the current thread `Blocked(reason)`, then evaluates `ready()` (interrupts off,
+  scheduler lock *not* held – `ready` may take other locks), then schedules. Wakers (`notify`, `wake`, `make_ready`): a blocked
+  thread that is still `on_cpu` is set back to `Running` (it will see its condition), otherwise it is queued and an idle CPU
+  gets a `WAKE_VECTOR` IPI. Lock order: `PROCESSES` → `SCHEDULER`; pipe/keyboard/serial locks are leaves.
+- No TLB shootdowns: kernel virtual ranges are never reused after unmapping (stacks) or never unmapped (heap), and a process
+  has one thread, so only the CPU running it uses its user mappings; a CPU always reloads CR3 when it switches processes.
 - `task::Scheduler` (behind a spin lock, only touched with interrupts disabled): `BTreeMap<Tid, Box<Thread>>` (boxed so the saved
   RSP has a stable address), a FIFO ready queue, the current TID and the idle TID. Thread 0 = the boot code ("main"), runs the shell.
 - Context switch: `kernel_switch_context(old_rsp_ptr, new_rsp)` pushes rbp/rbx/r12–r15, swaps RSP, pops, `ret`. A new thread's stack
   is prepared so that `ret` lands in `kernel_thread_trampoline`, which calls `thread_start(entry)` with the boxed closure from r12.
-- `schedule()` must run with interrupts disabled and drops the lock *before* switching. A resumed thread continues with interrupts off
-  and restores them itself (via `without_interrupts`, `iretq` of the interrupted handler, or `sti` in `thread_start`).
+- `schedule()` must run with interrupts disabled. A resumed thread continues with interrupts off and restores them itself (via
+  `without_interrupts`, `iretq` of the interrupted handler, or `sti` in `thread_start`).
 - Preemption: every timer tick, if another thread is ready. The timer handler sends EOI first, then calls `task::on_tick`.
-- Blocking: `block_current(Wait)` must be called with interrupts disabled after checking the wait condition (no lost wake-ups).
-  Wake-ups: timer (`Until`), keyboard/COM1 IRQ (`Input`), `exit` (`Join`).
+- Wake-ups: timer (`Until`), keyboard/COM1 IRQ on the BSP (`Input`), `exit` (`Join`), pipes (`Pipe(id)`), `kill` (`wake`).
 - Dead threads are reaped (stack unmapped and frames freed) by a later `schedule()` call – never while running on their stack.
 
 ## Storage
@@ -107,7 +116,9 @@
   status, moves the thread to the kernel CR3, frees the address space and exits the thread. The status stays in the table until
   `process::wait` (zombie); the shell always waits.
 - **System calls** (`syscall`/`sysret`): STAR = kernel CS 0x08 / sysret base 0x10, LSTAR = `syscall_entry`, FMASK clears
-  IF/TF/DF/AC. The stub swaps to the kernel stack via a static (single CPU, interrupts off until it is pushed), saves a
+  IF/TF/DF/AC. The stub does `swapgs` (IA32_KERNEL_GS_BASE = this CPU's `CpuLocal`), parks the user RSP in `gs:[0]`, loads the
+  kernel stack from `gs:[8]`, pushes the user RSP and swaps GS back *before* enabling interrupts (a preempted syscall may
+  resume on another CPU, so GS must never stay swapped), saves a
   `SyscallFrame`, enables interrupts and calls `process::syscall::dispatch`. Convention like Linux: number in RAX, args in
   RDI/RSI/RDX/R10/R8/R9, result in RAX, negative = `-errno`; only RCX/R11 are clobbered. Syscalls may block (read, sleep).
   | # | Name | |
@@ -212,8 +223,8 @@
 - CPU index: `smp::cpu_index()` maps the local APIC ID to 0..MAX_CPUS-1 (BSP = 0; 0 before the LAPIC is set up). Used for
   the per-CPU TSS. (M26 will move this to a GS-based per-CPU block.)
 - APs (M25): own GDT/TSS (+ double fault IST stack), shared IDT, FPU/SSE, syscall MSRs, LAPIC (timer masked); they idle with
-  `sti; hlt` and run jobs from a per-CPU mailbox (`run_on`, woken by an IPI on `WAKE_VECTOR` 0xF0). The scheduler, the
-  timer and all device IRQs stay on the BSP.
+  `sti; hlt` and run jobs from a per-CPU mailbox (`run_on`, woken by an IPI on `WAKE_VECTOR` 0xF0). Since M26 every AP also runs
+  threads (its start-up context becomes its idle thread, its LAPIC timer preempts). Device IRQs (keyboard, COM1) stay on the BSP.
 
 ## GDT / TSS
 | Selector | Entry |

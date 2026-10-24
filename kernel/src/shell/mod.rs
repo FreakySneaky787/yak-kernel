@@ -677,7 +677,7 @@ fn cmd_history(shell: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(
 fn cmd_ps(_: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), String> {
     let threads = task::list();
     let total: u64 = threads.iter().map(|t| t.cpu_ticks).sum::<u64>().max(1);
-    writeln!(out, "  TID  STATE         CPU    NAME").ok();
+    writeln!(out, "  TID  STATE         CPU  ON   NAME").ok();
     for t in threads {
         let state = match t.state {
             task::State::Running => String::from("running"),
@@ -688,12 +688,14 @@ fn cmd_ps(_: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), String
             task::State::Blocked(task::Wait::Pipe(_)) => String::from("wait pipe"),
             task::State::Dead => String::from("dead"),
         };
+        let on = t.cpu.map_or(String::from("-"), |c| format!("{}", c));
         writeln!(
             out,
-            "  {:>3}  {:<12} {:>3}%    {}",
+            "  {:>3}  {:<12} {:>3}%  {:>2}   {}",
             t.id,
             state,
             t.cpu_ticks * 100 / total,
+            on,
             t.name
         )
         .ok();

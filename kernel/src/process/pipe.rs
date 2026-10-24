@@ -14,7 +14,7 @@
 //! locked, interrupts off). Blocked threads wait on `Wait::Pipe(id)` and are
 //! notified on every change; they also wake up for a `kill`.
 
-use crate::arch::x86_64::{disable_interrupts, enable_interrupts, without_interrupts};
+use crate::arch::x86_64::without_interrupts;
 use crate::task::{self, Wait};
 use alloc::collections::VecDeque;
 use alloc::sync::Arc;
@@ -109,8 +109,7 @@ impl PipeEnd {
     /// blocking (a pending kill).
     pub fn read(&self, max: usize, abort: impl Fn() -> bool) -> Result<Vec<u8>, PipeError> {
         loop {
-            disable_interrupts();
-            let result = {
+            let result = without_interrupts(|| {
                 let mut inner = self.pipe.inner.lock();
                 if !inner.buf.is_empty() || inner.writers == 0 {
                     let n = inner.buf.len().min(max);
@@ -118,24 +117,32 @@ impl PipeEnd {
                 } else {
                     None
                 }
-            };
-            match result {
-                Some(data) => {
-                    enable_interrupts();
-                    task::notify(Wait::Pipe(self.pipe.id)); // room for writers
-                    return Ok(data);
-                }
-                None if abort() => {
-                    enable_interrupts();
-                    return Err(PipeError::Interrupted);
-                }
-                None => {
-                    // interrupts stay off from the check until we are on the wait list
-                    task::block_current(Wait::Pipe(self.pipe.id));
-                    enable_interrupts();
-                }
+            });
+            if let Some(data) = result {
+                task::notify(Wait::Pipe(self.pipe.id)); // room for writers
+                return Ok(data);
             }
+            if abort() {
+                return Err(PipeError::Interrupted);
+            }
+            task::wait_for(Wait::Pipe(self.pipe.id), || self.readable() || abort());
         }
+    }
+
+    /// Data to read, or no writer left (end of file).
+    fn readable(&self) -> bool {
+        without_interrupts(|| {
+            let inner = self.pipe.inner.lock();
+            !inner.buf.is_empty() || inner.writers == 0
+        })
+    }
+
+    /// Room to write, or no reader left (broken pipe).
+    fn writable(&self) -> bool {
+        without_interrupts(|| {
+            let inner = self.pipe.inner.lock();
+            inner.buf.len() < PIPE_CAPACITY || inner.readers == 0
+        })
     }
 
     /// Writes all of `data`, blocking while the pipe is full. Returns the
@@ -144,8 +151,7 @@ impl PipeEnd {
     pub fn write(&self, data: &[u8], abort: impl Fn() -> bool) -> Result<usize, PipeError> {
         let mut done = 0;
         while done < data.len() {
-            disable_interrupts();
-            let (written, broken) = {
+            let (written, broken) = without_interrupts(|| {
                 let mut inner = self.pipe.inner.lock();
                 if inner.readers == 0 {
                     (0, true)
@@ -154,27 +160,23 @@ impl PipeEnd {
                     inner.buf.extend(&data[done..done + n]);
                     (n, false)
                 }
-            };
+            });
             if broken {
-                enable_interrupts();
                 return Err(PipeError::Broken);
             }
             if written > 0 {
                 done += written;
-                enable_interrupts();
                 task::notify(Wait::Pipe(self.pipe.id)); // data for readers
                 continue;
             }
             if abort() {
-                enable_interrupts();
                 return if done > 0 {
                     Ok(done)
                 } else {
                     Err(PipeError::Interrupted)
                 };
             }
-            task::block_current(Wait::Pipe(self.pipe.id));
-            enable_interrupts();
+            task::wait_for(Wait::Pipe(self.pipe.id), || self.writable() || abort());
         }
         Ok(done)
     }

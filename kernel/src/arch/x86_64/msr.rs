@@ -12,6 +12,10 @@ pub const IA32_STAR: u32 = 0xC000_0081;
 pub const IA32_LSTAR: u32 = 0xC000_0082;
 /// RFLAGS bits that `syscall` clears.
 pub const IA32_FMASK: u32 = 0xC000_0084;
+/// Base of the GS segment (the active one).
+pub const IA32_GS_BASE: u32 = 0xC000_0101;
+/// The other GS base, exchanged with the active one by `swapgs`.
+pub const IA32_KERNEL_GS_BASE: u32 = 0xC000_0102;
 
 pub fn read(msr: u32) -> u64 {
     let (low, high): (u32, u32);

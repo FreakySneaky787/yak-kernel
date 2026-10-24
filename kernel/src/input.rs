@@ -6,7 +6,6 @@
 //! printable UTF-8, Enter (CR / LF / CRLF), Backspace (DEL or BS), Ctrl+letter
 //! (0x01-0x1A) and ANSI escape sequences for arrows, Home/End and Delete.
 
-use crate::arch::x86_64::{disable_interrupts, enable_interrupts};
 use crate::drivers::keyboard;
 use crate::drivers::scancode::{Key, KeyEvent};
 use crate::serial;
@@ -164,21 +163,14 @@ pub fn read_key_or_abort(abort: impl Fn() -> bool) -> Option<KeyEvent> {
         if let Some(event) = try_read_key() {
             return Some(event);
         }
-        // Check and block atomically: with interrupts off, no input can
-        // arrive between the check and putting the thread on the wait list.
-        disable_interrupts();
         if abort() {
-            enable_interrupts();
             return None;
         }
-        if keyboard::has_pending() || serial::has_pending() {
-            enable_interrupts();
-        } else if crate::task::is_running() {
-            crate::task::block_current(crate::task::Wait::Input);
-            enable_interrupts();
-        } else {
-            unsafe { core::arch::asm!("sti; hlt", options(nomem, nostack)) };
-        }
+        // `wait_for` marks us waiting before it checks, so input arriving on
+        // another CPU in between still wakes us
+        crate::task::wait_for(crate::task::Wait::Input, || {
+            keyboard::has_pending() || serial::has_pending() || abort()
+        });
     }
 }
 

@@ -200,9 +200,13 @@ mod tests {
 
     #[test_case]
     fn gdtr_points_to_our_gdt() {
-        let (limit, base) = read_gdtr();
+        // interrupts off: the thread must not move to another CPU in between
+        let (limit, base, cpu) = crate::arch::x86_64::without_interrupts(|| {
+            let (l, b) = read_gdtr();
+            (l, b, smp::cpu_index())
+        });
         assert_eq!(limit as usize, size_of::<Gdt>() - 1);
-        assert_eq!(base, GDT[0].get().unwrap() as *const _ as u64);
+        assert_eq!(base, GDT[cpu].get().unwrap() as *const _ as u64);
     }
 
     #[test_case]

@@ -12,10 +12,11 @@
 //! on a fresh kernel stack. APs are started one after another.
 //!
 //! In `ap_main` every AP loads its own GDT/TSS, the shared IDT, enables its
-//! FPU/SSE, syscall MSRs and local APIC, reports in and then waits for jobs
-//! (`run_on`): it sleeps with `hlt` and is woken by a `WAKE_VECTOR` IPI.
-//! The scheduler still runs on the BSP only (M26 changes that), so jobs must
-//! not block or use the scheduler.
+//! FPU/SSE, syscall MSRs and local APIC, turns its start-up context into its
+//! idle thread (`task::init_cpu`), starts its LAPIC timer and reports in.
+//! From then on the scheduler runs threads on it. The idle thread also runs
+//! jobs handed to this CPU with `run_on` (woken by a `WAKE_VECTOR` IPI, which
+//! also makes an idle CPU look for ready threads); jobs must not block.
 
 use super::{gdt, interrupts, lapic};
 use crate::mem::paging::{self, Flags};
@@ -195,13 +196,16 @@ fn patch(base: VirtAddr, field: *const u8, value: u64, size: usize) {
 /// Where the AP lands in long mode, on its own stack.
 extern "C" fn ap_main(cpu: u64) -> ! {
     let cpu = cpu as usize;
+    // first, so that `cpu_index()` is right from here on
+    APIC_TO_CPU[lapic::id() as usize].store(cpu as u8, Ordering::Relaxed);
     let df_stack = stack::alloc_stack(5).expect("no memory for a double fault stack");
     gdt::init_cpu(cpu, df_stack.top.as_u64());
     interrupts::kernel_idt().expect("IDT not built").load();
     super::fpu::init();
-    super::syscall::init();
+    super::syscall::init(cpu);
     lapic::init_local();
-    APIC_TO_CPU[lapic::id() as usize].store(cpu as u8, Ordering::Relaxed);
+    crate::task::init_cpu(cpu, &alloc::format!("idle{}", cpu));
+    lapic::start_timer_calibrated(super::irq::TIMER_VECTOR);
     ONLINE[cpu].store(true, Ordering::Release);
     ap_idle(cpu)
 }
@@ -237,21 +241,36 @@ pub fn run_on<R: Send + 'static>(cpu: usize, f: impl FnOnce() -> R + Send + 'sta
         let r = f();
         *slot.lock() = Some(r);
     });
+    let mut job = Some(job);
     loop {
-        let mut mailbox = JOBS[cpu].lock();
-        if mailbox.is_none() {
-            *mailbox = Some(job);
+        // interrupts off while holding the mailbox: the AP takes it with interrupts off too
+        let posted = super::without_interrupts(|| {
+            let mut mailbox = JOBS[cpu].lock();
+            if mailbox.is_none() {
+                *mailbox = job.take();
+                true
+            } else {
+                false
+            }
+        });
+        if posted {
             break;
         }
-        drop(mailbox);
         crate::task::yield_now(); // another job is still pending there
     }
-    lapic::send_fixed(CPU_APIC_ID[cpu].load(Ordering::Relaxed), WAKE_VECTOR);
+    wake_cpu(cpu);
     loop {
         if let Some(r) = result.lock().take() {
             return Some(r);
         }
         crate::task::yield_now();
+    }
+}
+
+/// Sends the wake-up IPI to CPU `cpu`.
+pub fn wake_cpu(cpu: usize) {
+    if ONLINE[cpu].load(Ordering::Acquire) {
+        lapic::send_fixed(CPU_APIC_ID[cpu].load(Ordering::Relaxed), WAKE_VECTOR);
     }
 }
 
@@ -373,8 +392,6 @@ mod tests {
             "APIC IDs online: {:?}",
             online_apic_ids()
         );
-        assert!(online_count() >= 2, "the tests run with -smp 4");
-        assert_eq!(cpu_index(), 0, "tests run on the boot CPU");
     }
 
     #[test_case]
@@ -407,6 +424,38 @@ mod tests {
             });
             assert_eq!(v, Some((499_500 * cpu as u64, true)));
         }
+    }
+
+    #[test_case]
+    fn threads_run_on_several_cpus_at_once() {
+        use crate::task;
+        use core::sync::atomic::AtomicU32;
+        if online_count() < 2 {
+            return; // KERNEL_SMP=1
+        }
+        let stop = Arc::new(AtomicBool::new(false));
+        let cpus_seen = Arc::new(AtomicU32::new(0)); // bit mask
+        let running = Arc::new(AtomicUsize::new(0));
+        let ids: Vec<_> = (0..online_count())
+            .map(|_| {
+                let (stop, seen, running) = (stop.clone(), cpus_seen.clone(), running.clone());
+                task::spawn("smp-spin", move || {
+                    running.fetch_add(1, Ordering::SeqCst);
+                    while !stop.load(Ordering::Relaxed) {
+                        seen.fetch_or(1 << cpu_index(), Ordering::Relaxed);
+                        core::hint::spin_loop();
+                    }
+                })
+            })
+            .collect();
+        time::sleep_ms(200);
+        stop.store(true, Ordering::Relaxed);
+        for id in ids {
+            task::join(id);
+        }
+        let seen = cpus_seen.load(Ordering::Relaxed);
+        assert!(seen.count_ones() >= 2, "spinning threads only ran on CPUs {:#b}", seen);
+        assert_eq!(running.load(Ordering::SeqCst), online_count());
     }
 
     #[test_case]

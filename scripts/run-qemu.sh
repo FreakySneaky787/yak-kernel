@@ -8,6 +8,7 @@
 #                      headless, timeout, isa-debug-exit status is evaluated
 #   KERNEL_DEBUG=1     QEMU waits for gdb (-s -S)
 #   KERNEL_DISK=<img>  use this disk image instead of the default one
+#   KERNEL_SMP=<n>     number of CPU cores (default 4)
 set -euo pipefail
 
 ELF="$1"; shift || true
@@ -68,7 +69,7 @@ else
 fi
 
 QEMU_ARGS=(
-    -M q35 -m 256M -smp 4
+    -M q35 -m 256M -smp "${KERNEL_SMP:-4}"
     -cdrom "$ISO"
     -boot d
     -no-reboot

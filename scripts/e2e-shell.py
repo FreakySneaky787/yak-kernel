@@ -34,6 +34,7 @@ HOME = "\x1b[H"
 END = "\x1b[F"
 CTRL_C = "\x03"
 PAUSE = "\0"  # never typed: splits the keys of a step
+CPUS = int(os.environ.get("KERNEL_SMP", "4"))  # same default as scripts/run-qemu.sh
 
 # (keys to type, substrings that must appear in the output, substrings that must not)
 STEPS = [
@@ -46,7 +47,7 @@ STEPS = [
     ("mem\r", ["Physical:", "MiB usable", "Heap:"], []),
     ("memmap\r", ["usable", "kernel and modules"], []),
     ("uptime\r", ["up 00:", "ticks at 100 Hz"], []),
-    ("cpu\r", ["Vendor:", "Flags:", "lm", "CPUs:   4 online (APIC IDs 0 1 2 3)"], []),  # SMP (M25)
+    ("cpu\r", ["Vendor:", "Flags:", "lm", f"CPUs:   {CPUS} online"], []),  # SMP (M25), cores from KERNEL_SMP
     ("acpi\r", ["APIC", "I/O APIC", "ISA IRQ 0 -> GSI 2"], []),
     ("layout us\r", ["keyboard layout: Us"], []),
     ("layout de\r", ["keyboard layout: De"], []),

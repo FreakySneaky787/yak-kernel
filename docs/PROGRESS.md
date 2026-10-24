@@ -47,7 +47,7 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 |---|---|---|---|
 | 24 | FPU/SSE state per thread; user programs built with SSE2 hardware floating point | ✅ | 3 FPU unit tests (CR0/CR4, initial state, save/restore), `fputest` (4 preempted workers checking XMM0–15 + MXCSR, pi with f64) in integration + E2E; verified that it fails without the switch |
 | 25 | SMP part 1: start the other cores ourselves (trampoline, INIT/SIPI), per-CPU GDT/TSS/LAPIC, jobs on APs | ✅ | 4 SMP unit tests (all MADT CPUs online, jobs run on the right CPU with its own TSS, FPU + heap on APs, trampoline page), E2E `cpu` shows 4 CPUs, BIOS + UEFI, 3 stable runs |
-| 26 | SMP part 2: scheduler on all cores (per-CPU data via GS/`swapgs`, per-CPU current thread, locking review) | ⬜ | |
+| 26 | SMP part 2: scheduler on all cores (per-CPU current/idle thread, lock held across switches, no lost wake-ups, `swapgs` in the syscall stub) | ✅ | new test: spinning threads seen on ≥ 2 CPUs; whole suite green with `KERNEL_SMP=1`, `2` and `4`; `demo 4`: 760 ms on 1 core → 200 ms on 4 |
 | 27 | Network: virtio-net/e1000 driver, Ethernet/ARP/IPv4/ICMP/UDP, `ping` | ⬜ | |
 
 ## Log
@@ -197,6 +197,14 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   per CPU) with its own double fault stack, shared IDT, FPU/SSE, syscall MSRs, local APIC, then `hlt` until a `WAKE_VECTOR`
   IPI brings a job (`smp::run_on`). QEMU runs with `-smp 4`; `cpu` lists the online CPUs.
 
+- **2026-10-24** – M26: the scheduler runs on every core. Per CPU: current thread, idle thread (APs turn their start-up context
+  into it), LAPIC timer (calibrated once on the BSP; only CPU 0 advances `time::ticks`). Shared ready queue; `schedule()` keeps
+  the scheduler lock across the context switch and the next thread releases it (`finish_switch`), so a thread that is still
+  being switched out (`on_cpu`) can never be picked by another CPU. `block_current` replaced by `wait_for(reason, ready)`:
+  mark blocked first, then check – no lost wake-ups across CPUs; wakers on a thread still `on_cpu` just set it running.
+  Idle CPUs get a wake-up IPI when a thread becomes ready. Syscall stub: per-CPU slots through `swapgs`/IA32_KERNEL_GS_BASE,
+  swapped back before interrupts are enabled. `ps` shows the CPU a thread runs on. `KERNEL_SMP=<n>` selects the core count.
+
 ## Open items / later
 - AHCI uses polling; switching to completion interrupts (MSI or the PCI interrupt line) would free the CPU during I/O.
 - Thread-level sleeping mutex (today all shared state uses spin locks with interrupts disabled).
@@ -214,10 +222,8 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   write, append, echo, sleep, clear, help. Without `/bin` on the disk, the kernel shell has no `ls`/`cat`.
 
 ## Next step
-**M26 – scheduler on all cores:** per-CPU block (GS base: self pointer, CPU index, current thread, kernel stack for syscalls,
-user RSP scratch) with `swapgs` on every entry from ring 3 (syscall stub, interrupts/exceptions with CS.RPL = 3); per-CPU
-current thread and idle thread in the scheduler, a shared ready queue with real locking, LAPIC timer on every CPU, wake-ups
-across CPUs (IPI to an idle CPU when a thread becomes ready). Review every global that relied on "one CPU, interrupts off":
-`SCHEDULER`, `PROCESSES`, `FOREGROUND`, pipes, `fs::ROOT`, `DISK`, the console, `syscall::USER_RSP`. TLB shootdown when user
-page tables change (only the owning process's thread runs them, so mostly not needed yet) and when kernel mappings are removed.
-Tests: threads run on several CPUs at once (`demo` faster), the whole suite with `-smp 4` and `-smp 1`.
+**M27 – network:** a PCI network card driver (virtio-net: virtqueues with descriptors in physical memory; QEMU
+`-netdev user -device virtio-net-pci`), Ethernet frames, ARP (resolve the gateway 10.0.2.2), IPv4, ICMP echo and UDP.
+User space gets a small socket-like syscall set (send/receive UDP datagrams, ping), programs `ping` and `udpecho`.
+Tests: ARP + ICMP against QEMU's user-mode network (`ping 10.0.2.2`), UDP to QEMU's built-in DNS (10.0.2.3) or to a
+host port forwarded with `hostfwd` and answered by a small Python echo server in the E2E test.
