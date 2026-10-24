@@ -143,6 +143,18 @@ Short explanations of every subsystem: what it is and why we need it.
 - A disk is just a long array of **sectors** (512 bytes). `READ DMA EXT` / `WRITE DMA EXT` move sectors between disk and RAM,
   addressed by their number (**LBA**, logical block address). File systems are built on top of this.
 
+## M15 – The FAT32 file system
+- A **file system** turns the flat array of sectors into named files and directories. FAT32 is old and simple, and every OS
+  (and Linux tools like `fsck.fat` and mtools) can read it – ideal to check our own code against.
+- The disk is split into **clusters** (here 512 bytes). The **FAT** (file allocation table) has one entry per cluster saying
+  which cluster comes next in the same file – a file is a linked list of clusters. 0 = free, `0x0FFFFFF8+` = end of the file.
+- A **directory** is just a file full of 32-byte entries: name, attributes, first cluster, size, timestamps.
+- Names were originally limited to 8+3 upper-case characters. **Long file names** (VFAT) are stored in extra hidden entries
+  right before the 8.3 entry, 13 UTF-16 characters each, protected by a checksum of the short name.
+- **Persistence** means: after `write`, the data must really be on the disk image, so the kernel flushes the disk after every
+  change. The E2E test proves it by writing a file, powering off, booting again and reading it back.
+- The **RTC** (real-time clock) is a battery-powered clock chip; we read it via ports 0x70/0x71 for file timestamps and `date`.
+
 ## Tooling – GNU ld and binutils
 - rustc compiles our code into object files; a **linker** combines them into the final ELF according to `kernel/linker.ld`
   (load address, section order, segments). We use **GNU ld** (`ld.bfd`) for that.

@@ -366,14 +366,17 @@ mod tests {
     }
 
     #[test_case]
-    fn vec_grows_beyond_initial_heap() {
+    fn heap_grows_when_full() {
+        // Ask for more than the largest free block, independent of what earlier tests left behind
         let before = HEAP.mapped();
-        let mut v = Vec::new();
-        for i in 0..300_000u64 {
-            v.push(i); // 2.4 MB > 1 MiB initial heap
+        let wanted = stats().largest_free_block + 256 * 1024;
+        let mut v: Vec<u64> = Vec::with_capacity(wanted / 8);
+        for i in 0..(wanted / 8) as u64 {
+            v.push(i);
         }
-        assert_eq!(v.iter().sum::<u64>(), 300_000 * 299_999 / 2);
-        assert!(HEAP.mapped() > before.max(HEAP_INITIAL_SIZE));
+        let n = v.len() as u64;
+        assert_eq!(v.iter().sum::<u64>(), n * (n - 1) / 2);
+        assert!(HEAP.mapped() > before, "heap did not grow");
     }
 
     #[test_case]

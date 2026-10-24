@@ -65,6 +65,22 @@
   created by `scripts/mkdisk.sh` from `rootfs/`. QEMU: `-device ide-hd,bus=ide.0` = AHCI port 0 (the boot CD is ATAPI on port 2).
   Run mode uses the persistent `build/disk.img`; every test binary and the E2E test get fresh images.
 
+## File system
+- One FAT32 volume on the system disk, mounted at boot as `fs::ROOT` (a spin lock like `DISK`: never from interrupt handlers).
+  `FatFs<D: BlockDevice>` is generic, so the same code runs on `SystemDisk` (adapter for `drivers::DISK`) and on `RamDisk` in tests.
+- Mount: FAT32 boot sector at LBA 0 (superfloppy), otherwise the first MBR partition of type 0x0B/0x0C. Only 512-byte sectors.
+- No block cache: data clusters are read/written directly. Only one FAT sector is cached; FAT updates are written through to
+  **every** FAT copy immediately. Every mutating operation ends with `sync` (FSInfo hints + disk flush), so a `poweroff` or reset
+  right after a command never leaves the volume inconsistent. Simple and safe, slow for big files – fine for now.
+- Names: a name that fits 8.3 in one case per part (`hello.txt`, `README`) is stored as a plain short entry with the NT
+  lower-case flags, like Windows/Linux do. Everything else gets LFN entries plus a unique 8.3 alias (`MYNOTE~1`).
+  Lookup is case-insensitive on long and short names.
+- Paths at the FS API are absolute and normalized (`/a/b`); the shell owns the current directory and calls `fs::normalize`.
+- `rm` refuses non-empty directories; `mv` only rewrites directory entries (and the `..` entry of moved directories).
+- Timestamps come from the CMOS RTC (`drivers/rtc.rs`, treated as UTC).
+- Validation outside the kernel: after `make test`, `scripts/check-test-disks.sh` runs `fsck.fat -n` on every test disk and
+  checks kernel-written files with mtools; the E2E test does the same for its disk after two boots.
+
 ## Kernel heap
 - `mem::heap::LinkedListHeap`: free blocks form a singly linked list sorted by address; each free block stores `size` + `next` in its first 16 bytes.
 - First fit; a block is split into [front padding][allocation][rest], padding and rest go back to the list. Freeing inserts by address and merges neighbours.

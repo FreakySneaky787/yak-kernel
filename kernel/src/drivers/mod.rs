@@ -2,6 +2,7 @@ pub mod ahci;
 pub mod block;
 pub mod keyboard;
 pub mod pci;
+pub mod rtc;
 pub mod scancode;
 
 use alloc::vec::Vec;

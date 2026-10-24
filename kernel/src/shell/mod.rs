@@ -10,6 +10,7 @@ pub mod parser;
 use crate::arch::x86_64::{cpu, power};
 use crate::drivers::keyboard;
 use crate::drivers::scancode::Layout;
+use crate::fs::{self, fat32::FsError};
 use crate::mem::{heap, pmm};
 use crate::{boot, input, task, time};
 use alloc::format;
@@ -18,7 +19,10 @@ use alloc::vec::Vec;
 use core::fmt::{self, Write};
 use line_editor::{EditResult, LineEditor};
 
-pub const PROMPT: &str = "\x1b[92mkernel\x1b[0m> ";
+/// Prompt: "kernel:<current directory>> " (with colours).
+fn prompt(cwd: &str) -> String {
+    format!("\x1b[92mkernel\x1b[0m:\x1b[94m{}\x1b[0m> ", cwd)
+}
 
 /// Writes to the screen and the serial port.
 pub struct Stdout;
@@ -143,6 +147,84 @@ pub static COMMANDS: &[Command] = &[
         run: cmd_colors,
     },
     Command {
+        name: "ls",
+        usage: "ls [path]",
+        help: "list a directory",
+        run: cmd_ls,
+    },
+    Command {
+        name: "cd",
+        usage: "cd [path]",
+        help: "change the current directory",
+        run: cmd_cd,
+    },
+    Command {
+        name: "pwd",
+        usage: "pwd",
+        help: "print the current directory",
+        run: cmd_pwd,
+    },
+    Command {
+        name: "cat",
+        usage: "cat <file>...",
+        help: "print files",
+        run: cmd_cat,
+    },
+    Command {
+        name: "write",
+        usage: "write <file> <text...>",
+        help: "replace a file's contents with a line of text",
+        run: cmd_write,
+    },
+    Command {
+        name: "append",
+        usage: "append <file> <text...>",
+        help: "add a line of text to a file",
+        run: cmd_append,
+    },
+    Command {
+        name: "touch",
+        usage: "touch <file>",
+        help: "create an empty file if it does not exist",
+        run: cmd_touch,
+    },
+    Command {
+        name: "mkdir",
+        usage: "mkdir <dir>",
+        help: "create a directory",
+        run: cmd_mkdir,
+    },
+    Command {
+        name: "rm",
+        usage: "rm <path>",
+        help: "delete a file or an empty directory",
+        run: cmd_rm,
+    },
+    Command {
+        name: "mv",
+        usage: "mv <from> <to>",
+        help: "rename or move a file or directory",
+        run: cmd_mv,
+    },
+    Command {
+        name: "stat",
+        usage: "stat <path>",
+        help: "details about a file or directory",
+        run: cmd_stat,
+    },
+    Command {
+        name: "df",
+        usage: "df",
+        help: "file system usage",
+        run: cmd_df,
+    },
+    Command {
+        name: "date",
+        usage: "date",
+        help: "current date and time (CMOS clock)",
+        run: cmd_date,
+    },
+    Command {
         name: "version",
         usage: "version",
         help: "kernel version",
@@ -189,6 +271,8 @@ pub fn complete_command(prefix: &str) -> Vec<String> {
 
 pub struct Shell {
     editor: LineEditor,
+    /// Current directory (absolute, normalized).
+    cwd: String,
 }
 
 impl Default for Shell {
@@ -201,6 +285,7 @@ impl Shell {
     pub fn new() -> Shell {
         Shell {
             editor: LineEditor::new(),
+            cwd: String::from("/"),
         }
     }
 
@@ -233,7 +318,8 @@ impl Shell {
     pub fn run(&mut self) -> ! {
         let mut out = Stdout;
         loop {
-            self.editor.start(PROMPT, &mut out);
+            let prompt = prompt(&self.cwd);
+            self.editor.start(&prompt, &mut out);
             loop {
                 let event = input::read_key();
                 match self.editor.handle(event, &mut out, &complete_command) {
@@ -606,6 +692,171 @@ fn cmd_colors(_: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), St
     Ok(())
 }
 
+// ---- file system commands ----
+
+impl Shell {
+    pub fn cwd(&self) -> &str {
+        &self.cwd
+    }
+
+    fn path(&self, arg: &str) -> String {
+        fs::normalize(&self.cwd, arg)
+    }
+}
+
+fn fs_err(path: &str, e: FsError) -> String {
+    format!("{}: {}", path, e)
+}
+
+fn arg<'a>(args: &'a [String], i: usize, usage: &str) -> Result<&'a str, String> {
+    args.get(i)
+        .map(|s| s.as_str())
+        .ok_or_else(|| format!("usage: {}", usage))
+}
+
+fn cmd_ls(shell: &mut Shell, args: &[String], out: &mut dyn Write) -> Result<(), String> {
+    let path = shell.path(args.first().map_or(".", |s| s.as_str()));
+    let entry = fs::with_root(|fs| fs.lookup(&path)).map_err(|e| fs_err(&path, e))?;
+    let entries = if entry.is_dir() {
+        fs::with_root(|fs| fs.read_dir(&path)).map_err(|e| fs_err(&path, e))?
+    } else {
+        alloc::vec![entry]
+    };
+    for e in entries {
+        let size = if e.is_dir() {
+            String::from("<DIR>")
+        } else {
+            format!("{}", e.size)
+        };
+        let name = if e.is_dir() {
+            format!("\x1b[94m{}/\x1b[0m", e.name)
+        } else {
+            e.name.clone()
+        };
+        writeln!(out, "  {:>10}  {}  {}", size, e.modified, name).ok();
+    }
+    Ok(())
+}
+
+fn cmd_cd(shell: &mut Shell, args: &[String], _: &mut dyn Write) -> Result<(), String> {
+    let path = shell.path(args.first().map_or("/", |s| s.as_str()));
+    let entry = fs::with_root(|fs| fs.lookup(&path)).map_err(|e| fs_err(&path, e))?;
+    if !entry.is_dir() {
+        return Err(fs_err(&path, FsError::NotADirectory));
+    }
+    shell.cwd = path;
+    Ok(())
+}
+
+fn cmd_pwd(shell: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), String> {
+    writeln!(out, "{}", shell.cwd).ok();
+    Ok(())
+}
+
+fn cmd_cat(shell: &mut Shell, args: &[String], out: &mut dyn Write) -> Result<(), String> {
+    arg(args, 0, "cat <file>...")?;
+    for a in args {
+        let path = shell.path(a);
+        let data = fs::with_root(|fs| fs.read_file(&path)).map_err(|e| fs_err(&path, e))?;
+        let text = String::from_utf8_lossy(&data);
+        out.write_str(&text).ok();
+        if !text.is_empty() && !text.ends_with('\n') {
+            writeln!(out).ok();
+        }
+    }
+    Ok(())
+}
+
+fn text_line(args: &[String]) -> Vec<u8> {
+    let mut line = args.join(" ");
+    line.push('\n');
+    line.into_bytes()
+}
+
+fn cmd_write(shell: &mut Shell, args: &[String], _: &mut dyn Write) -> Result<(), String> {
+    let path = shell.path(arg(args, 0, "write <file> <text...>")?);
+    fs::with_root(|fs| fs.write_file(&path, &text_line(&args[1..]))).map_err(|e| fs_err(&path, e))
+}
+
+fn cmd_append(shell: &mut Shell, args: &[String], _: &mut dyn Write) -> Result<(), String> {
+    let path = shell.path(arg(args, 0, "append <file> <text...>")?);
+    fs::with_root(|fs| fs.append_file(&path, &text_line(&args[1..]))).map_err(|e| fs_err(&path, e))
+}
+
+fn cmd_touch(shell: &mut Shell, args: &[String], _: &mut dyn Write) -> Result<(), String> {
+    let path = shell.path(arg(args, 0, "touch <file>")?);
+    fs::with_root(|fs| match fs.lookup(&path) {
+        Ok(_) => Ok(()),
+        Err(FsError::NotFound) => fs.write_file(&path, b""),
+        Err(e) => Err(e),
+    })
+    .map_err(|e| fs_err(&path, e))
+}
+
+fn cmd_mkdir(shell: &mut Shell, args: &[String], _: &mut dyn Write) -> Result<(), String> {
+    let path = shell.path(arg(args, 0, "mkdir <dir>")?);
+    fs::with_root(|fs| fs.create_dir(&path)).map_err(|e| fs_err(&path, e))
+}
+
+fn cmd_rm(shell: &mut Shell, args: &[String], _: &mut dyn Write) -> Result<(), String> {
+    let path = shell.path(arg(args, 0, "rm <path>")?);
+    if shell.cwd == path || shell.cwd.starts_with(&format!("{}/", path)) {
+        return Err(String::from(
+            "cannot remove the current directory or one of its parents",
+        ));
+    }
+    fs::with_root(|fs| fs.remove(&path)).map_err(|e| fs_err(&path, e))
+}
+
+fn cmd_mv(shell: &mut Shell, args: &[String], _: &mut dyn Write) -> Result<(), String> {
+    let from = shell.path(arg(args, 0, "mv <from> <to>")?);
+    let mut to = shell.path(arg(args, 1, "mv <from> <to>")?);
+    // "mv file dir" moves the file into the directory
+    if let Ok(target) = fs::with_root(|fs| fs.lookup(&to)) {
+        if target.is_dir() {
+            let name = from.rsplit('/').next().unwrap_or("");
+            to = fs::normalize(&to, name);
+        }
+    }
+    fs::with_root(|fs| fs.rename(&from, &to)).map_err(|e| fs_err(&from, e))
+}
+
+fn cmd_stat(shell: &mut Shell, args: &[String], out: &mut dyn Write) -> Result<(), String> {
+    let path = shell.path(arg(args, 0, "stat <path>")?);
+    let e = fs::with_root(|fs| fs.lookup(&path)).map_err(|e| fs_err(&path, e))?;
+    writeln!(out, "  path:      {}", path).ok();
+    writeln!(out, "  type:      {}", if e.is_dir() { "directory" } else { "file" }).ok();
+    writeln!(out, "  size:      {} bytes", e.size).ok();
+    writeln!(out, "  modified:  {}", e.modified).ok();
+    writeln!(out, "  8.3 name:  {}", e.short_name()).ok();
+    writeln!(out, "  cluster:   {}", e.cluster).ok();
+    Ok(())
+}
+
+fn cmd_df(_: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), String> {
+    let (label, s) = fs::with_root(|fs| Ok((String::from(fs.label()), fs.stats()))).map_err(|e| format!("{}", e))?;
+    let total = s.total_clusters as u64 * s.cluster_size as u64;
+    let free = s.free_clusters as u64 * s.cluster_size as u64;
+    const KIB: u64 = 1024;
+    writeln!(out, "FAT32 volume '{}' on the system disk", label).ok();
+    writeln!(
+        out,
+        "  size {} KiB, used {} KiB, free {} KiB ({} % used), cluster size {} bytes",
+        total / KIB,
+        (total - free) / KIB,
+        free / KIB,
+        (total - free) * 100 / total.max(1),
+        s.cluster_size
+    )
+    .ok();
+    Ok(())
+}
+
+fn cmd_date(_: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), String> {
+    writeln!(out, "{}", crate::drivers::rtc::now()).ok();
+    Ok(())
+}
+
 fn cmd_version(_: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), String> {
     writeln!(
         out,
@@ -731,6 +982,38 @@ mod tests {
         assert!(out.contains("000001f0") && out.contains("55 aa"), "{}", out);
         assert!(!run("hexdump").0);
         assert!(!run("hexdump 0 99").0);
+    }
+
+    #[test_case]
+    fn file_commands() {
+        let mut shell = Shell::new();
+        let mut out = String::new();
+        let mut ok = |shell: &mut Shell, line: &str| {
+            out.clear();
+            let r = shell.execute(line, &mut out);
+            (r, out.clone())
+        };
+        assert!(ok(&mut shell, "mkdir shelltest").0);
+        assert!(ok(&mut shell, "cd shelltest").0);
+        assert_eq!(shell.cwd(), "/shelltest");
+        assert!(ok(&mut shell, "write notes.txt hello file system").0);
+        assert!(ok(&mut shell, "append notes.txt second line").0);
+        assert_eq!(ok(&mut shell, "cat notes.txt").1, "hello file system\nsecond line\n");
+        assert!(ok(&mut shell, "ls").1.contains("notes.txt"));
+        assert!(ok(&mut shell, "mv notes.txt \"renamed notes.txt\"").0);
+        assert!(ok(&mut shell, "stat \"renamed notes.txt\"").1.contains("30 bytes"));
+        assert!(ok(&mut shell, "touch empty").0);
+        assert!(ok(&mut shell, "cat empty").1.is_empty());
+        assert!(!ok(&mut shell, "rm /shelltest").0, "removing the cwd must fail");
+        assert!(ok(&mut shell, "cd ..").0);
+        assert_eq!(shell.cwd(), "/");
+        assert!(!ok(&mut shell, "rm shelltest").1.is_empty(), "not empty");
+        assert!(ok(&mut shell, "rm \"shelltest/renamed notes.txt\"").0);
+        assert!(ok(&mut shell, "rm shelltest/empty").0);
+        assert!(ok(&mut shell, "rm shelltest").0);
+        assert!(ok(&mut shell, "cat nothing-here").1.contains("no such file"));
+        assert!(ok(&mut shell, "df").1.contains("KERNELTRY"));
+        assert!(!ok(&mut shell, "cd README.txt").0);
     }
 
     #[test_case]

@@ -5,8 +5,11 @@ Usage: scripts/e2e-shell.py <kernel-elf> [extra QEMU arguments...]
 
 Each step types a line (exactly like a user on a serial terminal, including
 escape sequences for arrow keys and Tab), waits for the next prompt, and checks
-the output between the two prompts. The last step powers the machine off and
-expects QEMU to exit.
+the output between the two prompts. Each session ends with `poweroff`.
+
+Two sessions run on the same scratch disk: the second one boots again and
+checks that files written in the first one survived. Finally `fsck.fat`
+validates the disk image.
 """
 import os
 import re
@@ -16,7 +19,7 @@ import threading
 import time
 
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
-PROMPT = "kernel> "
+PROMPT = re.compile(r"kernel:(/[^>\n]*)> ")
 LEFT = "\x1b[D"
 RIGHT = "\x1b[C"
 UP = "\x1b[A"
@@ -44,9 +47,31 @@ STEPS = [
     ("disk\r", ["QEMU HARDDISK", "64 MiB", "Atapi"], []),
     ("hexdump 0\r", ["FAT32", "55 aa"], []),
     ("history\r", ["echo hello from e2e", "version"], []),
+    ("ls /\r", ["README.txt", "docs/", "etc/"], []),
+    ("cat /docs/hello.txt\r", ["Hello from a file on a real (virtual) SATA disk."], []),
+    ("cd docs\r", [], ["error"]),
+    ("pwd\r", ["/docs"], []),
+    ("mkdir \"My Notes\"\r", [], ["error"]),
+    ("write \"My Notes/today.txt\" written before the reboot\r", [], ["error"]),
+    ("append \"My Notes/today.txt\" Grüße äöü\r", [], ["error"]),
+    ("cat \"My Notes/today.txt\"\r", ["written before the reboot", "Grüße äöü"], []),
+    ("cd ..\r", [], ["error"]),
+    ("df\r", ["KERNELTRY", "free"], []),
+    ("date\r", ["20"], []),
+    ("cat /nope\r", ["no such file or directory"], []),
     ("does-not-exist\r", ["unknown command 'does-not-exist'"], []),
     ('echo "unterminated\r', ["unterminated"], []),
     ("echo Grüße äöü\r", ["Grüße äöü"], []),
+]
+
+
+# Second boot on the same disk: the data must still be there
+PERSIST_STEPS = [
+    ("cat \"/docs/My Notes/today.txt\"\r", ["written before the reboot", "Grüße äöü"], ["error"]),
+    ("ls /docs\r", ["My Notes/", "hello.txt"], []),
+    ("rm \"/docs/My Notes/today.txt\"\r", [], ["error"]),
+    ("rm \"/docs/My Notes\"\r", [], ["error"]),
+    ("write /persist.txt survived\r", [], ["error"]),
 ]
 
 
@@ -69,27 +94,25 @@ class Reader(threading.Thread):
             with self.lock:
                 self.buf = text
 
-    def wait_for(self, text, start, timeout):
+    def wait_for_prompt(self, start, timeout):
+        """Returns (start, end) of the next prompt after `start`."""
         deadline = time.time() + timeout
         while time.time() < deadline:
             with self.lock:
-                idx = self.buf.find(text, start)
-                if idx >= 0:
-                    return idx
+                m = PROMPT.search(self.buf, start)
+                if m:
+                    return m.start(), m.end()
             time.sleep(0.05)
-        raise TimeoutError(f"did not see {text!r} within {timeout}s")
+        raise TimeoutError(f"no prompt within {timeout}s")
 
     def text(self, start, end=None):
         with self.lock:
             return self.buf[start:end]
 
 
-def main() -> int:
-    elf, extra_args = sys.argv[1], sys.argv[2:]
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    # Never touch the user's persistent build/disk.img: use a fresh scratch disk
-    disk = os.path.join(root, "build", "e2e-disk.img")
-    subprocess.run([os.path.join(root, "scripts/mkdisk.sh"), disk, "64"], check=True, stderr=subprocess.DEVNULL)
+def run_session(root, elf, extra_args, disk, steps, title):
+    """Boots the kernel once, runs `steps`, powers off. Returns the number of failures."""
+    print(f"--- {title} ---")
     proc = subprocess.Popen(
         [os.path.join(root, "scripts/run-qemu.sh"), elf, "-display", "none", *extra_args],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -98,12 +121,12 @@ def main() -> int:
     reader.start()
     failures = 0
     try:
-        pos = reader.wait_for(PROMPT, 0, 30) + len(PROMPT)
-        for keys, expected, forbidden in STEPS:
+        pos = reader.wait_for_prompt(0, 30)[1]
+        for keys, expected, forbidden in steps:
             proc.stdin.write(keys.encode())
             proc.stdin.flush()
-            nxt = reader.wait_for(PROMPT, pos, 15)
-            output = reader.text(pos, nxt)
+            nxt_start, nxt_end = reader.wait_for_prompt(pos, 20)
+            output = reader.text(pos, nxt_start)
             missing = [e for e in expected if e not in output]
             present = [f for f in forbidden if f in output]
             label = keys.replace("\r", "").replace("\x1b", "^[").replace("\t", "<Tab>")
@@ -112,7 +135,7 @@ def main() -> int:
                 print(f"FAIL  {label!r}: missing {missing}, unexpected {present}\n----\n{output}\n----")
             else:
                 print(f"ok    {label!r}")
-            pos = nxt + len(PROMPT)
+            pos = nxt_end
 
         proc.stdin.write(b"poweroff\r")
         proc.stdin.flush()
@@ -129,8 +152,34 @@ def main() -> int:
         if proc.poll() is None:
             proc.kill()
             proc.wait()
+    return failures
 
-    total = len(STEPS) + 1
+
+def main() -> int:
+    elf, extra_args = sys.argv[1], sys.argv[2:]
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # Never touch the user's persistent build/disk.img: use a fresh scratch disk
+    disk = os.path.join(root, "build", "e2e-disk.img")
+    subprocess.run([os.path.join(root, "scripts/mkdisk.sh"), disk, "64"], check=True, stderr=subprocess.DEVNULL)
+
+    failures = run_session(root, elf, extra_args, disk, STEPS, "session 1")
+    failures += run_session(root, elf, extra_args, disk, PERSIST_STEPS, "session 2 (after reboot, same disk)")
+
+    fsck = subprocess.run(["fsck.fat", "-n", disk], capture_output=True, text=True)
+    if fsck.returncode == 0:
+        print("ok    fsck.fat: disk image is consistent")
+    else:
+        failures += 1
+        print(f"FAIL  fsck.fat:\n{fsck.stdout}{fsck.stderr}")
+    persisted = subprocess.run(["mtype", "-i", disk, "::/persist.txt"], capture_output=True, text=True,
+                               env=dict(os.environ, MTOOLS_SKIP_CHECK="1"))
+    if persisted.stdout == "survived\n":
+        print("ok    mtools reads /persist.txt written by the kernel")
+    else:
+        failures += 1
+        print(f"FAIL  mtools /persist.txt: {persisted.stdout!r} {persisted.stderr!r}")
+
+    total = len(STEPS) + len(PERSIST_STEPS) + 4
     print(f"\n{total - failures}/{total} steps passed")
     return 1 if failures else 0
 

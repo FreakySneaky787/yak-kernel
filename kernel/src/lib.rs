@@ -16,6 +16,7 @@ pub mod boot;
 pub mod console;
 pub mod drivers;
 pub mod font;
+pub mod fs;
 pub mod input;
 pub mod mem;
 pub mod qemu;
@@ -44,6 +45,9 @@ pub fn init() {
     console::init();
     task::init();
     drivers::init_storage();
+    if let Err(e) = fs::mount_root() {
+        serial_println!("fs: root not mounted: {}", e);
+    }
     arch::x86_64::enable_interrupts();
 }
 

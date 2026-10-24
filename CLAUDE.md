@@ -62,8 +62,10 @@ Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.s
 - `kernel/src/shell/` – `mod.rs` (commands, `Shell::run`), `line_editor.rs`, `parser.rs`
 - `kernel/src/task/` – threads + preemptive scheduler (`mod.rs`), context switch assembly (`switch.rs`)
 - `kernel/src/drivers/pci.rs` – PCI enumeration; `drivers/ahci.rs` – SATA driver; `drivers/block.rs` – `BlockDevice`, `RamDisk`;
-  `drivers/mod.rs` – global `DISK`
-- `rootfs/` – initial contents of the FAT32 disk image; `scripts/mkdisk.sh` – builds the image
+  `drivers/mod.rs` – global `DISK`; `drivers/rtc.rs` – CMOS real-time clock
+- `kernel/src/fs/` – `mod.rs` (root mount `fs::ROOT`, `SystemDisk`, path `normalize`), `fat32.rs` (FAT32 read/write, LFN, `format`)
+- `rootfs/` – initial contents of the FAT32 disk image; `scripts/mkdisk.sh` – builds the image;
+  `scripts/check-test-disks.sh` – `fsck.fat` + mtools validation of the test disks (run by `make test`)
 - `kernel/src/time.rs` – ticks, `uptime_ms`, `sleep_ms`
 - `kernel/src/drivers/keyboard.rs` – PS/2 driver, ring buffer, `read_key()`; `drivers/scancode.rs` – decoder + layouts (DE/US)
 - `kernel/src/arch/x86_64/` – CPU specifics: `port.rs` (in/out), `gdt.rs` (GDT+TSS), `idt.rs` (IDT structure),

@@ -24,7 +24,7 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 | 12 | APIC: ACPI/MADT, local APIC + timer, I/O APIC, 8259 masked | ✅ | 10 tests + E2E on BIOS and UEFI, timer vs. wall clock checked |
 | 13 | Multitasking: kernel threads, context switch, scheduler | ✅ | 7 scheduler tests + shell tests + E2E (`ps`, `demo`), 3× stable |
 | 14 | Storage: PCI enumeration, AHCI SATA driver, block device layer | ✅ | 11 tests + E2E (`lspci`, `disk`, `hexdump`) |
-| 15 | FAT32 file system (read/write, long names), persistent across reboots | ⬜ | |
+| 15 | FAT32 file system (read/write, long names), persistent across reboots | ✅ | 30 tests + `fsck.fat`/mtools check of all test disks + 45-step E2E incl. reboot (BIOS + UEFI) |
 | 16 | User space: ring 3, syscalls, ELF loader | ⬜ | |
 
 ## Log
@@ -86,6 +86,15 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   `build/disk.img` in run mode, a fresh image per test binary, a scratch image for E2E. `scripts/mkdisk.sh` builds FAT32 images
   from `rootfs/`. Shell: `lspci`, `disk`, `hexdump`. Bug #3 (double probe) found and fixed.
 
+- **2026-10-24** – M15: FAT32 (`fs/fat32.rs`): mount (superfloppy or first FAT32 MBR partition), FAT cluster chains with a
+  one-sector FAT cache written through to all FAT copies, directories with 8.3 + long file names (LFN, UTF-16, checksum),
+  read/write/append/truncate, mkdir, rm (empty dirs only), rename/move, FSInfo free-count hints, `format` for RAM-disk tests.
+  Timestamps from the new CMOS clock driver (`drivers/rtc.rs`). `fs::ROOT` is mounted at boot. Shell: current directory in the
+  prompt (`kernel:/path>`), `ls cd pwd cat write append touch mkdir rm mv stat df date`. `make test` now validates every test
+  disk with `fsck.fat -n` and mtools (`scripts/check-test-disks.sh`); the E2E test boots twice on the same disk to prove persistence.
+  Session was interrupted once before the commit; `make check` re-run green on resume. The `poweroff` exit-status-33 observation
+  from before the cut did not reproduce (4/4 sessions exited with 0).
+
 ## Open items / later
 - AHCI uses polling; switching to completion interrupts (MSI or the PCI interrupt line) would free the CPU during I/O.
 - Thread-level sleeping mutex (today all shared state uses spin locks with interrupts disabled).
@@ -95,8 +104,8 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 - `gcc` is not installed yet → `make limine-tool` (bios-install for USB/HDD images) is not available.
 
 ## Next step
-**M15 – FAT32:** parse the BPB (superfloppy, MBR partition later), FAT cluster chains, directories with 8.3 + long file names (LFN),
-read files; then writing: allocate clusters, create/extend/truncate files, create directories, delete, update FSInfo.
-Shell: `ls`, `cd`, `pwd`, `cat`, `write <file> <text>`, `mkdir`, `rm`, `df`. Tests: against `RamDisk` images and the real disk,
-`fsck.fat -n` on the image after the kernel wrote to it (no errors allowed), persistence E2E (write, power off, boot again, read).
-Then **M16** (user space).
+**M16 – user space:** ring-3 code/data segments in the GDT, TSS RSP0 for the kernel stack on interrupts from ring 3,
+per-process page tables (kernel half shared), `syscall`/`sysret` via the STAR/LSTAR/SFMASK MSRs with a small syscall table
+(`write`, `exit`, `read`, `sleep`), an ELF64 loader, and a first program loaded from the FAT32 disk (`run /bin/hello`).
+Tests: GDT/MSR setup, ELF parser against embedded images, a user program that makes syscalls, a user page fault that kills only
+the process (kernel keeps running), E2E `run` from the shell.

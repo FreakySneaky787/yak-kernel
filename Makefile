@@ -39,7 +39,9 @@ gdb:
 
 # All in-kernel tests in QEMU, exit status 0 = all green
 test: limine
+	rm -rf build/test-disks
 	$(CARGO) test
+	scripts/check-test-disks.sh
 
 # End-to-end: boot the real kernel and drive the shell over the serial port
 e2e: build
