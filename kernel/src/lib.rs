@@ -9,6 +9,8 @@
 
 pub mod arch;
 pub mod boot;
+pub mod console;
+pub mod font;
 pub mod qemu;
 pub mod serial;
 pub mod testing;
@@ -16,6 +18,7 @@ pub mod testing;
 /// Gemeinsame Initialisierung für Kernel und alle Test-Binaries.
 pub fn init() {
     serial::init();
+    console::init();
     if !boot::BASE_REVISION.is_supported() {
         serial_println!(
             "Limine unterstuetzt Base Revision nicht (aktiv: {:?})",

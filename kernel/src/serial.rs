@@ -59,7 +59,11 @@ pub fn init() {
 
 #[doc(hidden)]
 pub fn _print(args: fmt::Arguments) {
-    // TODO(M6): Interrupts sperren, sobald es Interrupt-Handler gibt, die drucken
+    crate::arch::x86_64::without_interrupts(|| _print_locked(args));
+}
+
+/// Wie `_print`, aber der Aufrufer hat Interrupts bereits gesperrt.
+pub(crate) fn _print_locked(args: fmt::Arguments) {
     SERIAL.lock().write_fmt(args).ok();
 }
 

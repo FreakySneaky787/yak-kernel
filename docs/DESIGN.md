@@ -16,6 +16,12 @@
   Eine physische Adresse `p` erreichen wir also über `p + hhdm_offset`.
 - Linker-Sections: `.limine_requests` (zwischen Start- und End-Marker), `.text`, `.rodata`, `.data`/`.bss`, jede auf Seitengröße ausgerichtet und mit eigenem PT_LOAD.
 
+## Ausgabe
+- `serial_println!`: nur COM1. `println!`: Konsole **und** COM1. Beide sperren Interrupts, während sie den Lock halten (`without_interrupts`).
+- Panic-Handler nutzen nur Serial, denn der Konsolen-Lock könnte beim Panic noch gehalten sein.
+- Konsole: arbeitet auf einer `Surface` (32 bpp, Stride in Pixeln). Scrollen per Zeilen-Memcopy im Framebuffer. Das ist langsam auf echter Hardware, in QEMU aber okay.
+  Font: Terminus 8×16 (PSF2) per `include_bytes!`. Latin-1-Zeichen gehen über die Unicode-Tabelle, unbekannte Zeichen werden zu `?`.
+
 ## Testen
 - Crate-Aufbau: `src/lib.rs` enthält den ganzen Kernel. `src/main.rs` ist nur `kmain` + Panic-Handler.
   Jedes Test-Binary (lib-Unit-Tests, `tests/*.rs`) definiert sein eigenes `kmain`. Der Linker nutzt in allen `ENTRY(kmain)`.

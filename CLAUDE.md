@@ -16,6 +16,7 @@ Sprache der Doku und Kommentare: **Deutsch**. Bezeichner im Code: Englisch.
 | `make run-uefi` | wie run, aber mit OVMF/UEFI |
 | `make test` | alle In-Kernel-Tests headless in QEMU, Exitcode 0 = grün |
 | `make debug` + `make gdb` | QEMU wartet auf gdb an :1234 |
+| `python3 -I scripts/screenshot.py <elf> <out.png> [sek] [tasten…]` | headless booten, optional Tasten senden, Screenshot + Serial-Log |
 
 Tests laufen ohne Fenster und brechen nach 30 s ab (`KERNEL_TEST_TIMEOUT`), du kannst sie also selbst ausführen.
 Bei Triple Faults hilft es, an `scripts/run-qemu.sh` die Flags `-d int,cpu_reset` anzuhängen.
@@ -37,6 +38,8 @@ Bei Triple Faults hilft es, an `scripts/run-qemu.sh` die Flags `-d int,cpu_reset
 - `kernel/tests/` – Integrationstests (je ein eigener Kernel)
 - `kernel/src/boot.rs` – Limine-Requests
 - `kernel/src/serial.rs` – COM1, Makros `serial_print!` / `serial_println!`
+- `kernel/src/font.rs` – PSF2-Parser, eingebauter Font aus `kernel/assets/`
+- `kernel/src/console.rs` – Framebuffer-Textkonsole, Makros `print!`/`println!` (Bildschirm + Serial)
 - `kernel/src/qemu.rs` – QEMU beenden (isa-debug-exit)
 - `kernel/src/arch/x86_64/` – CPU-spezifisches (Ports, später GDT/IDT/…)
 - `kernel/linker.ld` – Higher-Half-Layout ab `0xffffffff80000000`

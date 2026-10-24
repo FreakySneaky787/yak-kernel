@@ -22,3 +22,9 @@ Kurze Erklärungen zu jedem Subsystem: was es ist und warum wir es brauchen.
 - Jeder Test wird als eigener Kernel gebaut. `cargo test` ruft für jedes Binary den **Runner** (`scripts/run-qemu.sh`) auf: ISO bauen, QEMU headless starten.
 - Den Rückkanal bildet das virtuelle QEMU-Gerät **isa-debug-exit**. Ein Schreibzugriff auf Port 0xF4 beendet QEMU sofort mit Exitcode `(wert << 1) | 1`, so wird aus „Kernel sagt OK“ ein Exitcode für Cargo.
 - Ein **Timeout** fängt Hänger ab, zum Beispiel eine Endlosschleife oder einen Triple Fault, nach dem QEMU wegen `-no-reboot` anhält.
+
+## M3 – Text auf dem Bildschirm
+- Der **Framebuffer** ist ein Stück Speicher, bei dem jedes 32-bit-Wort ein Pixel ist (0x00RRGGBB). Was wir hineinschreiben, erscheint sofort auf dem Bildschirm.
+- Eine **Bitmap-Schrift** speichert pro Zeichen 16 Bytes, eins pro Pixelzeile. Bit 7 ist das linke Pixel. Zum Zeichnen prüfen wir jedes Bit und setzen dann Vorder- oder Hintergrundfarbe.
+- **PSF2** ist das Fontformat der Linux-Konsole: Header, Glyphen und eine Tabelle „welcher Unicode-Buchstabe ist welcher Glyph“. Darüber kommen die Umlaute.
+- **Scrolling**: Ist die letzte Zeile voll, kopieren wir alle Pixelzeilen um eine Schrifthöhe (16 px) nach oben und leeren die unterste Zeile.

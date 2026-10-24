@@ -8,11 +8,11 @@ Legende: ✅ erledigt · 🔨 in Arbeit · ⬜ offen · **[USER]** = schreibt de
 | 0 | Setup: Toolchain, Limine, Git, GitHub | ✅ | – |
 | 1 | Limine-Boot, Serial-Ausgabe, Framebuffer-Testbild, Panic-Handler | ✅ | manuell: BIOS + UEFI |
 | 2 | Test-Framework + `make test` | ✅ | 7 Tests: lib, boot, should_panic + manuelle Fail-Gegenprobe |
-| 3 | Framebuffer-Textkonsole (Bitmap-Font), `println!` | ⬜ | |
+| 3 | Framebuffer-Textkonsole (Bitmap-Font), `println!` | ✅ | 9 Unit-Tests (Font, Konsole) + Screenshot |
 | 4 | GDT + TSS (Double-Fault-Stack) | ⬜ | |
-| 5 | IDT + Exception-Handler (**[USER]**: einzelne Handler) | ⬜ | |
+| 5 | IDT + Exception-Handler | ⬜ | |
 | 6 | PIC remappen + PIT-Timer | ⬜ | |
-| 7 | PS/2-Tastatur (**[USER]**: Scancode-Tabelle) | ⬜ | |
+| 7 | PS/2-Tastatur | ⬜ | |
 | 8 | Frame-Allocator aus der Limine-Memory-Map | ⬜ | |
 | 9 | Paging: map/unmap | ⬜ | |
 | 10 | Kernel-Heap → `alloc` | ⬜ | |
@@ -25,7 +25,9 @@ Legende: ✅ erledigt · 🔨 in Arbeit · ⬜ offen · **[USER]** = schreibt de
 - **2026-10-24** – M2: Der Kernel ist jetzt Library + Binary. Custom Test Framework in `kernel/src/testing.rs`.
   Integrationstests: `tests/boot.rs` (Limine-Antworten) und `tests/should_panic.rs`. Bug #1 gefunden und behoben (Runner hat den Testmodus nicht erkannt).
 
+- **2026-10-24** – Der User hat entschieden, dass Claude auch M5 und M7 komplett selbst schreibt (keine [USER]-Teile).
+- **2026-10-24** – M3: Eigener PSF2-Parser (`font.rs`, Terminus 8×16, OFL) und Textkonsole (`console.rs`) mit Umbruch, Tab, Backspace und Scrolling.
+  `print!`/`println!` schreiben auf Bildschirm und Serial. `without_interrupts` ist schon vorbereitet. Dazu `scripts/screenshot.py` für visuelle Checks.
+
 ## Nächster Schritt
-**M3:** Textkonsole auf dem Framebuffer. Eigener 8×16-Bitmap-Font (als Rust-Array), `console.rs` mit Cursor, Zeilenumbruch und Scrolling.
-Makros `print!`/`println!` schreiben auf Framebuffer **und** Serial. Tests: viele Zeilen ausgeben (Scrolling) ohne Panic, Cursor-Position prüfen.
-Danach fliegt das Farbbalken-Testbild aus `main.rs`.
+**M4:** GDT mit Kernel-Code- und Kernel-Data-Segment sowie TSS. Der TSS bekommt einen IST-Stack für Double Faults. Segmente neu laden (far return für CS) und `ltr`.
