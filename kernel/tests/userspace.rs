@@ -91,6 +91,21 @@ extern "C" fn kmain() -> ! {
     let (status, out) = run("fstest", "");
     assert_eq!(status, ExitStatus::Exited(0), "{}", out);
 
+    // M18: programs with a heap
+    let free_before = kernel::mem::pmm::stats().free_frames;
+    let (status, out) = run("heaptest", "");
+    assert_eq!(status, ExitStatus::Exited(0), "{}", out);
+    kernel::task::yield_now(); // reap the thread
+    let leaked = free_before.saturating_sub(kernel::mem::pmm::stats().free_frames);
+    assert!(leaked <= 4, "heaptest leaked {} frames", leaked);
+    fs::with_root(|fs| fs.write_file("/sortme.txt", "pear\napple\nfig\nbanana\n".as_bytes())).unwrap();
+    let (status, out) = run("sort", "/sortme.txt");
+    assert_eq!(
+        (status, out.as_str()),
+        (ExitStatus::Exited(0), "apple\nbanana\nfig\npear\n")
+    );
+    assert_eq!(run("sort", "-r /sortme.txt").1, "pear\nfig\nbanana\napple\n");
+
     assert_eq!(process::count(), 0);
     serial_println!("[ok]");
     exit(ExitCode::Success)

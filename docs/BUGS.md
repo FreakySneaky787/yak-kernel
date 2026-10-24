@@ -39,4 +39,8 @@ Format: number · date · title, then symptom → cause → fix → test.
   reach kernel memory by accident (found by the test `kernel_half_is_fully_populated`).
 - **`x86_64-unknown-none` defaults to `code-model=kernel`** (addresses in the top 2 GiB). User programs linked at 0x40_0000
   need `-C code-model=small`, otherwise GNU ld fails with "relocation truncated to fit".
+- **LLVM may delete an unused allocation and assume it succeeded.** `alloc(huge).is_null()` was optimized to `false` in
+  `heaptest`, so the "allocation must fail" check failed although the kernel refused the memory. Pass the pointer through
+  `core::hint::black_box` when testing allocation failure.
+- **The serial console sends `\r\n` for every `\n`.** E2E expectations spanning several lines must contain `\r\n`.
 - **Limine's stack has no guard page** – a stack overflow silently corrupts memory instead of faulting (until M9 gives us our own stack).

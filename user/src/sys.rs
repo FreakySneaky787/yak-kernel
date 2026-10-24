@@ -18,6 +18,7 @@ pub const STAT: u64 = 10;
 pub const GETCWD: u64 = 11;
 pub const UNLINK: u64 = 12;
 pub const MKDIR: u64 = 13;
+pub const BRK: u64 = 14;
 
 pub const STDIN: u64 = 0;
 pub const STDOUT: u64 = 1;
@@ -136,4 +137,10 @@ pub fn unlink(path: &str) -> i64 {
 
 pub fn mkdir(path: &str) -> i64 {
     unsafe { syscall3(MKDIR, path.as_ptr() as u64, path.len() as u64, 0) }
+}
+
+/// Moves the end of the heap to `new_end` (0 = just query). Returns the end
+/// now in effect, or -ENOMEM.
+pub fn brk(new_end: u64) -> i64 {
+    unsafe { syscall3(BRK, new_end, 0, 0) }
 }

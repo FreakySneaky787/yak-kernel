@@ -45,16 +45,32 @@ impl AddressSpace {
         Ok(frame)
     }
 
-    /// Maps `pages` fresh zeroed pages starting at `virt`.
+    /// Maps `pages` fresh zeroed pages starting at `virt`. On failure the
+    /// pages mapped so far are released again.
     pub fn map_fresh(&mut self, virt: VirtAddr, pages: usize, flags: Flags) -> Result<(), MapError> {
         for i in 0..pages as u64 {
             let page = VirtAddr(virt.0 + i * PAGE_SIZE);
-            if paging::translate_in(self.root, page).is_some() {
-                return Err(MapError::AlreadyMapped);
+            let result = if paging::translate_in(self.root, page).is_some() {
+                Err(MapError::AlreadyMapped)
+            } else {
+                self.page_frame(page, flags).map(|_| ())
+            };
+            if let Err(e) = result {
+                self.unmap(virt, i as usize);
+                return Err(e);
             }
-            self.page_frame(page, flags)?;
         }
         Ok(())
+    }
+
+    /// Unmaps `pages` pages starting at `virt` and frees their frames
+    /// (pages that are not mapped are skipped).
+    pub fn unmap(&mut self, virt: VirtAddr, pages: usize) {
+        for i in 0..pages as u64 {
+            if let Ok(frame) = paging::unmap_page_in(self.root, VirtAddr(virt.0 + i * PAGE_SIZE)) {
+                free_frame(frame);
+            }
+        }
     }
 
     /// Copies `data` to the user address `virt` (pages must be mapped).
@@ -146,6 +162,17 @@ mod tests {
             assert!(!a.is_accessible(u64::MAX - 4, 10, false));
             assert!(!b.is_accessible(virt.0, 1, false));
             assert_eq!(a.map_fresh(virt, 1, Flags::WRITABLE), Err(MapError::AlreadyMapped));
+            // a failing map_fresh rolls back: pages before the conflict are released
+            let frames = pmm::stats().free_frames;
+            assert_eq!(
+                a.map_fresh(VirtAddr(virt.0 - 2 * PAGE_SIZE), 3, Flags::WRITABLE),
+                Err(MapError::AlreadyMapped)
+            );
+            assert!(a.page_flags(VirtAddr(virt.0 - 2 * PAGE_SIZE)).is_none());
+            assert!(pmm::stats().free_frames >= frames - 1, "rollback leaked frames"); // maybe one new page table
+            a.unmap(VirtAddr(virt.0 + PAGE_SIZE), 2);
+            assert!(a.page_flags(VirtAddr(virt.0 + PAGE_SIZE)).is_none());
+            assert!(a.page_flags(virt).is_some());
         }
         assert_eq!(pmm::stats().free_frames, before, "address space leaked frames");
     }

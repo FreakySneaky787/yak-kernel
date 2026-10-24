@@ -68,6 +68,12 @@ STEPS = [
     # user space: programs from /bin on the disk, running in ring 3
     ("ls /bin\r", ["hello", "fault", "upper", "cat", "cp", "ls", "fstest"], []),
     ("fstest\r", ["fstest: all checks passed"], ["FAIL"]),
+    ("heaptest\r", ["heaptest: all checks passed"], ["FAIL"]),
+    ("write /fruits.txt cherry\r", [], ["error"]),
+    ("append /fruits.txt apple\r", [], ["error"]),
+    ("append /fruits.txt banana\r", [], ["error"]),
+    ("sort /fruits.txt\r", ["apple\r\nbanana\r\ncherry"], ["error"]),
+    ("sort\rzebra\rant\r\r", ["ant\r\nzebra"], ["error"]),  # typed lines, ended by an empty one (serial: \r\n)
     ("hello e2e world\r", ["Hello from user space! I am process", "arg 1: e2e", "arg 2: world", "Bye!"], ["error"]),
     ("upp\t\rhello Welt äöü\r", ["Type a line: hello Welt äöü", "HELLO WELT ÄÖÜ"], ["error"]),  # completion + stdin
     ("fault null\r", ["fault was killed: page fault at 0x0"], []),

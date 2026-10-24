@@ -91,7 +91,7 @@
   HHDM, so loading never switches CR3. `Drop` frees every user frame and page table (`paging::free_user_half`); all user
   mappings own their frames. It must not be the active address space when dropped.
 - **User layout**: ELF segments between `USER_IMAGE_START` (64 KiB, null page area stays unmapped) and `USER_IMAGE_END`;
-  our programs link at `0x40_0000`. Stack: 16 pages below `USER_STACK_TOP = 0x7FFF_FFFF_0000`, nothing mapped below it
+  our programs link at `0x40_0000`. The heap starts at the first page after the image and is moved with `brk` (max 64 MiB). Stack: 16 pages below `USER_STACK_TOP = 0x7FFF_FFFF_0000`, nothing mapped below it
   (overflow → page fault → process killed). The argument block is copied to the stack top; `_start` gets pointer and length
   in RDI/RSI. Arguments inside the block are separated by NUL bytes (`ulib::Args`); the shell joins its words that way.
 - **ELF loader** (`process::elf`): static `ET_EXEC` x86_64 only, `PT_LOAD` segments with R/W/X → USER, WRITABLE, NO_EXECUTE.
@@ -126,6 +126,7 @@
   | 11 | `getcwd(buf, len)` | `-ERANGE` if too small |
   | 12 | `unlink(path, len)` | files and empty directories |
   | 13 | `mkdir(path, len)` | |
+  | 14 | `brk(new_end)` | 0 = query; maps zeroed RW/NX pages when growing, frees them when shrinking; `-ENOMEM` outside the range |
 - **Files**: each process has a cwd (inherited from the spawner, paths are normalized against it) and up to 32 file descriptors
   (`process::Handle`): 0 stdin, 1/2 the process's `Output`, then files (path + read offset, writes append via `append_file`)
   and directories (snapshot of the entries at `open`). Handlers copy what they need out of the table, do the disk I/O
@@ -136,10 +137,13 @@
 - **User programs** (`user/`, crate `ulib` + `src/bin/*`): built with the same target as the kernel but `code-model=small`,
   linked by GNU ld at `0x40_0000` (`user/linker.ld`). `make user` copies them to `build/user/bin`; `scripts/mkdisk.sh`
   and (for the persistent disk) `run-qemu.sh` install them into `/bin` via `scripts/install-user.sh`.
+- **User heap** (`ulib::heap`): first-fit allocator, free list sorted by address with coalescing, 16-byte units, grows the
+  break by ≥ 64 KiB at a time. No lock (programs are single-threaded). `sys_brk` takes the `AddressSpace` out of the process
+  table while it maps/unmaps, so zeroing megabytes does not run with the table lock held (interrupts off).
 - **Shell**: a word that is not a built-in is a program path or a name in `/bin`; `run <path> [args]` does the same explicitly.
   Programs run in the shell's cwd. `ls`, `cat` and `cp` are programs (no built-ins any more). Non-zero exit codes and kills
   are reported as errors. `Shell::capture_programs` makes program output go to the command's `out` (unit tests).
-- Limitations: no FPU/SSE state is saved (kernel and our programs are built soft-float); no user heap; no seek;
+- Limitations: no FPU/SSE state is saved (kernel and our programs are built soft-float); no seek;
   no Ctrl+C for a running program (`kill` exists in the kernel API only); a program blocked in `read` is only killed after its next key.
 
 ## Kernel heap

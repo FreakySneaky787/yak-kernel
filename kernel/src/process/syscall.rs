@@ -49,11 +49,14 @@ pub mod nr {
     pub const UNLINK: u32 = 12;
     /// mkdir(path, path_len) -> 0
     pub const MKDIR: u32 = 13;
+    /// brk(new_end) -> the heap end now in effect; 0 only queries it
+    pub const BRK: u32 = 14;
 }
 
 pub mod errno {
     pub const ENOENT: i64 = 2;
     pub const EIO: i64 = 5;
+    pub const ENOMEM: i64 = 12;
     pub const EBADF: i64 = 9;
     pub const EFAULT: i64 = 14;
     pub const EEXIST: i64 = 17;
@@ -173,6 +176,7 @@ pub extern "C" fn dispatch(frame: &mut SyscallFrame) {
         nr::GETCWD => sys_getcwd(a0, a1),
         nr::UNLINK => sys_unlink(a0, a1),
         nr::MKDIR => sys_mkdir(a0, a1),
+        nr::BRK => sys_brk(a0),
         _ => Err(errno::ENOSYS),
     };
     frame.rax = match result {
@@ -419,6 +423,40 @@ fn sys_mkdir(path: u64, path_len: u64) -> SysResult {
     let path = user_path(path, path_len)?;
     fs::with_root(|fs| fs.create_dir(&path)).map_err(fs_errno)?;
     Ok(0)
+}
+
+/// Moves the end of the heap to `new_end` (mapping zeroed pages or freeing
+/// them). Fails with ENOMEM outside `[heap_start, heap_start + HEAP_MAX]`
+/// or when memory runs out.
+fn sys_brk(new_end: u64) -> SysResult {
+    use crate::mem::{PAGE_SIZE, VirtAddr, align_up, paging::Flags};
+    let (start, end) = with_current(|p| (p.heap_start, p.heap_end)).ok_or(errno::EBADF)?;
+    if new_end == 0 {
+        return Ok(end);
+    }
+    if new_end < start || new_end > start + super::HEAP_MAX {
+        return Err(errno::ENOMEM);
+    }
+    let (old_top, new_top) = (align_up(end, PAGE_SIZE), align_up(new_end, PAGE_SIZE));
+    // Map/unmap without holding the process table lock (zeroing many pages
+    // takes a while): borrow the address space. Only this thread uses it.
+    let mut space = with_current(|p| p.space.take()).flatten().ok_or(errno::EBADF)?;
+    let result = if new_top > old_top {
+        let pages = ((new_top - old_top) / PAGE_SIZE) as usize;
+        space
+            .map_fresh(VirtAddr(old_top), pages, Flags::WRITABLE | Flags::NO_EXECUTE)
+            .map_err(|_| errno::ENOMEM)
+    } else {
+        space.unmap(VirtAddr(new_top), ((old_top - new_top) / PAGE_SIZE) as usize);
+        Ok(())
+    };
+    with_current(|p| {
+        p.space = Some(space);
+        if result.is_ok() {
+            p.heap_end = new_end;
+        }
+    });
+    result.map(|_| new_end)
 }
 
 fn sys_getcwd(buf: u64, len: u64) -> SysResult {

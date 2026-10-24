@@ -31,7 +31,7 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 | # | Milestone | Status | Tests |
 |---|---|---|---|
 | 17 | Files for programs: fd table, `open`/`close`/`readdir`/`stat`/`getcwd`/`unlink`/`mkdir`, `cat`/`ls`/`cp` as programs | ✅ | `read_at` unit test, `fstest` (25 syscall checks incl. errors), integration test, mtools check of a `cp` copy, 6 E2E steps |
-| 18 | User heap: `brk`-style syscall + allocator in `ulib` (`alloc` in programs) | ⬜ | |
+| 18 | User heap: `brk`-style syscall + allocator in `ulib` (`alloc` in programs) | ✅ | 4 unit tests (grow/shrink, limits, release, rollback), `heaptest` (11 checks), `sort` in integration test, 6 E2E steps |
 | 19 | Processes from processes: `spawn`/`wait`/`kill` syscalls, Ctrl+C, shell as a user program (`init`) | ⬜ | |
 
 ## Log
@@ -121,6 +121,12 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   arguments with spaces survive. `ulib::fs` (`File`, `Dir`, `stat`, `cwd`); new programs `cat`, `ls`, `cp`, `fstest`.
   The kernel shell's built-in `ls`/`cat` are gone – `/bin/ls` and `/bin/cat` replace them. Shell tests capture program output.
 
+- **2026-10-24** – M18: user heap. Syscall 14 `brk(new_end)`: heap right after the ELF image, max 64 MiB, pages mapped zeroed
+  when growing and freed when shrinking (address space borrowed out of the process table so the lock is not held while zeroing).
+  `AddressSpace::map_fresh` now rolls back on failure, new `AddressSpace::unmap`. `ulib::heap`: first-fit allocator with an
+  address-ordered free list and coalescing as `#[global_allocator]` – programs can use `Vec`, `String`, `BTreeMap`, `format!`.
+  New programs `sort` (files or typed lines, `-r`) and `heaptest`.
+
 ## Open items / later
 - AHCI uses polling; switching to completion interrupts (MSI or the PCI interrupt line) would free the CPU during I/O.
 - Thread-level sleeping mutex (today all shared state uses spin locks with interrupts disabled).
@@ -128,13 +134,14 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 - Reclaim `BOOTLOADER_RECLAIMABLE` memory once we no longer use Limine's stack, page tables and responses.
 - Shell lines longer than one console row are not handled by the line editor (input is capped at 120 characters).
 - `gcc` is not installed yet → `make limine-tool` (bios-install for USB/HDD images) is not available.
-- User space: no FPU/SSE state saving (everything is soft-float), no SMAP/SMEP, no user heap,
+- User space: no FPU/SSE state saving (everything is soft-float), no SMAP/SMEP, heap is mapped eagerly (no demand paging),
   no Ctrl+C for a running program (`process::kill` exists, but nothing in the shell triggers it), only a single CPU.
 - File syscalls: writes always append (no seek, no overwrite in the middle); `read` re-walks the cluster chain per call;
   directory handles are snapshots; no rename syscall yet. Without `/bin` on the disk, the kernel shell has no `ls`/`cat`.
 
 ## Next step
-**M18 – user heap:** a `brk`-style syscall (grow/shrink a heap area above the ELF image, pages mapped zeroed on demand by
-the kernel, freed on exit), a small allocator in `ulib` as `#[global_allocator]` so programs can use `alloc` (`Vec`, `String`).
-Tests: syscall limits (cannot grow into the stack or kernel), memory released after exit, a program that builds big `Vec`s,
-e.g. a `sort` program reading a file. Then **M19** (spawn/wait/kill syscalls, Ctrl+C, shell as a user program).
+**M19 – processes from processes:** syscalls `spawn(path, args)` → pid, `wait(pid)` → exit status, `kill(pid)`; the child
+inherits cwd and stdout. Ctrl+C (keyboard or serial) kills the foreground program – also one blocked in `read` (wake it).
+Then the shell becomes a user program (`/bin/sh`, needs `chdir` + the remaining file syscalls such as `rename`), started by
+the kernel as the first process (`init`); the kernel shell stays as a fallback when `/bin/sh` is missing.
+Tests: spawn/wait chains, exit statuses of killed children, Ctrl+C in the E2E test, the existing E2E steps against `/bin/sh`.

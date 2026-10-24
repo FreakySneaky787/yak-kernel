@@ -7,15 +7,22 @@
 //! - `sys`: the raw system calls.
 //! - `print!` / `println!` (stdout), `eprintln!` (stderr), `io::read_line`.
 //! - `fs`: files and directories (`File`, `Dir`, `stat`, `cwd`).
+//! - `heap`: the `#[global_allocator]` – programs can use `alloc` (`Vec`, `String`, ...).
 //! - A panic handler that prints the message and exits with code 101.
 
 #![no_std]
 
+extern crate alloc;
+
 pub mod fs;
+pub mod heap;
 pub mod io;
 pub mod sys;
 
 use core::panic::PanicInfo;
+
+#[global_allocator]
+static HEAP: heap::Heap = heap::Heap::new();
 
 core::arch::global_asm!(
     ".pushsection .text._start, \"ax\", @progbits",

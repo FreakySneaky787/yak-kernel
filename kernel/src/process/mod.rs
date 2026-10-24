@@ -9,6 +9,7 @@
 //!
 //! User memory layout:
 //! - `USER_IMAGE_START ..`: the ELF segments (our programs link at 0x40_0000)
+//! - right after the image: the heap, grown and shrunk with `brk` (max `HEAP_MAX`)
 //! - `USER_STACK_TOP - USER_STACK_PAGES * 4 KiB .. USER_STACK_TOP`: the stack,
 //!   with nothing mapped below it (an overflow faults and kills the process)
 //! - the argument string sits at the top of the stack; `_start` receives a
@@ -45,6 +46,8 @@ pub const USER_STACK_PAGES: usize = 16;
 /// ELF segments must end below the stack and its unmapped guard gap.
 pub const USER_IMAGE_END: u64 = USER_STACK_TOP - (USER_STACK_PAGES as u64 + 16) * PAGE_SIZE;
 pub const MAX_ARGS_LEN: usize = 4096;
+/// Largest heap a process may have.
+pub const HEAP_MAX: u64 = 64 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExitStatus {
@@ -127,8 +130,11 @@ pub struct Process {
     pub cwd: String,
     /// Index = file descriptor.
     pub files: Vec<Option<Handle>>,
-    /// `None` once the process has ended.
+    /// `None` once the process has ended (or while `brk` maps pages).
     space: Option<AddressSpace>,
+    /// Heap: `[heap_start, heap_end)`, pages mapped up to `heap_end` rounded up.
+    pub heap_start: u64,
+    pub heap_end: u64,
     stdout: Output,
     /// Bytes of a key that did not fit into the last `read` buffer.
     stdin_pending: Vec<u8>,
@@ -152,6 +158,13 @@ pub fn spawn_in(cwd: &str, name: &str, elf: &[u8], args: &str, stdout: Output) -
         return Err(ExecError::ArgsTooLong);
     }
     let image = elf::parse(elf)?;
+    let image_end = image
+        .segments
+        .iter()
+        .map(|s| s.vaddr + s.memsz)
+        .max()
+        .unwrap_or(USER_IMAGE_START);
+    let heap_start = crate::mem::align_up(image_end, PAGE_SIZE);
     let mut space = AddressSpace::new()?;
     elf::load(&mut space, elf, &image)?;
 
@@ -180,6 +193,8 @@ pub fn spawn_in(cwd: &str, name: &str, elf: &[u8], args: &str, stdout: Output) -
                 cwd: String::from(cwd),
                 files: alloc::vec![Some(Handle::Stdin), Some(Handle::Stdout), Some(Handle::Stdout)],
                 space: Some(space),
+                heap_start,
+                heap_end: heap_start,
                 stdout,
                 stdin_pending: Vec::new(),
                 status: None,
@@ -465,6 +480,86 @@ mod tests {
         task::yield_now();
         let after = crate::mem::pmm::stats().free_frames;
         // a few frames for new page tables in the never-reused kernel stack area
+        assert!(before.saturating_sub(after) <= 4, "leaked {} frames", before - after);
+    }
+
+    /// brk(0) -> rax = heap start; mov rbx, rax
+    fn heap_start_to_rbx() -> Vec<u8> {
+        [
+            &mov_eax(syscall::nr::BRK)[..],
+            &[0x31, 0xFF],
+            &SYSCALL,
+            &[0x48, 0x89, 0xC3],
+        ]
+        .concat()
+    }
+
+    #[test_case]
+    fn brk_grows_and_shrinks_the_heap() {
+        let code = [
+            &heap_start_to_rbx()[..],
+            &[0x48, 0x8D, 0xBB, 0x00, 0x30, 0, 0], // lea rdi, [rbx + 0x3000]
+            &mov_eax(syscall::nr::BRK),
+            &SYSCALL,
+            &[0xC6, 0x83, 0xFF, 0x2F, 0, 0, 1], // mov byte [rbx + 0x2FFF], 1 (last heap byte)
+            &[0x48, 0x89, 0xDF],                // mov rdi, rbx
+            &mov_eax(syscall::nr::BRK),
+            &SYSCALL,         // shrink back to nothing
+            &[0xC6, 0x03, 1], // mov byte [rbx], 1 -> must fault now
+        ]
+        .concat();
+        // test ELF: code page at 0x11000, data page at 0x12000 -> heap starts at 0x13000
+        let heap_start = USER_IMAGE_START + 0x3000;
+        match run_code(&code, "").0 {
+            ExitStatus::Killed(r) => assert!(r.contains(&format!("page fault at {:#x}", heap_start)), "{}", r),
+            other => panic!("expected a page fault after shrinking, got {:?}", other),
+        }
+    }
+
+    #[test_case]
+    fn brk_respects_its_limits() {
+        for bad in [
+            USER_STACK_TOP,
+            USER_IMAGE_START,
+            USER_IMAGE_START + 0x3000 + HEAP_MAX + 1,
+        ] {
+            let code = [
+                &[0x48, 0xBF][..],
+                &bad.to_le_bytes(), // mov rdi, imm64
+                &mov_eax(syscall::nr::BRK),
+                &SYSCALL,
+                &exit_with_rax(),
+            ]
+            .concat();
+            assert_eq!(
+                run_code(&code, "").0,
+                ExitStatus::Exited(-syscall::errno::ENOMEM),
+                "brk({:#x})",
+                bad
+            );
+        }
+    }
+
+    #[test_case]
+    fn heap_memory_is_released() {
+        // grow the heap by 1 MiB and exit without shrinking it
+        let code = [
+            &heap_start_to_rbx()[..],
+            &[0x48, 0x8D, 0xBB, 0x00, 0x00, 0x10, 0], // lea rdi, [rbx + 0x100000]
+            &mov_eax(syscall::nr::BRK),
+            &SYSCALL,
+            &[0xC6, 0x83, 0xFF, 0xFF, 0x0F, 0, 1], // touch the last byte
+            &mov_eax(syscall::nr::EXIT),
+            &[0x31, 0xFF],
+            &SYSCALL,
+        ]
+        .concat();
+        assert_eq!(run_code(&code, "").0, ExitStatus::Exited(0));
+        task::yield_now();
+        let before = crate::mem::pmm::stats().free_frames;
+        assert_eq!(run_code(&code, "").0, ExitStatus::Exited(0));
+        task::yield_now();
+        let after = crate::mem::pmm::stats().free_frames;
         assert!(before.saturating_sub(after) <= 4, "leaked {} frames", before - after);
     }
 

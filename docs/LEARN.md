@@ -185,6 +185,15 @@ Short explanations of every subsystem: what it is and why we need it.
 - Programs get their arguments as one block with NUL bytes between them, so `cp "My Notes/a.txt" b.txt` arrives as exactly
   two arguments even though the first one contains a space.
 
+## M18 – A heap for programs
+- The kernel gives a process memory in big pieces: `brk` moves the **program break**, the end of the heap area right after
+  the program image. Growing maps fresh zeroed pages, shrinking frees them again.
+- Handing out small pieces (a `String` of 20 bytes) is the job of an **allocator** inside the program – here `ulib::heap`.
+  It keeps a list of free blocks, takes the first one that is big enough (*first fit*), and when a block is freed it is
+  merged with free neighbours so that the heap does not crumble into unusable fragments.
+- With a `#[global_allocator]` in place, the standard `alloc` crate works: `Vec`, `String`, `BTreeMap`, `format!` – the
+  `sort` program reads a whole file into memory and sorts its lines without knowing anything about pages.
+
 ## Tooling – GNU ld and binutils
 - rustc compiles our code into object files; a **linker** combines them into the final ELF according to `kernel/linker.ld`
   (load address, section order, segments). We use **GNU ld** (`ld.bfd`) for that.
