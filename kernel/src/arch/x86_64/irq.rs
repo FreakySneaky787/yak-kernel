@@ -61,16 +61,21 @@ pub fn init() {
 
 extern "x86-interrupt" fn timer(_frame: InterruptStackFrame) {
     time::tick();
+    // EOI before scheduling: we may switch to another thread here and only
+    // return to this handler much later; the LAPIC must accept new ticks.
     lapic::eoi();
+    crate::task::on_tick();
 }
 
 extern "x86-interrupt" fn keyboard(_frame: InterruptStackFrame) {
     crate::drivers::keyboard::handle_interrupt();
+    crate::task::wake_input_waiters();
     lapic::eoi();
 }
 
 extern "x86-interrupt" fn com1(_frame: InterruptStackFrame) {
     crate::serial::handle_interrupt();
+    crate::task::wake_input_waiters();
     lapic::eoi();
 }
 

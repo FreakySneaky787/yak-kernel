@@ -22,7 +22,7 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 | # | Milestone | Status | Tests |
 |---|---|---|---|
 | 12 | APIC: ACPI/MADT, local APIC + timer, I/O APIC, 8259 masked | ✅ | 10 tests + E2E on BIOS and UEFI, timer vs. wall clock checked |
-| 13 | Multitasking: kernel threads, context switch, scheduler | ⬜ | |
+| 13 | Multitasking: kernel threads, context switch, scheduler | ✅ | 7 scheduler tests + shell tests + E2E (`ps`, `demo`), 3× stable |
 | 14 | Ramdisk filesystem (Limine module), `ls`/`cat` | ⬜ | |
 | 15 | User space: ring 3, syscalls, ELF loader | ⬜ | |
 
@@ -70,14 +70,21 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   keyboard (GSI 1) and COM1 (GSI 4); 8259 remapped + fully masked; PIT channel 0 unused. New shell command `acpi`.
   `make check` now also runs the E2E test under UEFI. Timer accuracy: 6.00 s kernel vs. 6.00 s wall clock (BIOS), 5.99 s (UEFI).
 
+- **2026-10-24** – M13: preemptive round-robin scheduler (`task/`): context switch in `global_asm!` (callee-saved regs + RSP),
+  new threads start via a trampoline, each with an 8-page guarded stack that is freed after exit. Blocking waits: `Until(tick)`,
+  `Input` (woken by keyboard/COM1 IRQs), `Join(tid)`. Idle thread halts. `sleep_ms`, `input::read_key`, `keyboard::read_key` block
+  instead of spinning. Timer handler sends EOI *before* calling `task::on_tick` (which may switch threads).
+  Shell: `ps` and `demo [n]` (parallel prime-counting workers).
+
 ## Open items / later
+- Thread-level sleeping mutex (today all shared state uses spin locks with interrupts disabled).
+- `ps` CPU percentages only cover threads that still exist (dead threads are reaped with their counters).
 - Reclaim `BOOTLOADER_RECLAIMABLE` memory once we no longer use Limine's stack, page tables and responses.
 - Shell lines longer than one console row are not handled by the line editor (input is capped at 120 characters).
 - `gcc` is not installed yet → `make limine-tool` (bios-install for USB/HDD images) is not available.
 
 ## Next step
-**M13 – Multitasking:** kernel threads with their own guarded stacks, context switch in assembly (callee-saved registers + RSP),
-round-robin scheduler with preemption from the LAPIC timer, `sleep_ms` that blocks instead of spinning, `thread::spawn`/`exit`/`yield`.
-Shell: `ps` command, a demo command that starts background threads. Tests: two threads interleave, sleeping threads wake up,
-exited threads release their stacks, preemption happens without explicit yields.
-Then **M14** (ramdisk filesystem) and **M15** (user space).
+**M14 – Ramdisk filesystem:** pass a tar archive as a Limine module (built by the Makefile from a `rootfs/` directory),
+parse the USTAR format, a small VFS layer (path lookup, directories, file read), shell commands `ls`, `cat`, `stat`, `cd`/`pwd`.
+Tests: tar parser with an in-memory archive, path resolution, reading real files from the module, E2E `ls`/`cat`.
+Then **M15** (user space).

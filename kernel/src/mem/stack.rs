@@ -44,6 +44,12 @@ pub fn alloc_stack(pages: usize) -> Result<KernelStack, MapError> {
     Ok(KernelStack { guard: VirtAddr(guard), top: VirtAddr(guard + span), pages })
 }
 
+/// Unmaps a stack and returns its frames. The guard page and the virtual
+/// range are not reused.
+pub fn free_stack(stack: KernelStack) {
+    paging::unmap_and_free(VirtAddr(stack.guard.0 + PAGE_SIZE), stack.pages);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

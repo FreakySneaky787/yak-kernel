@@ -21,9 +21,15 @@ pub fn uptime_ms() -> u64 {
 }
 
 /// Sleeps for at least `ms` milliseconds (resolution: one tick = 10 ms).
+/// With the scheduler running the thread blocks and other threads run;
+/// before that (early boot) the CPU halts until the deadline.
 /// Requires interrupts to be enabled.
 pub fn sleep_ms(ms: u64) {
     let target = ticks() + ms.div_ceil(MS_PER_TICK);
+    if crate::task::is_running() {
+        crate::task::sleep_until(target);
+        return;
+    }
     while ticks() < target {
         unsafe { core::arch::asm!("hlt", options(nomem, nostack)) };
     }

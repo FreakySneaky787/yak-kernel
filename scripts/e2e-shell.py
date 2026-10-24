@@ -38,6 +38,8 @@ STEPS = [
     ("layout de\r", ["keyboard layout: De"], []),
     ("sleep 100\r", ["slept 100 ms"], []),
     ("int3\r", ["breakpoint handled"], []),
+    ("ps\r", ["TID", "main", "idle"], []),
+    ("demo 3\r", ["worker 1", "worker 2", "worker 3", "found 3245 primes", "all workers done"], []),
     ("history\r", ["echo hello from e2e", "version"], []),
     ("does-not-exist\r", ["unknown command 'does-not-exist'"], []),
     ('echo "unterminated\r', ["unterminated"], []),

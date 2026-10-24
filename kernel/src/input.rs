@@ -138,9 +138,13 @@ pub fn read_key() -> KeyEvent {
         if let Some(event) = try_read_key() {
             return event;
         }
-        // Check and sleep atomically (see keyboard::read_key)
+        // Check and block atomically: with interrupts off, no input can
+        // arrive between the check and putting the thread on the wait list.
         disable_interrupts();
         if keyboard::has_pending() || serial::has_pending() {
+            enable_interrupts();
+        } else if crate::task::is_running() {
+            crate::task::block_current(crate::task::Wait::Input);
             enable_interrupts();
         } else {
             unsafe { core::arch::asm!("sti; hlt", options(nomem, nostack)) };

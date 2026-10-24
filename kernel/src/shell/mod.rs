@@ -11,7 +11,7 @@ use crate::arch::x86_64::{cpu, power};
 use crate::drivers::keyboard;
 use crate::drivers::scancode::Layout;
 use crate::mem::{heap, pmm};
-use crate::{boot, input, time};
+use crate::{boot, input, task, time};
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -51,6 +51,8 @@ pub static COMMANDS: &[Command] = &[
     Command { name: "acpi", usage: "acpi", help: "ACPI tables, CPUs and interrupt routing", run: cmd_acpi },
     Command { name: "layout", usage: "layout [de|us]", help: "show or set the keyboard layout", run: cmd_layout },
     Command { name: "history", usage: "history", help: "previously entered commands", run: cmd_history },
+    Command { name: "ps", usage: "ps", help: "list kernel threads", run: cmd_ps },
+    Command { name: "demo", usage: "demo [threads]", help: "run worker threads in parallel (multitasking demo)", run: cmd_demo },
     Command { name: "colors", usage: "colors", help: "show the console colour palette", run: cmd_colors },
     Command { name: "version", usage: "version", help: "kernel version", run: cmd_version },
     Command { name: "int3", usage: "int3", help: "trigger a breakpoint exception (harmless)", run: cmd_int3 },
@@ -262,6 +264,51 @@ fn cmd_history(shell: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(
     Ok(())
 }
 
+fn cmd_ps(_: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), String> {
+    let threads = task::list();
+    let total: u64 = threads.iter().map(|t| t.cpu_ticks).sum::<u64>().max(1);
+    writeln!(out, "  TID  STATE         CPU    NAME").ok();
+    for t in threads {
+        let state = match t.state {
+            task::State::Running => String::from("running"),
+            task::State::Ready => String::from("ready"),
+            task::State::Blocked(task::Wait::Until(_)) => String::from("sleeping"),
+            task::State::Blocked(task::Wait::Input) => String::from("wait input"),
+            task::State::Blocked(task::Wait::Join(id)) => format!("join {}", id),
+            task::State::Dead => String::from("dead"),
+        };
+        writeln!(out, "  {:>3}  {:<12} {:>3}%    {}", t.id, state, t.cpu_ticks * 100 / total, t.name).ok();
+    }
+    Ok(())
+}
+
+fn cmd_demo(_: &mut Shell, args: &[String], out: &mut dyn Write) -> Result<(), String> {
+    let count: u64 = match args.first() {
+        Some(a) => a.parse().map_err(|_| "not a number")?,
+        None => 3,
+    };
+    if !(1..=16).contains(&count) {
+        return Err(String::from("use 1 to 16 threads"));
+    }
+    writeln!(out, "starting {} worker threads, each counts primes below 30000...", count).ok();
+    let start = time::ticks();
+    let ids: Vec<task::Tid> = (1..=count)
+        .map(|n| {
+            task::spawn("demo-worker", move || {
+                // naive prime counting: pure CPU work, preempted by the timer
+                let primes = (2u64..30_000).filter(|&k| (2..).take_while(|d| d * d <= k).all(|d| k % d != 0)).count();
+                let tid = task::current_id();
+                crate::println!("  worker {} (thread {}) found {} primes after {} ms", n, tid, primes, time::uptime_ms());
+            })
+        })
+        .collect();
+    for id in ids {
+        task::join(id);
+    }
+    writeln!(out, "all workers done in {} ms", (time::ticks() - start) * time::MS_PER_TICK).ok();
+    Ok(())
+}
+
 fn cmd_colors(_: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), String> {
     for base in [30, 90] {
         for i in 0..8 {
@@ -347,7 +394,7 @@ mod tests {
 
     #[test_case]
     fn info_commands_produce_output() {
-        for cmd in ["mem", "memmap", "uptime", "cpu", "acpi", "version", "colors"] {
+        for cmd in ["mem", "memmap", "uptime", "cpu", "acpi", "version", "colors", "ps"] {
             let (ok, out) = run(cmd);
             assert!(ok && !out.is_empty(), "'{}' failed: {}", cmd, out);
         }
@@ -366,6 +413,14 @@ mod tests {
         assert!(!run("sleep").0);
         assert!(!run("sleep abc").0);
         assert!(run("sleep 20").0);
+    }
+
+    #[test_case]
+    fn demo_runs_workers() {
+        let (ok, out) = run("demo 2");
+        assert!(ok, "{}", out);
+        assert!(out.contains("all workers done"));
+        assert!(!run("demo 99").0);
     }
 
     #[test_case]

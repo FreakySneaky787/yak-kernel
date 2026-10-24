@@ -42,6 +42,18 @@
 - Limine enables EFER.NXE (so `NO_EXECUTE` is usable) and CR0.WP (the kernel cannot write read-only pages either).
 - `kmain` switches from Limine's stack to a 64 KiB guarded stack (`mem::stack`) immediately after `kernel::init()`.
 
+## Threads and scheduling
+- `task::Scheduler` (behind a spin lock, only touched with interrupts disabled): `BTreeMap<Tid, Box<Thread>>` (boxed so the saved
+  RSP has a stable address), a FIFO ready queue, the current TID and the idle TID. Thread 0 = the boot code ("main"), runs the shell.
+- Context switch: `kernel_switch_context(old_rsp_ptr, new_rsp)` pushes rbp/rbx/r12–r15, swaps RSP, pops, `ret`. A new thread's stack
+  is prepared so that `ret` lands in `kernel_thread_trampoline`, which calls `thread_start(entry)` with the boxed closure from r12.
+- `schedule()` must run with interrupts disabled and drops the lock *before* switching. A resumed thread continues with interrupts off
+  and restores them itself (via `without_interrupts`, `iretq` of the interrupted handler, or `sti` in `thread_start`).
+- Preemption: every timer tick, if another thread is ready. The timer handler sends EOI first, then calls `task::on_tick`.
+- Blocking: `block_current(Wait)` must be called with interrupts disabled after checking the wait condition (no lost wake-ups).
+  Wake-ups: timer (`Until`), keyboard/COM1 IRQ (`Input`), `exit` (`Join`).
+- Dead threads are reaped (stack unmapped and frames freed) by a later `schedule()` call – never while running on their stack.
+
 ## Kernel heap
 - `mem::heap::LinkedListHeap`: free blocks form a singly linked list sorted by address; each free block stores `size` + `next` in its first 16 bytes.
 - First fit; a block is split into [front padding][allocation][rest], padding and rest go back to the list. Freeing inserts by address and merges neighbours.

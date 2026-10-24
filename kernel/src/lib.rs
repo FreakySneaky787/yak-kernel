@@ -22,6 +22,7 @@ pub mod qemu;
 pub mod ringbuf;
 pub mod serial;
 pub mod shell;
+pub mod task;
 pub mod testing;
 pub mod time;
 
@@ -41,6 +42,7 @@ pub fn init() {
     mem::init();
     arch::x86_64::irq::init();
     console::init();
+    task::init();
     arch::x86_64::enable_interrupts();
 }
 

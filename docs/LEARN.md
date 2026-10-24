@@ -123,6 +123,17 @@ Short explanations of every subsystem: what it is and why we need it.
 - APIC registers are **memory-mapped I/O (MMIO)**: reading/writing special physical addresses talks to hardware, not RAM.
   Such pages must be mapped **uncached**, otherwise the CPU might serve stale values from its cache.
 
+## M13 – Multitasking
+- A **thread** is "a CPU state + its own stack". To switch threads we save the registers of the running one on its stack,
+  remember its stack pointer, load the stack pointer of the next one and restore its registers – the **context switch**.
+  The next `ret` then continues wherever that thread stopped.
+- **Preemptive** scheduling: the timer interrupt arrives every 10 ms and may switch to another thread, even if the running one never
+  gives up the CPU voluntarily. **Round robin**: ready threads take turns in a queue.
+- **Blocking** instead of busy-waiting: a thread that waits (sleep, keyboard input, another thread finishing) is taken off the ready
+  queue and woken up by the event it waits for. If nobody is ready, the **idle thread** halts the CPU.
+- The classic trap is the **lost wake-up**: check "no input yet", then the key arrives, then we go to sleep – and never wake up.
+  We avoid it by checking and blocking with interrupts disabled.
+
 ## Tooling – GNU ld and binutils
 - rustc compiles our code into object files; a **linker** combines them into the final ELF according to `kernel/linker.ld`
   (load address, section order, segments). We use **GNU ld** (`ld.bfd`) for that.
