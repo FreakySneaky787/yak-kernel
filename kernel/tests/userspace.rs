@@ -203,6 +203,11 @@ extern "C" fn kmain() -> ! {
         "unsaved changes must not be written"
     );
 
+    // M24: per-thread x87/SSE state (the programs are built with SSE2)
+    let (status, out) = run("fputest", "");
+    assert_eq!(status, ExitStatus::Exited(0), "{}", out);
+    assert!(out.contains("pi = 3.14158"), "{}", out);
+
     assert_eq!(process::count(), 0);
     serial_println!("[ok]");
     exit(ExitCode::Success)

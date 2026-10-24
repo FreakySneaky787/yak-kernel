@@ -179,7 +179,9 @@
   FS errors map to Linux errno values (`ENOENT`, `EISDIR`, ...).
 - **User pointers**: every buffer is checked page by page against the process's page tables (present + USER, + WRITABLE for
   `read`) before the kernel touches it; then it is accessed directly (the process CR3 is active). No SMAP/SMEP yet.
-- **User programs** (`user/`, crate `ulib` + `src/bin/*`): built with the same target as the kernel but `code-model=small`,
+- **User programs** (`user/`, crate `ulib` + `src/bin/*`): own target `user/x86_64-kerneltry-user.json` (x86-64 with SSE2 and
+  the normal hard-float ABI, static, `code-model=small`, red zone allowed – interrupts from ring 3 switch stacks), built with
+  `-Zbuild-std=core,alloc` (+ `compiler-builtins-mem`; needs `rust-src` and `gcc` as host linker for build scripts),
   linked by GNU ld at `0x40_0000` (`user/linker.ld`). `make user` copies them to `build/user/bin`; `scripts/mkdisk.sh`
   and (for the persistent disk) `run-qemu.sh` install them into `/bin` via `scripts/install-user.sh`.
 - **User heap** (`ulib::heap`): first-fit allocator, free list sorted by address with coalescing, 16-byte units, grows the
@@ -188,7 +190,11 @@
 - **Shell**: a word that is not a built-in is a program path or a name in `/bin`; `run <path> [args]` does the same explicitly.
   Programs run in the shell's cwd. `ls`, `cat` and `cp` are programs (no built-ins any more). Non-zero exit codes and kills
   are reported as errors. `Shell::capture_programs` makes program output go to the command's `out` (unit tests).
-- Limitations: no FPU/SSE state is saved (kernel and our programs are built soft-float); no seek;
+- **FPU/SSE** (`arch::x86_64::fpu`): the kernel is soft-float and never uses x87/MMX/XMM, so user register contents survive
+  syscalls and interrupts untouched. Each thread has a boxed, 16-byte aligned 512-byte `FxState` (initialised from a clean
+  image taken after `fninit` + `ldmxcsr 0x1F80`); `schedule()` saves the outgoing (unless dead) and restores the incoming
+  thread's state right before `kernel_switch_context`. No lazy switching (CR0.TS stays clear), no XSAVE/AVX.
+- Limitations: no AVX state;
   no Ctrl+C for a running program (`kill` exists in the kernel API only); a program blocked in `read` is only killed after its next key.
 
 ## Kernel heap

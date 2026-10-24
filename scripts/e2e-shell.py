@@ -99,6 +99,7 @@ STEPS = [
     ("grep sh /ps.txt\r", ["sh"], ["error"]),
     ("fault spin | cat\r" + PAUSE + CTRL_C, ["fault was killed: interrupted"], []),
     ("pipetest\r", ["pipetest: all checks passed"], ["FAIL"]),
+    ("fputest\r", ["fputest: all checks passed"], ["registers changed", "MXCSR changed", "is wrong", "error"]),  # SSE registers per thread (M24)
     # file operations as programs (M22)
     ("touch /t1.txt\r", [], ["error"]),
     ("mv /t1.txt /docs\r", [], ["error"]),

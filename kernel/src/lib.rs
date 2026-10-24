@@ -40,6 +40,7 @@ pub fn init() {
         arch::x86_64::halt_loop();
     }
     arch::x86_64::gdt::init();
+    arch::x86_64::fpu::init();
     arch::x86_64::interrupts::init();
     mem::init();
     arch::x86_64::syscall::init();

@@ -235,6 +235,15 @@ Short explanations of every subsystem: what it is and why we need it.
   (insert, delete, cursor movement) from the **drawing** makes the model testable without a screen (`edit --selftest`).
 - Redrawing everything on every key would be slow; the editor redraws only the line that changed unless it had to scroll.
 
+## M24 – Floating point and SSE registers
+- Besides the general registers, the CPU has the x87 FPU and 16 **XMM registers** (128 bit each) for floating point and
+  vector work, plus the control register **MXCSR** (e.g. rounding mode). Compilers use them for `f64` maths and fast copies.
+- When the scheduler switches threads, these registers belong to the thread too. If the kernel does not save them, one
+  program suddenly sees another program's numbers. `fxsave` writes all of them (512 bytes) to memory, `fxrstor` loads them.
+- The kernel itself is built without floating point, so it never disturbs them – only the context switch has to care.
+- `fputest` proves it: four programs keep different values in all XMM registers while being preempted constantly; with the
+  switch code removed they immediately see each other's values.
+
 ## Tooling – GNU ld and binutils
 - rustc compiles our code into object files; a **linker** combines them into the final ELF according to `kernel/linker.ld`
   (load address, section order, segments). We use **GNU ld** (`ld.bfd`) for that.

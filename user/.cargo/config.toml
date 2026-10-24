@@ -1,13 +1,12 @@
+# User programs use their own target (x86_64-kerneltry-user.json): like the
+# kernel's x86_64-unknown-none, but with SSE2 hardware floating point (the
+# kernel saves the SSE registers per thread) and linked low (small code model).
+# `core` and `alloc` are built from source for it (needs the rust-src component).
 [build]
-target = "x86_64-unknown-none"
+target = "x86_64-kerneltry-user.json"
+rustflags = ["-C", "link-arg=-Tlinker.ld"]
 
-# Like the kernel (GNU ld, static, no PIE), but linked low at 0x40_0000:
-# the "small" code model instead of the kernel's -2 GiB one.
-[target.x86_64-unknown-none]
-rustflags = [
-    "-C", "linker=ld.bfd",
-    "-C", "linker-flavor=ld",
-    "-C", "link-arg=-Tlinker.ld",
-    "-C", "relocation-model=static",
-    "-C", "code-model=small",
-]
+[unstable]
+build-std = ["core", "alloc"]
+build-std-features = ["compiler-builtins-mem"]
+json-target-spec = true

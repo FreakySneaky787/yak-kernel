@@ -34,7 +34,8 @@ Interrupt problems: QEMU monitor `info pic`, `info lapic`, `info registers`.
 Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.sh` invocation.
 
 ## Toolchain
-- Rust nightly via rustup, target `x86_64-unknown-none`.
+- Rust nightly via rustup, target `x86_64-unknown-none` for the kernel; user programs use `user/x86_64-kerneltry-user.json`
+  with `-Zbuild-std` (needs the `rust-src` component and `gcc` as host linker – both installed).
 - **GNU tools preferred where they fit:** GNU ld (`ld.bfd`) links the kernel, GNU make drives everything,
   gdb for debugging, binutils (objdump, nm, readelf, addr2line) for inspection, gcc builds host helpers (Limine utility).
 
@@ -80,7 +81,7 @@ Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.s
 - `kernel/src/drivers/keyboard.rs` – PS/2 driver, ring buffer, `read_key()`; `drivers/scancode.rs` – decoder + layouts (DE/US)
 - `kernel/src/arch/x86_64/` – CPU specifics: `port.rs` (in/out), `gdt.rs` (GDT+TSS), `idt.rs` (IDT structure),
   `interrupts.rs` (exception handlers, kernel IDT), `syscall.rs` (syscall entry stub, MSRs, `enter_user`), `irq.rs` (IRQ routing + handlers), `lapic.rs` (local APIC + timer), `ioapic.rs`, `pic.rs` (legacy, masked), `pit.rs` (timer calibration), `msr.rs`, `cpu.rs` (cpuid), `power.rs` (reboot/poweroff),
-  interrupt helpers in `mod.rs`
+  `fpu.rs` (x87/SSE enable, FXSAVE areas), interrupt helpers in `mod.rs`
 - `kernel/tests/` – integration tests (each one is a separate kernel)
 - `kernel/linker.ld` – higher-half layout at `0xffffffff80000000`
 - `scripts/run-qemu.sh` – cargo runner: builds the ISO and starts QEMU

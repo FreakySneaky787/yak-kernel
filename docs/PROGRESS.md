@@ -42,6 +42,13 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 | 22 | System information as syscalls (replace `kshell`), `ps`/`mem`/... as programs, `rename` + seek | ✅ | `write_at` unit test, `fstest` +17 checks (seek, gaps, APPEND, rename, ESPIPE), integration test for all 10 programs, 5 E2E steps |
 | 23 | Full-screen text editor as a user program | ✅ | `edit --selftest` (19 buffer checks), console SGR 7 test, 3 scripted editor sessions in the integration test, 5 E2E steps, screenshot |
 
+## Stage 5: hardware (agreed with the user on 2026-10-24)
+| # | Milestone | Status | Tests |
+|---|---|---|---|
+| 24 | FPU/SSE state per thread; user programs built with SSE2 hardware floating point | ✅ | 3 FPU unit tests (CR0/CR4, initial state, save/restore), `fputest` (4 preempted workers checking XMM0–15 + MXCSR, pi with f64) in integration + E2E; verified that it fails without the switch |
+| 25 | SMP: start the other CPU cores, per-CPU data, real locking | ⬜ | |
+| 26 | Network: virtio-net/e1000 driver, Ethernet/ARP/IPv4/ICMP/UDP, `ping` | ⬜ | |
+
 ## Log
 - **2026-10-24** – Setup: Rust nightly 1.101 (rustup), target `x86_64-unknown-none`, Limine v11.x-binary.
   M1: kernel boots via BIOS and UEFI, prints "Hello from KernelTry!" on serial, colour bars on the framebuffer (1280×800×32).
@@ -173,14 +180,21 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   Kernel: syscalls 29 `termsize` and 30 `ignore_interrupt` (the editor takes Ctrl+C itself), console SGR 7/27 (inverse video).
   **Stage 4 complete: 169 in-kernel tests + 6 test kernels + 90 E2E steps green (BIOS and UEFI), 26 programs in /bin.**
 
+- **2026-10-24** – User agreed to stage 5 (M24–M26) and installed `gcc` (needed as host linker for `-Zbuild-std`).
+- **2026-10-24** – M24: `arch/x86_64/fpu.rs` enables x87/SSE (CR0.EM/TS off, MP/NE on, CR4.OSFXSR/OSXMMEXCPT) and records a
+  clean initial FXSAVE image. Every thread owns a 512-byte `FxState`; `schedule()` does `fxsave64` for the outgoing and
+  `fxrstor64` for the incoming thread (eager). The kernel stays soft-float. User programs now use their own target
+  `user/x86_64-kerneltry-user.json` (SSE2, hard-float ABI, static, small code model, red zone allowed) with
+  `-Zbuild-std=core,alloc`. New program `fputest`. Check: with the save/restore removed, all 4 workers report corrupted XMM.
+
 ## Open items / later
 - AHCI uses polling; switching to completion interrupts (MSI or the PCI interrupt line) would free the CPU during I/O.
 - Thread-level sleeping mutex (today all shared state uses spin locks with interrupts disabled).
 - `ps` CPU percentages only cover threads that still exist (dead threads are reaped with their counters).
 - Reclaim `BOOTLOADER_RECLAIMABLE` memory once we no longer use Limine's stack, page tables and responses.
 - Shell lines longer than one console row are not handled by the line editor (input is capped at 120 characters).
-- `gcc` is not installed yet → `make limine-tool` (bios-install for USB/HDD images) is not available.
-- User space: no FPU/SSE state saving (everything is soft-float), no SMAP/SMEP, heap is mapped eagerly (no demand paging),
+- `gcc` is installed now → `make limine-tool` (bios-install for USB/HDD images) could be used (not tried yet).
+- User space: no AVX (XSAVE not enabled, AVX instructions kill the program), no SMAP/SMEP, heap is mapped eagerly (no demand paging),
   only a single CPU, no signals beyond "kill", no pipes (a child always writes to its parent's output).
 - `kshell`/`kcommands` are a bridge: the information commands (mem, ps, cpu, acpi, lspci, ...) should become real syscalls
   and programs. `/bin/sh`: no scripts, no environment variables, no `2>`, operators must be separate words, built-in output
@@ -190,9 +204,9 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   write, append, echo, sleep, clear, help. Without `/bin` on the disk, the kernel shell has no `ls`/`cat`.
 
 ## Next step
-**Stage 4 is complete.** Stage 5 still has to be agreed with the user. Proposal:
-- **M24 – FPU/SSE state per thread** (`fxsave`/`fxrstor` or lazy switching via CR0.TS), so programs may be built with SSE
-  (faster `core` code, floating point in programs).
-- **M25 – SMP:** start the other CPU cores (INIT/SIPI via the local APIC), per-CPU data and run queues, real locking.
-- **M26 – network:** a virtio-net (or e1000) driver, Ethernet/ARP/IPv4/ICMP/UDP, `ping` as a program.
-- Smaller items: shell scripts and environment variables, `2>`, demand paging for the heap, reclaiming bootloader memory.
+**M25 – SMP:** find the other CPUs in the MADT (already parsed), start them with INIT/SIPI through the local APIC
+(real-mode trampoline below 1 MiB → long mode → `ap_main`), give each its own GDT/TSS, IDT, LAPIC timer and per-CPU data
+(GS base), then let the scheduler run threads on all cores (per-CPU current thread, a shared or per-CPU run queue).
+Every global lock must then be a real lock (interrupts-off alone no longer protects across CPUs) – review `SCHEDULER`,
+`PROCESSES`, the syscall scratch slot (`USER_RSP` becomes per-CPU via `swapgs`), pipes, `fs::ROOT`.
+Tests: all CPUs report in (`cpu` command), parallel `demo` faster than on one core, full test suite with `-smp 4`.

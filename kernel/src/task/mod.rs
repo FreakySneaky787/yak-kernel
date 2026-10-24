@@ -17,6 +17,7 @@
 
 mod switch;
 
+use crate::arch::x86_64::fpu::{self, FxState};
 use crate::arch::x86_64::{disable_interrupts, enable_interrupts, interrupts_enabled, syscall, without_interrupts};
 use crate::mem::PhysAddr;
 use crate::mem::paging;
@@ -78,6 +79,8 @@ struct Thread {
     cr3: PhysAddr,
     /// Set for user threads until they enter ring 3.
     user_entry: Option<UserEntry>,
+    /// x87/SSE registers while the thread is not running (see `arch::x86_64::fpu`).
+    fpu: Box<FxState>,
 }
 
 struct Scheduler {
@@ -162,6 +165,7 @@ pub fn init() {
                 cpu_ticks: 0,
                 cr3: paging::kernel_root(),
                 user_entry: None,
+                fpu: Box::new(FxState::initial()),
             }),
         );
         *SCHEDULER.lock() = Some(Scheduler {
@@ -216,6 +220,7 @@ fn spawn_with(name: &str, entry: Entry, cr3: PhysAddr, user_entry: Option<UserEn
                 cpu_ticks: 0,
                 cr3,
                 user_entry,
+                fpu: Box::new(FxState::initial()),
             }),
         );
         s.ready.push_back(id);
@@ -278,12 +283,31 @@ fn schedule() {
             None
         } else {
             s.current = next;
-            let old_rsp: *mut u64 = &mut s.thread(current).rsp;
+            let old = s.thread(current);
+            let old_rsp: *mut u64 = &mut old.rsp;
+            // A dead thread's registers are never needed again
+            let old_fpu: Option<*mut FxState> = (old.state != State::Dead).then(|| &mut *old.fpu as *mut FxState);
             let t = s.thread(next);
-            Some((old_rsp, t.rsp, t.cr3, t.stack.map(|st| st.top.as_u64())))
+            let new_fpu: *const FxState = &*t.fpu;
+            Some((
+                old_rsp,
+                t.rsp,
+                t.cr3,
+                t.stack.map(|st| st.top.as_u64()),
+                old_fpu,
+                new_fpu,
+            ))
         }
     }; // lock released here, interrupts are still off
-    if let Some((old_rsp, new_rsp, cr3, kernel_stack)) = switch {
+    if let Some((old_rsp, new_rsp, cr3, kernel_stack, old_fpu, new_fpu)) = switch {
+        // The boxed FPU areas stay put: threads are only freed by `reap`,
+        // which never frees the current thread, and both are still in the map.
+        unsafe {
+            if let Some(old) = old_fpu {
+                fpu::save(&mut *old);
+            }
+            fpu::restore(&*new_fpu);
+        }
         if let Some(top) = kernel_stack {
             syscall::set_kernel_stack(top);
         }

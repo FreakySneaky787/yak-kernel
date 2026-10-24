@@ -55,4 +55,7 @@ Format: number · date · title, then symptom → cause → fix → test.
 - **Empty slices from Rust come with dangling pointers** (e.g. `0x1` for an empty `Vec<u8>`). The syscall pointer check
   rejected `spawn(path, [])` with `EFAULT` because page 0 is unmapped; zero-length ranges are now always accepted.
 - **The serial console sends `\r\n` for every `\n`.** E2E expectations spanning several lines must contain `\r\n`.
+- **rustc no longer accepts `+sse` / `-soft-float` on `x86_64-unknown-none`** ("must be disabled to ensure that the ABI of
+  the current target can be implemented correctly", soon a hard error). Hard-float user programs need their own target JSON
+  and `-Zbuild-std`; build scripts of `core`'s dependencies then need a host C toolchain (`gcc`, glibc headers/crt files).
 - **Limine's stack has no guard page** – a stack overflow silently corrupts memory instead of faulting (until M9 gives us our own stack).
