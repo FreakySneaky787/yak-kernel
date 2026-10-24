@@ -154,6 +154,11 @@
   | 28 | `seek(fd, offset, whence)` | SET/CUR/END for files, `-ESPIPE` otherwise; past the end is allowed (gap = zeros on write) |
   | 29 | `termsize()` | console rows << 32 \| columns (the serial side has no size; programs draw for the console) |
   | 30 | `ignore_interrupt(on)` | Ctrl+C arrives as 0x03 instead of killing the caller (the editor) |
+  | 31 | `net_info(*NetInfo)` | 40 bytes: MAC, link, IPv4, netmask, gateway, frame counters; `-ENODEV` without a card |
+  | 32 | `ping(ip, seq, timeout_ms)` | round trip in ms; `-ETIMEDOUT`, `-EHOSTUNREACH` |
+  | 33 | `udp_socket(port)` | 0 = ephemeral (≥ 0xC000); `-EADDRINUSE` |
+  | 34 | `sendto(fd, buf, len, ip, port)` | ≤ 1472 bytes, `-EMSGSIZE` above |
+  | 35 | `recvfrom(fd, buf, len, *SockAddr, timeout_ms)` | 5th argument in R8; `-ETIMEDOUT`, `-EINTR` |
 - **`/bin/edit`**: `buffer.rs` is pure logic (tested by `edit --selftest`), `main.rs` draws with `ESC[r;cH`, `ESC[K`, SGR 7.
   The text area is all rows but the last; the cursor line and the status bar are redrawn per key, the whole screen only after
   scrolling or when lines are inserted/removed. Writing the bottom-right cell is safe: the console wraps lazily (only when the
@@ -207,6 +212,20 @@
   thread's state right before `kernel_switch_context`. No lazy switching (CR0.TS stays clear), no XSAVE/AVX.
 - Limitations: no AVX state;
   no Ctrl+C for a running program (`kill` exists in the kernel API only); a program blocked in `read` is only killed after its next key.
+
+## Network
+- **Driver** (`drivers/e1000.rs`): Intel 82540EM as emulated by QEMU, BAR0 MMIO (128 KiB, mapped via `ensure_hhdm_mapped`).
+  RX ring 32 × 16-byte descriptors (one frame), TX ring 8; DMA buffers 2 KiB (two per frame). RCTL: broadcast accepted, CRC
+  stripped; TCTL: pad short packets. TX descriptors start with DD set so "DD = slot free". Polled – no MSI on this model and
+  INTx routing would need the ACPI `_PRT` (AML), which we do not interpret.
+- **Stack** (`net/`): static config for QEMU's slirp (10.0.2.15/24, gateway and host = 10.0.2.2, DNS 10.0.2.3). The `net`
+  kernel thread polls every 10 ms, then `notify(Wait::Net)` – that doubles as the tick for timeouts of everyone waiting on the
+  network. ARP: cache learned from requests/replies addressed to us and from IPv4 packets of on-link hosts; `resolve` sends up
+  to 3 requests. IPv4: no options sent, fragments dropped, DF set. ICMP: echo requests answered, replies with our id recorded.
+  UDP: ports map to bounded queues (64 datagrams); checksums sent, not verified on receipt.
+- **User API**: `ping` (one echo, waits ≤ timeout), `udp_socket` → `Handle::Udp(Arc<UdpSocket>)` (port released when the last
+  descriptor closes), `sendto` / `recvfrom` (timeout, abortable by kill), `net_info`. Small state locks are taken with
+  interrupts off; the NIC lock with interrupts on (it is never needed by `wait_for` conditions).
 
 ## Kernel heap
 - `mem::heap::LinkedListHeap`: free blocks form a singly linked list sorted by address; each free block stores `size` + `next` in its first 16 bytes.

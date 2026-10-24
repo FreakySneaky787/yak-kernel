@@ -19,6 +19,7 @@ validates the disk image.
 """
 import os
 import re
+import socket
 import subprocess
 import sys
 import threading
@@ -35,6 +36,23 @@ END = "\x1b[F"
 CTRL_C = "\x03"
 PAUSE = "\0"  # never typed: splits the keys of a step
 CPUS = int(os.environ.get("KERNEL_SMP", "4"))  # same default as scripts/run-qemu.sh
+
+
+def start_udp_echo():
+    """A UDP echo server on the host's 127.0.0.1 (the guest reaches it as 10.0.2.2)."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind(("127.0.0.1", 0))
+
+    def serve():
+        while True:
+            data, addr = sock.recvfrom(2048)
+            sock.sendto(data, addr)
+
+    threading.Thread(target=serve, daemon=True).start()
+    return sock.getsockname()[1]
+
+
+UDP_PORT = start_udp_echo()
 
 # (keys to type, substrings that must appear in the output, substrings that must not)
 STEPS = [
@@ -100,6 +118,9 @@ STEPS = [
     ("grep sh /ps.txt\r", ["sh"], ["error"]),
     ("fault spin | cat\r" + PAUSE + CTRL_C, ["fault was killed: interrupted"], []),
     ("pipetest\r", ["pipetest: all checks passed"], ["FAIL"]),
+    ("netinfo\r", ["IPv4     10.0.2.15", "link up"], ["error"]),  # network (M27)
+    ("ping 10.0.2.2 2\r", ["reply from 10.0.2.2: seq=1", "2 packets sent, 2 received"], ["error"]),
+    (f"udpecho 10.0.2.2 {UDP_PORT} hello over UDP\r", [f"reply from 10.0.2.2:{UDP_PORT}: hello over UDP"], ["error"]),
     ("fputest\r", ["fputest: all checks passed"], ["registers changed", "MXCSR changed", "is wrong", "error"]),  # SSE registers per thread (M24)
     # file operations as programs (M22)
     ("touch /t1.txt\r", [], ["error"]),

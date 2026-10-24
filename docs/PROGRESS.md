@@ -48,7 +48,7 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 | 24 | FPU/SSE state per thread; user programs built with SSE2 hardware floating point | ✅ | 3 FPU unit tests (CR0/CR4, initial state, save/restore), `fputest` (4 preempted workers checking XMM0–15 + MXCSR, pi with f64) in integration + E2E; verified that it fails without the switch |
 | 25 | SMP part 1: start the other cores ourselves (trampoline, INIT/SIPI), per-CPU GDT/TSS/LAPIC, jobs on APs | ✅ | 4 SMP unit tests (all MADT CPUs online, jobs run on the right CPU with its own TSS, FPU + heap on APs, trampoline page), E2E `cpu` shows 4 CPUs, BIOS + UEFI, 3 stable runs |
 | 26 | SMP part 2: scheduler on all cores (per-CPU current/idle thread, lock held across switches, no lost wake-ups, `swapgs` in the syscall stub) | ✅ | new test: spinning threads seen on ≥ 2 CPUs; whole suite green with `KERNEL_SMP=1`, `2` and `4`; `demo 4`: 760 ms on 1 core → 200 ms on 4 |
-| 27 | Network: virtio-net/e1000 driver, Ethernet/ARP/IPv4/ICMP/UDP, `ping` | ⬜ | |
+| 27 | Network: e1000 driver, Ethernet/ARP/IPv4/ICMP/UDP, `ping`, `netinfo`, `udpecho` | ✅ | 4 packet unit tests (checksum, IPv4/ARP/ICMP/UDP round trips), 4 network tests (config, ARP + ping to the gateway, UDP ports, receive path), integration test (ping/netinfo/unreachable), E2E: ping + UDP echo through a host server |
 
 ## Log
 - **2026-10-24** – Setup: Rust nightly 1.101 (rustup), target `x86_64-unknown-none`, Limine v11.x-binary.
@@ -205,6 +205,14 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   Idle CPUs get a wake-up IPI when a thread becomes ready. Syscall stub: per-CPU slots through `swapgs`/IA32_KERNEL_GS_BASE,
   swapped back before interrupts are enabled. `ps` shows the CPU a thread runs on. `KERNEL_SMP=<n>` selects the core count.
 
+- **2026-10-24** – M27: `drivers/e1000.rs` (82540EM: reset, MAC from RAL/EEPROM, 32 RX / 8 TX descriptors with 2 KiB DMA
+  buffers, polled) and `net/` (`packet.rs`: Ethernet II, ARP, IPv4 with checksum, ICMP echo, UDP with pseudo-header checksum;
+  `mod.rs`: static config for QEMU user networking 10.0.2.15/24 via 10.0.2.2, ARP cache + resolution, net thread polling
+  every 10 ms, answers ARP and pings, ping replies, UDP sockets with receive queues; waits use `Wait::Net`). Syscalls 31–35
+  `net_info`, `ping`, `udp_socket`, `sendto`, `recvfrom` (5th argument in R8); `Handle::Udp`. Programs `ping`, `netinfo`,
+  `udpecho`. QEMU gets `-netdev user -device e1000` (`KERNEL_NETDEV_OPTS` for extras). Bug #5 (`run_on` could starve the
+  target CPU's idle thread) fixed. **Stage 5 complete: 185 in-kernel tests + 6 test kernels + 94 E2E steps (BIOS + UEFI).**
+
 ## Open items / later
 - AHCI uses polling; switching to completion interrupts (MSI or the PCI interrupt line) would free the CPU during I/O.
 - Thread-level sleeping mutex (today all shared state uses spin locks with interrupts disabled).
@@ -214,6 +222,8 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 - `gcc` is installed now → `make limine-tool` (bios-install for USB/HDD images) could be used (not tried yet).
 - User space: no AVX (XSAVE not enabled, AVX instructions kill the program), no SMAP/SMEP, heap is mapped eagerly (no demand paging),
   only a single CPU, no signals beyond "kill", no pipes (a child always writes to its parent's output).
+- Network: static IP (no DHCP), no TCP, no fragmentation, no DNS client; polled driver (10 ms latency); ping resolution
+  10 ms (no fine-grained clock).
 - `kshell`/`kcommands` are a bridge: the information commands (mem, ps, cpu, acpi, lspci, ...) should become real syscalls
   and programs. `/bin/sh`: no scripts, no environment variables, no `2>`, operators must be separate words, built-in output
   in a pipeline must fit into one pipe (64 KiB) because it is written before the next stage starts.
@@ -222,8 +232,9 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   write, append, echo, sleep, clear, help. Without `/bin` on the disk, the kernel shell has no `ls`/`cat`.
 
 ## Next step
-**M27 – network:** a PCI network card driver (virtio-net: virtqueues with descriptors in physical memory; QEMU
-`-netdev user -device virtio-net-pci`), Ethernet frames, ARP (resolve the gateway 10.0.2.2), IPv4, ICMP echo and UDP.
-User space gets a small socket-like syscall set (send/receive UDP datagrams, ping), programs `ping` and `udpecho`.
-Tests: ARP + ICMP against QEMU's user-mode network (`ping 10.0.2.2`), UDP to QEMU's built-in DNS (10.0.2.3) or to a
-host port forwarded with `hostfwd` and answered by a small Python echo server in the E2E test.
+**Stage 5 is complete.** The next stage still has to be agreed with the user. Ideas:
+- **TCP** (connect/listen/accept, retransmission, windows) and a tiny HTTP client/server program; DHCP and a DNS client.
+- **A real-time clock and fine timers:** TSC calibration for µs time stamps (ping times, profiling).
+- **Shell scripts**, environment variables, `2>`, job control (`&`, `fg`).
+- **Storage:** an ext2-like own file system or FAT32 long-file performance (cluster cache), AHCI interrupts.
+- **Reclaim bootloader memory**, demand paging for user heaps, copy-on-write.

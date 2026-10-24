@@ -208,6 +208,24 @@ extern "C" fn kmain() -> ! {
     assert_eq!(status, ExitStatus::Exited(0), "{}", out);
     assert!(out.contains("pi = 3.14158"), "{}", out);
 
+    // M27: network (QEMU's user-mode network: the gateway 10.0.2.2 answers pings)
+    let (status, out) = run("ping", "10.0.2.2 2");
+    assert_eq!(status, ExitStatus::Exited(0), "{}", out);
+    assert!(
+        out.contains("reply from 10.0.2.2: seq=1") && out.contains("2 packets sent, 2 received"),
+        "{}",
+        out
+    );
+    let (_, out) = run("netinfo", "");
+    assert!(out.contains("IPv4     10.0.2.15") && out.contains("link up"), "{}", out);
+    let (status, out) = run("udpecho", "10.0.2.99 9 nobody");
+    assert_eq!(
+        status,
+        ExitStatus::Exited(1),
+        "an address nobody has must fail: {}",
+        out
+    );
+
     assert_eq!(process::count(), 0);
     serial_println!("[ok]");
     exit(ExitCode::Success)

@@ -1,5 +1,6 @@
 pub mod ahci;
 pub mod block;
+pub mod e1000;
 pub mod keyboard;
 pub mod pci;
 pub mod rtc;

@@ -35,10 +35,36 @@ pub const RENAME: u64 = 27;
 pub const SEEK: u64 = 28;
 pub const TERMSIZE: u64 = 29;
 pub const IGNORE_INTERRUPT: u64 = 30;
+pub const NET_INFO: u64 = 31;
+pub const PING: u64 = 32;
+pub const UDP_SOCKET: u64 = 33;
+pub const SENDTO: u64 = 34;
+pub const RECVFROM: u64 = 35;
 
 pub const STDIN: u64 = 0;
 pub const STDOUT: u64 = 1;
 pub const STDERR: u64 = 2;
+
+/// # Safety
+/// The arguments must be valid for system call `nr`.
+pub unsafe fn syscall5(nr: u64, a0: u64, a1: u64, a2: u64, a3: u64, a4: u64) -> i64 {
+    let ret: i64;
+    unsafe {
+        asm!(
+            "syscall",
+            inlateout("rax") nr as i64 => ret,
+            in("rdi") a0,
+            in("rsi") a1,
+            in("rdx") a2,
+            in("r10") a3,
+            in("r8") a4,
+            lateout("rcx") _,
+            lateout("r11") _,
+            options(nostack),
+        )
+    };
+    ret
+}
 
 /// # Safety
 /// The arguments must be valid for system call `nr`.
@@ -298,6 +324,7 @@ pub const PROC_WAIT_INPUT: u32 = 3;
 pub const PROC_JOIN: u32 = 4;
 pub const PROC_WAIT_PIPE: u32 = 5;
 pub const PROC_DEAD: u32 = 6;
+pub const PROC_WAIT_NET: u32 = 7;
 
 const _: () = assert!(core::mem::size_of::<SysInfo>() == 176 && core::mem::size_of::<ProcInfo>() == 64);
 
@@ -348,4 +375,82 @@ pub fn termsize() -> u64 {
 /// With `true`, Ctrl+C arrives as byte 0x03 instead of killing the process.
 pub fn ignore_interrupt(on: bool) {
     unsafe { syscall3(IGNORE_INTERRUPT, on as u64, 0, 0) };
+}
+
+/// Same layout as the kernel's `process::syscall::NetInfo`.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct NetInfo {
+    pub mac: [u8; 6],
+    pub link_up: u8,
+    pub _pad: u8,
+    pub ip: [u8; 4],
+    pub netmask: [u8; 4],
+    pub gateway: [u8; 4],
+    pub _pad2: u32,
+    pub rx_frames: u64,
+    pub tx_frames: u64,
+}
+
+/// Same layout as the kernel's `process::syscall::SockAddr`.
+#[repr(C)]
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+pub struct SockAddr {
+    pub ip: [u8; 4],
+    pub port: u16,
+    pub _pad: u16,
+}
+
+const _: () = assert!(core::mem::size_of::<NetInfo>() == 40 && core::mem::size_of::<SockAddr>() == 8);
+
+/// 0 or -ENODEV (no network card).
+pub fn net_info(info: &mut NetInfo) -> i64 {
+    unsafe { syscall3(NET_INFO, info as *mut NetInfo as u64, 0, 0) }
+}
+
+/// One ICMP echo; returns the round trip time in ms or -errno.
+pub fn ping(ip: [u8; 4], seq: u16, timeout_ms: u64) -> i64 {
+    unsafe { syscall3(PING, u32::from_be_bytes(ip) as u64, seq as u64, timeout_ms) }
+}
+
+/// A UDP socket bound to `port` (0 = any free port); returns the fd or -errno.
+pub fn udp_socket(port: u16) -> i64 {
+    unsafe { syscall3(UDP_SOCKET, port as u64, 0, 0) }
+}
+
+pub fn sendto(fd: u64, data: &[u8], ip: [u8; 4], port: u16) -> i64 {
+    unsafe {
+        syscall5(
+            SENDTO,
+            fd,
+            data.as_ptr() as u64,
+            data.len() as u64,
+            u32::from_be_bytes(ip) as u64,
+            port as u64,
+        )
+    }
+}
+
+/// Waits up to `timeout_ms` for a datagram; returns its length or -errno (-110 = timed out).
+pub fn recvfrom(fd: u64, buf: &mut [u8], from: &mut SockAddr, timeout_ms: u64) -> i64 {
+    unsafe {
+        syscall5(
+            RECVFROM,
+            fd,
+            buf.as_mut_ptr() as u64,
+            buf.len() as u64,
+            from as *mut SockAddr as u64,
+            timeout_ms,
+        )
+    }
+}
+
+/// "10.0.2.2" -> [10, 0, 2, 2]
+pub fn parse_ip(s: &str) -> Option<[u8; 4]> {
+    let mut out = [0u8; 4];
+    let mut parts = s.split('.');
+    for b in &mut out {
+        *b = parts.next()?.parse().ok()?;
+    }
+    parts.next().is_none().then_some(out)
 }

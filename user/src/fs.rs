@@ -41,6 +41,11 @@ impl fmt::Display for Error {
             36 => "path too long",
             32 => "broken pipe",
             39 => "directory not empty",
+            19 => "no network card",
+            90 => "message too long",
+            98 => "address in use",
+            110 => "timed out",
+            113 => "host unreachable",
             _ => return write!(f, "error {}", self.0),
         };
         f.write_str(text)

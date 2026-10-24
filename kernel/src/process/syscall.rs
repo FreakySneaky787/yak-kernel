@@ -16,6 +16,7 @@ use crate::arch::x86_64::without_interrupts;
 use crate::drivers::scancode::{Key, KeyEvent};
 use crate::fs::{self, fat32::DirEntry, fat32::FsError};
 use crate::mem::address_space::USER_END;
+use crate::net::{self, NetError};
 use crate::{input, task, time};
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -86,6 +87,16 @@ pub mod nr {
     pub const TERMSIZE: u32 = 29;
     /// ignore_interrupt(on) -> 0: Ctrl+C is delivered as a byte (0x03) instead of killing us
     pub const IGNORE_INTERRUPT: u32 = 30;
+    /// net_info(*mut NetInfo) -> 0
+    pub const NET_INFO: u32 = 31;
+    /// ping(ipv4 as u32, seq, timeout_ms) -> round trip time in ms
+    pub const PING: u32 = 32;
+    /// udp_socket(port, 0 = any) -> fd
+    pub const UDP_SOCKET: u32 = 33;
+    /// sendto(fd, buf, len, ipv4 as u32, port) -> bytes sent
+    pub const SENDTO: u32 = 34;
+    /// recvfrom(fd, buf, len, *mut SockAddr or 0, timeout_ms) -> bytes received
+    pub const RECVFROM: u32 = 35;
 }
 
 pub mod errno {
@@ -112,6 +123,11 @@ pub mod errno {
     pub const ENOSYS: i64 = 38;
     pub const EPIPE: i64 = 32;
     pub const ENOTEMPTY: i64 = 39;
+    pub const ENODEV: i64 = 19;
+    pub const EMSGSIZE: i64 = 90;
+    pub const EADDRINUSE: i64 = 98;
+    pub const EHOSTUNREACH: i64 = 113;
+    pub const ETIMEDOUT: i64 = 110;
 }
 
 /// `open` flags. At least one of READ / WRITE is required.
@@ -215,7 +231,7 @@ pub extern "C" fn dispatch(frame: &mut SyscallFrame) {
     if frame.rip >= USER_END {
         super::kill_current(String::from("syscall from a non-canonical address"));
     }
-    let (a0, a1, a2, a3) = (frame.rdi, frame.rsi, frame.rdx, frame.r10);
+    let (a0, a1, a2, a3, a4) = (frame.rdi, frame.rsi, frame.rdx, frame.r10, frame.r8);
     let result = match frame.rax as u32 {
         _ if frame.rax > u32::MAX as u64 => Err(errno::ENOSYS),
         nr::EXIT => super::exit_current(ExitStatus::Exited(a0 as i64)),
@@ -257,6 +273,11 @@ pub extern "C" fn dispatch(frame: &mut SyscallFrame) {
             let (cols, rows) = crate::console::with_console(|c| c.size()).unwrap_or((80, 25));
             Ok((rows as u64) << 32 | cols as u64)
         }
+        nr::NET_INFO => sys_net_info(a0),
+        nr::PING => net::ping((a0 as u32).to_be_bytes(), a1 as u16, a2.min(10_000)).map_err(net_errno),
+        nr::UDP_SOCKET => sys_udp_socket(a0),
+        nr::SENDTO => sys_sendto(a0, a1, a2, a3, a4),
+        nr::RECVFROM => sys_recvfrom(a0, a1, a2, a3, a4),
         nr::IGNORE_INTERRUPT => {
             with_current(|p| p.set_ignore_interrupt(a0 != 0));
             Ok(0)
@@ -325,6 +346,8 @@ enum Target {
     },
     Dir,
     Pipe(PipeEnd),
+    /// A UDP socket: only `sendto`/`recvfrom` (read/write give EBADF)
+    Socket,
 }
 
 fn target(fd: u64) -> Result<Target, i64> {
@@ -348,6 +371,7 @@ fn target(fd: u64) -> Result<Target, i64> {
             },
             Handle::Dir { .. } => Target::Dir,
             Handle::Pipe(end) => Target::Pipe(end.clone()),
+            Handle::Udp(_) => Target::Socket,
         })
     })
     .unwrap_or(Err(errno::EBADF))
@@ -808,6 +832,7 @@ pub const PROC_WAIT_INPUT: u32 = 3;
 pub const PROC_JOIN: u32 = 4;
 pub const PROC_WAIT_PIPE: u32 = 5;
 pub const PROC_DEAD: u32 = 6;
+pub const PROC_WAIT_NET: u32 = 7;
 
 const _: () = assert!(size_of::<SysInfo>() == 176 && size_of::<ProcInfo>() == 64);
 
@@ -882,6 +907,7 @@ fn sys_proclist(addr: u64, max: u64) -> SysResult {
                 State::Blocked(Wait::Input) => PROC_WAIT_INPUT,
                 State::Blocked(Wait::Join(_)) => PROC_JOIN,
                 State::Blocked(Wait::Pipe(_)) => PROC_WAIT_PIPE,
+                State::Blocked(Wait::Net) => PROC_WAIT_NET,
                 State::Dead => PROC_DEAD,
             },
             user: super::is_process(t.id) as u32,
@@ -916,6 +942,108 @@ fn sys_seek(fd: u64, offset: i64, whence: u64) -> SysResult {
     let new = base.checked_add(offset).filter(|&o| o >= 0).ok_or(errno::EINVAL)?;
     set_offset(fd, new as u64);
     Ok(new as u64)
+}
+
+/// Network configuration for `netinfo`. Layout shared with `ulib`.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct NetInfo {
+    pub mac: [u8; 6],
+    pub link_up: u8,
+    pub _pad: u8,
+    pub ip: [u8; 4],
+    pub netmask: [u8; 4],
+    pub gateway: [u8; 4],
+    pub _pad2: u32,
+    pub rx_frames: u64,
+    pub tx_frames: u64,
+}
+
+/// Source of a received datagram. Layout shared with `ulib`.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct SockAddr {
+    pub ip: [u8; 4],
+    pub port: u16,
+    pub _pad: u16,
+}
+
+const _: () = assert!(size_of::<NetInfo>() == 40 && size_of::<SockAddr>() == 8);
+
+fn net_errno(e: NetError) -> i64 {
+    match e {
+        NetError::NoDevice => errno::ENODEV,
+        NetError::Unreachable => errno::EHOSTUNREACH,
+        NetError::TimedOut => errno::ETIMEDOUT,
+        NetError::AddressInUse => errno::EADDRINUSE,
+        NetError::TooLong => errno::EMSGSIZE,
+        NetError::Interrupted => errno::EINTR,
+    }
+}
+
+fn sys_net_info(addr: u64) -> SysResult {
+    let cfg = net::config().ok_or(errno::ENODEV)?;
+    let (rx, tx, up) = net::stats().unwrap_or((0, 0, false));
+    let info = NetInfo {
+        mac: cfg.mac,
+        link_up: up as u8,
+        ip: cfg.ip,
+        netmask: cfg.netmask,
+        gateway: cfg.gateway,
+        rx_frames: rx,
+        tx_frames: tx,
+        ..NetInfo::default()
+    };
+    copy_struct_to_user(addr, &info)?;
+    Ok(0)
+}
+
+fn sys_udp_socket(port: u64) -> SysResult {
+    let port = u16::try_from(port).map_err(|_| errno::EINVAL)?;
+    let socket = net::udp_bind(port).map_err(net_errno)?;
+    with_current(|p| install(p, Handle::Udp(socket))).unwrap_or(Err(errno::EBADF))
+}
+
+fn udp_socket_of(fd: u64) -> Result<alloc::sync::Arc<net::UdpSocket>, i64> {
+    with_current(|p| match p.files.get(fd as usize) {
+        Some(Some(Handle::Udp(s))) => Ok(s.clone()),
+        Some(Some(_)) => Err(errno::EINVAL),
+        _ => Err(errno::EBADF),
+    })
+    .unwrap_or(Err(errno::EBADF))
+}
+
+fn sys_sendto(fd: u64, buf: u64, len: u64, ip: u64, port: u64) -> SysResult {
+    let socket = udp_socket_of(fd)?;
+    let data = copy_from_user(buf, len)?;
+    let port = u16::try_from(port).map_err(|_| errno::EINVAL)?;
+    socket
+        .send_to((ip as u32).to_be_bytes(), port, &data)
+        .map_err(net_errno)?;
+    Ok(len)
+}
+
+fn sys_recvfrom(fd: u64, buf: u64, len: u64, from: u64, timeout_ms: u64) -> SysResult {
+    let socket = udp_socket_of(fd)?;
+    if !accessible(buf, len, true) || (from != 0 && !accessible(from, size_of::<SockAddr>() as u64, true)) {
+        return Err(errno::EFAULT);
+    }
+    let d = socket
+        .recv(timeout_ms.min(60_000), super::kill_pending)
+        .map_err(net_errno)?;
+    let n = d.data.len().min(len as usize); // the rest of a longer datagram is dropped
+    copy_to_user(buf, &d.data[..n])?;
+    if from != 0 {
+        copy_struct_to_user(
+            from,
+            &SockAddr {
+                ip: d.src,
+                port: d.src_port,
+                _pad: 0,
+            },
+        )?;
+    }
+    Ok(n as u64)
 }
 
 fn sys_getcwd(buf: u64, len: u64) -> SysResult {

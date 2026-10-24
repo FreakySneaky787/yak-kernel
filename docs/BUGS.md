@@ -38,6 +38,15 @@ Format: number · date · title, then symptom → cause → fix → test.
 - **Test:** E2E `spawntest` followed by `fault spin<pause>^C`, `fault sleep<pause>^C`, `upper<pause>^C` (all under `/bin/sh`).
 - **Remember:** "who owns the console" must follow who is *waiting*, not who was started.
 
+### #5 · 2026-10-24 · `smp::run_on` hangs once more threads exist
+- **Symptom:** after the network thread was added, the unit test `jobs_run_on_their_cpu` timed out.
+- **Cause:** `run_on` waited for the job with `yield_now()` in a loop. If the waiting thread happened to run on the target
+  CPU itself, it was always ready there, so that CPU's idle thread – the one that executes jobs – was never scheduled.
+  On an otherwise idle system the thread rarely ended up there; more scheduling activity made it likely.
+- **Fix:** wait by *blocking* (`time::sleep_ms(1)`), which lets the target CPU's idle thread run.
+- **Test:** `smp::tests::jobs_run_on_their_cpu` (now stable with the net thread running).
+- **Remember:** a busy-yield loop is not waiting – a ready thread starves the idle thread of its CPU.
+
 ## Known pitfalls (not bugs, but worth remembering)
 - **The Limine host utility (`limine bios-install`) needs a C compiler** (`gcc`). It is not required for booting the ISO
   in QEMU with `-cdrom`; it is only needed to make the ISO bootable as a hard disk / USB image.

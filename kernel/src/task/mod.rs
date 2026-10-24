@@ -58,6 +58,8 @@ pub enum Wait {
     Join(Tid),
     /// Waiting for data in / room in the pipe with this id.
     Pipe(u64),
+    /// Waiting for the network (ARP answer, ping reply, UDP datagram, timeout).
+    Net,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

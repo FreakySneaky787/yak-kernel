@@ -9,6 +9,7 @@
 #   KERNEL_DEBUG=1     QEMU waits for gdb (-s -S)
 #   KERNEL_DISK=<img>  use this disk image instead of the default one
 #   KERNEL_SMP=<n>     number of CPU cores (default 4)
+#   KERNEL_NETDEV_OPTS extra options for the user-mode network (e.g. hostfwd=udp::5555-:7)
 set -euo pipefail
 
 ELF="$1"; shift || true
@@ -76,6 +77,9 @@ QEMU_ARGS=(
     -device isa-debug-exit,iobase=0xf4,iosize=0x04
     -drive "file=$DISK,format=raw,if=none,id=disk0"
     -device ide-hd,drive=disk0,bus=ide.0
+    # network: QEMU's user-mode NAT (we are 10.0.2.15, the gateway is 10.0.2.2)
+    -netdev "user,id=net0${KERNEL_NETDEV_OPTS:+,$KERNEL_NETDEV_OPTS}"
+    -device e1000,netdev=net0
 )
 [[ "${KERNEL_DEBUG:-0}" == 1 ]] && QEMU_ARGS+=(-s -S)
 

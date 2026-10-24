@@ -70,13 +70,14 @@ Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.s
 - `kernel/src/drivers/pci.rs` – PCI enumeration; `drivers/ahci.rs` – SATA driver; `drivers/block.rs` – `BlockDevice`, `RamDisk`;
   `drivers/mod.rs` – global `DISK`; `drivers/rtc.rs` – CMOS real-time clock
 - `kernel/src/fs/` – `mod.rs` (root mount `fs::ROOT`, `SystemDisk`, path `normalize`), `fat32.rs` (FAT32 read/write, LFN, `format`)
+- `kernel/src/drivers/e1000.rs` – network card; `kernel/src/net/` – `packet.rs` (Ethernet/ARP/IPv4/ICMP/UDP), `mod.rs` (stack, net thread, sockets)
 - `rootfs/` – initial contents of the FAT32 disk image; `scripts/mkdisk.sh` – builds the image;
   `scripts/check-test-disks.sh` – `fsck.fat` + mtools validation of the test disks (run by `make test`);
   `scripts/install-user.sh` – copies `build/user/bin/*` into `/bin` of a disk image
 - `user/` – user programs: `src/lib.rs` (`ulib`: `_start`, `Args`), `sys.rs` (syscalls), `io.rs` (`print!`, `read_line`),
   `fs.rs` (`File`, `Dir`, `stat`), `heap.rs` (allocator on `brk`),
   `process.rs` (`spawn`/`wait`/`kill`), `src/bin/*.rs` (one program each: tools cat, ls, cp, mv, rm, mkdir, touch, stat,
-  sort, wc, grep, ps, mem, uptime, df, date, upper, hello; self-tests fault, fstest, heaptest, spawntest, pipetest),
+  sort, wc, grep, ps, mem, uptime, df, date, upper, hello, ping, netinfo, udpecho; self-tests fault, fstest, heaptest, spawntest, pipetest),
   `src/bin/sh/` (the shell, started as init), `src/bin/edit/` (full-screen editor), `linker.ld`
 - `kernel/src/time.rs` – ticks, `uptime_ms`, `sleep_ms`
 - `kernel/src/drivers/keyboard.rs` – PS/2 driver, ring buffer, `read_key()`; `drivers/scancode.rs` – decoder + layouts (DE/US)

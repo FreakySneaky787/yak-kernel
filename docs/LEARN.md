@@ -264,6 +264,16 @@ Short explanations of every subsystem: what it is and why we need it.
   in between simply cancels the sleep.
 - Idle cores sleep with `hlt`; when work appears, another core wakes them with an inter-processor interrupt.
 
+## M27 – Networking
+- A network card is another DMA device: we give it rings of descriptors pointing at buffers in RAM; it fills receive
+  buffers with incoming **Ethernet frames** and sends the frames we put into the transmit ring.
+- Frames are layered like envelopes: **Ethernet** (MAC addresses) carries **IPv4** (IP addresses), which carries **ICMP**
+  (ping) or **UDP** (datagrams to a port). Each layer has a small header in front of its payload.
+- To send to an IP address, we first need the neighbour's MAC address: **ARP** asks "who has 10.0.2.2?" on the whole
+  network and remembers the answer. Hosts outside our subnet are reached through the **gateway**.
+- QEMU emulates a whole small network for us: a router at 10.0.2.2 that answers pings and forwards UDP to the host, which
+  is how the E2E test talks to the kernel over UDP.
+
 ## Tooling – GNU ld and binutils
 - rustc compiles our code into object files; a **linker** combines them into the final ELF according to `kernel/linker.ld`
   (load address, section order, segments). We use **GNU ld** (`ld.bfd`) for that.

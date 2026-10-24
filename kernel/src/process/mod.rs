@@ -142,6 +142,8 @@ pub enum Handle {
     Dir { entries: Vec<DirEntry>, next: usize },
     /// One end of a pipe.
     Pipe(pipe::PipeEnd),
+    /// A bound UDP port (`net`); unbound when the last descriptor closes.
+    Udp(Arc<crate::net::UdpSocket>),
 }
 
 /// The descriptor table of a process started without a parent.

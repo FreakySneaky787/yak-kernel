@@ -686,6 +686,7 @@ fn cmd_ps(_: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), String
             task::State::Blocked(task::Wait::Input) => String::from("wait input"),
             task::State::Blocked(task::Wait::Join(id)) => format!("join {}", id),
             task::State::Blocked(task::Wait::Pipe(_)) => String::from("wait pipe"),
+            task::State::Blocked(task::Wait::Net) => String::from("wait net"),
             task::State::Dead => String::from("dead"),
         };
         let on = t.cpu.map_or(String::from("-"), |c| format!("{}", c));

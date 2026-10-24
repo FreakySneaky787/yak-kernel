@@ -256,14 +256,16 @@ pub fn run_on<R: Send + 'static>(cpu: usize, f: impl FnOnce() -> R + Send + 'sta
         if posted {
             break;
         }
-        crate::task::yield_now(); // another job is still pending there
+        time::sleep_ms(1); // another job is still pending there
     }
     wake_cpu(cpu);
     loop {
         if let Some(r) = result.lock().take() {
             return Some(r);
         }
-        crate::task::yield_now();
+        // Block, don't just yield: if we landed on the target CPU ourselves, a
+        // ready thread there would keep its idle thread (which runs the job) away.
+        time::sleep_ms(1);
     }
 }
 
