@@ -92,7 +92,8 @@
   mappings own their frames. It must not be the active address space when dropped.
 - **User layout**: ELF segments between `USER_IMAGE_START` (64 KiB, null page area stays unmapped) and `USER_IMAGE_END`;
   our programs link at `0x40_0000`. Stack: 16 pages below `USER_STACK_TOP = 0x7FFF_FFFF_0000`, nothing mapped below it
-  (overflow → page fault → process killed). The argument string is copied to the stack top; `_start` gets pointer and length in RDI/RSI.
+  (overflow → page fault → process killed). The argument block is copied to the stack top; `_start` gets pointer and length
+  in RDI/RSI. Arguments inside the block are separated by NUL bytes (`ulib::Args`); the shell joins its words that way.
 - **ELF loader** (`process::elf`): static `ET_EXEC` x86_64 only, `PT_LOAD` segments with R/W/X → USER, WRITABLE, NO_EXECUTE.
   Every header field is bounds-checked; segments outside the user image area or an entry point outside an X segment are refused.
 - **Processes** (`process::PROCESSES`, interrupts off while locked): one kernel thread per process. `task::spawn_user` creates a
@@ -118,14 +119,27 @@
   | 4 | `getpid()` | |
   | 5 | `uptime_ms()` | |
   | 6 | `yield()` | |
+  | 7 | `open(path, len, flags)` | flags READ=1, WRITE=2 (appends), CREATE=4, TRUNCATE=8; a directory opens for `readdir` |
+  | 8 | `close(fd)` | |
+  | 9 | `readdir(fd, *DirEntryInfo)` | 1 = entry written, 0 = end; 296-byte `repr(C)` struct shared with `ulib` |
+  | 10 | `stat(path, len, *Stat)` | 32-byte `repr(C)`: size, kind (1 file, 2 dir), modified time |
+  | 11 | `getcwd(buf, len)` | `-ERANGE` if too small |
+  | 12 | `unlink(path, len)` | files and empty directories |
+  | 13 | `mkdir(path, len)` | |
+- **Files**: each process has a cwd (inherited from the spawner, paths are normalized against it) and up to 32 file descriptors
+  (`process::Handle`): 0 stdin, 1/2 the process's `Output`, then files (path + read offset, writes append via `append_file`)
+  and directories (snapshot of the entries at `open`). Handlers copy what they need out of the table, do the disk I/O
+  without holding `PROCESSES` (only `fs::ROOT`), then update the descriptor. `read` of a file uses `FatFs::read_at`, ≤ 64 KiB per call.
+  FS errors map to Linux errno values (`ENOENT`, `EISDIR`, ...).
 - **User pointers**: every buffer is checked page by page against the process's page tables (present + USER, + WRITABLE for
   `read`) before the kernel touches it; then it is accessed directly (the process CR3 is active). No SMAP/SMEP yet.
 - **User programs** (`user/`, crate `ulib` + `src/bin/*`): built with the same target as the kernel but `code-model=small`,
   linked by GNU ld at `0x40_0000` (`user/linker.ld`). `make user` copies them to `build/user/bin`; `scripts/mkdisk.sh`
   and (for the persistent disk) `run-qemu.sh` install them into `/bin` via `scripts/install-user.sh`.
 - **Shell**: a word that is not a built-in is a program path or a name in `/bin`; `run <path> [args]` does the same explicitly.
-  Arguments are joined with single spaces. Non-zero exit codes and kills are reported as errors.
-- Limitations: no FPU/SSE state is saved (kernel and our programs are built soft-float); no user heap; no file syscalls yet;
+  Programs run in the shell's cwd. `ls`, `cat` and `cp` are programs (no built-ins any more). Non-zero exit codes and kills
+  are reported as errors. `Shell::capture_programs` makes program output go to the command's `out` (unit tests).
+- Limitations: no FPU/SSE state is saved (kernel and our programs are built soft-float); no user heap; no seek;
   no Ctrl+C for a running program (`kill` exists in the kernel API only); a program blocked in `read` is only killed after its next key.
 
 ## Kernel heap

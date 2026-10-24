@@ -173,6 +173,18 @@ Short explanations of every subsystem: what it is and why we need it.
 - Our programs live in `user/`: a tiny runtime (`ulib`: `_start`, syscall wrappers, `println!`) plus one file per program.
   They are ordinary Rust `no_std` binaries, linked at 0x40_0000, and are loaded from `/bin` on the FAT32 disk.
 
+## M17 – Files for programs
+- A **file descriptor** is just a small number that stands for an open file inside one process: the kernel keeps a table per
+  process, `open` puts an entry in it and returns its index, `read`/`write`/`close` take that index. 0, 1 and 2 are
+  pre-opened: keyboard input, screen output, error output. Because the console is "just another descriptor", `cat` writes a
+  file to the screen with exactly the same `write` call it would use for a file.
+- The kernel remembers the **position** in an open file, so consecutive `read`s continue where the last one stopped.
+- Every process has a **current directory**; relative paths in system calls start there. A program inherits it from the
+  shell – that is why `ls` without arguments lists the directory you `cd`ed into.
+- Errors come back as negative numbers (`-2` = `ENOENT` "no such file or directory"), the same numbers Linux uses.
+- Programs get their arguments as one block with NUL bytes between them, so `cp "My Notes/a.txt" b.txt` arrives as exactly
+  two arguments even though the first one contains a space.
+
 ## Tooling – GNU ld and binutils
 - rustc compiles our code into object files; a **linker** combines them into the final ELF according to `kernel/linker.ld`
   (load address, section order, segments). We use **GNU ld** (`ld.bfd`) for that.
