@@ -1,4 +1,4 @@
-//! Handler für die CPU-Exceptions (Vektoren 0–31) und Aufbau der Kernel-IDT.
+//! Handlers for CPU exceptions (vectors 0-31) and construction of the kernel IDT.
 
 use super::gdt::DOUBLE_FAULT_IST;
 use super::idt::{Idt, InterruptStackFrame, read_cr2};
@@ -31,11 +31,11 @@ pub mod vector {
 
 static IDT: Once<Idt> = Once::new();
 
-/// Wie oft `int3` behandelt wurde (für Tests und Statistik).
+/// How often `int3` was handled (for tests and statistics).
 pub static BREAKPOINT_COUNT: AtomicU64 = AtomicU64::new(0);
 
-/// Trägt alle Exception-Handler in `idt` ein. Separat von `init`, damit
-/// spätere Module (IRQs) und Tests darauf aufbauen können.
+/// Installs all exception handlers into `idt`. Separate from `init` so that
+/// later modules (IRQs) and tests can build on it.
 pub fn install_exception_handlers(idt: &mut Idt) {
     use vector::*;
     idt.set(DIVIDE_ERROR, divide_error);
@@ -60,7 +60,7 @@ pub fn install_exception_handlers(idt: &mut Idt) {
     idt.set_with_error_code(CONTROL_PROTECTION, control_protection);
 }
 
-/// Baut die Kernel-IDT (einmalig) und lädt sie.
+/// Builds the kernel IDT (once) and loads it.
 pub fn init() {
     let idt = IDT.call_once(|| {
         let mut idt = Idt::new();
@@ -79,7 +79,7 @@ pub fn kernel_idt() -> Option<&'static Idt> {
 
 extern "x86-interrupt" fn breakpoint(frame: InterruptStackFrame) {
     BREAKPOINT_COUNT.fetch_add(1, Ordering::Relaxed);
-    serial_println!("EXCEPTION: BREAKPOINT bei {:#x}", frame.rip);
+    serial_println!("EXCEPTION: BREAKPOINT at {:#x}", frame.rip);
 }
 
 extern "x86-interrupt" fn double_fault(frame: InterruptStackFrame, error_code: u64) -> ! {
@@ -88,7 +88,7 @@ extern "x86-interrupt" fn double_fault(frame: InterruptStackFrame, error_code: u
 
 extern "x86-interrupt" fn page_fault(frame: InterruptStackFrame, error_code: u64) {
     panic!(
-        "EXCEPTION: PAGE FAULT bei Adresse {:#018x}\n  Ursache: {}\n{:?}",
+        "EXCEPTION: PAGE FAULT at address {:#018x}\n  cause: {}\n{:?}",
         read_cr2(),
         PageFaultError(error_code),
         frame
@@ -103,7 +103,7 @@ extern "x86-interrupt" fn machine_check(frame: InterruptStackFrame) -> ! {
     panic!("EXCEPTION: MACHINE CHECK\n{:?}", frame);
 }
 
-/// Erzeugt einfache Handler, die mit Namen (und ggf. Fehlercode) panicken.
+/// Generates simple handlers that panic with their name (and error code, if any).
 macro_rules! panicking_handler {
     ($name:ident, $text:literal) => {
         extern "x86-interrupt" fn $name(frame: InterruptStackFrame) {
@@ -133,7 +133,7 @@ panicking_handler!(stack_segment_fault, "STACK SEGMENT FAULT", error_code);
 panicking_handler!(alignment_check, "ALIGNMENT CHECK", error_code);
 panicking_handler!(control_protection, "CONTROL PROTECTION", error_code);
 
-/// Page-Fault-Fehlercode lesbar machen (Intel SDM Vol. 3, 4.7).
+/// Human-readable page fault error code (Intel SDM Vol. 3, 4.7).
 pub struct PageFaultError(pub u64);
 
 impl core::fmt::Display for PageFaultError {
@@ -142,12 +142,12 @@ impl core::fmt::Display for PageFaultError {
         write!(
             f,
             "{}, {}, {}",
-            if c & 1 != 0 { "Schutzverletzung" } else { "Seite nicht vorhanden" },
-            if c & 2 != 0 { "Schreiben" } else { "Lesen" },
-            if c & 4 != 0 { "User-Modus" } else { "Kernel-Modus" },
+            if c & 1 != 0 { "protection violation" } else { "page not present" },
+            if c & 2 != 0 { "write" } else { "read" },
+            if c & 4 != 0 { "user mode" } else { "kernel mode" },
         )?;
         if c & 16 != 0 {
-            write!(f, ", Instruction Fetch")?;
+            write!(f, ", instruction fetch")?;
         }
         Ok(())
     }
@@ -168,9 +168,9 @@ mod tests {
     fn exception_entries_present() {
         let idt = kernel_idt().unwrap();
         for v in [0u8, 3, 6, 8, 13, 14] {
-            assert!(idt.entry(v).is_present(), "Vektor {} fehlt", v);
+            assert!(idt.entry(v).is_present(), "vector {} missing", v);
         }
-        assert!(!idt.entry(9).is_present()); // reserviert
+        assert!(!idt.entry(9).is_present()); // reserved
     }
 
     #[test_case]
@@ -186,6 +186,6 @@ mod tests {
         }
         let mut b = Buf([0; 128], 0);
         write!(b, "{}", PageFaultError(0b10)).unwrap();
-        assert_eq!(core::str::from_utf8(&b.0[..b.1]).unwrap(), "Seite nicht vorhanden, Schreiben, Kernel-Modus");
+        assert_eq!(core::str::from_utf8(&b.0[..b.1]).unwrap(), "page not present, write, kernel mode");
     }
 }

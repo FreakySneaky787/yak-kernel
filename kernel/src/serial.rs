@@ -1,6 +1,6 @@
-//! Treiber für den UART 16550 an COM1 (Port 0x3F8).
-//! QEMU leitet COM1 mit `-serial stdio` ins Terminal um – unser wichtigster
-//! Debug- und Testkanal, weil er auch ohne Bildschirm funktioniert.
+//! Driver for the 16550 UART on COM1 (port 0x3F8).
+//! QEMU redirects COM1 to the terminal with `-serial stdio` - our most important
+//! debug and test channel, because it works without a screen.
 
 use crate::arch::x86_64::port::{inb, outb};
 use core::fmt::{self, Write};
@@ -20,18 +20,18 @@ impl SerialPort {
     fn init(&mut self) {
         let b = self.base;
         unsafe {
-            outb(b + 1, 0x00); // Interrupts aus
-            outb(b + 3, 0x80); // DLAB an: Baudraten-Teiler setzen
-            outb(b, 0x01); // Teiler 1 → 115200 Baud
+            outb(b + 1, 0x00); // disable UART interrupts
+            outb(b + 3, 0x80); // DLAB on: set baud rate divisor
+            outb(b, 0x01); // divisor 1 -> 115200 baud
             outb(b + 1, 0x00);
-            outb(b + 3, 0x03); // 8 Bit, keine Parität, 1 Stoppbit (DLAB aus)
-            outb(b + 2, 0xC7); // FIFO an, geleert, 14-Byte-Schwelle
+            outb(b + 3, 0x03); // 8 bits, no parity, 1 stop bit (DLAB off)
+            outb(b + 2, 0xC7); // FIFO on, cleared, 14-byte threshold
             outb(b + 4, 0x0B); // DTR + RTS + OUT2
         }
     }
 
     fn send(&mut self, byte: u8) {
-        // Warten bis das Senderegister leer ist (Line Status Register Bit 5)
+        // Wait until the transmit register is empty (line status register bit 5)
         while unsafe { inb(self.base + 5) } & 0x20 == 0 {
             core::hint::spin_loop();
         }
@@ -62,7 +62,7 @@ pub fn _print(args: fmt::Arguments) {
     crate::arch::x86_64::without_interrupts(|| _print_locked(args));
 }
 
-/// Wie `_print`, aber der Aufrufer hat Interrupts bereits gesperrt.
+/// Like `_print`, but the caller has already disabled interrupts.
 pub(crate) fn _print_locked(args: fmt::Arguments) {
     SERIAL.lock().write_fmt(args).ok();
 }

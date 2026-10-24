@@ -1,10 +1,10 @@
 //! Global Descriptor Table + Task State Segment.
 //!
-//! Im 64-bit-Modus ist Segmentierung praktisch abgeschaltet, die CPU will aber
-//! trotzdem gültige Code-/Data-Deskriptoren sehen. Wichtig ist vor allem der
-//! TSS: Er enthält die Interrupt Stack Table (IST) – separate Stacks, auf die
-//! die CPU bei bestimmten Exceptions umschaltet (z. B. Double Fault bei
-//! Stack Overflow, wo der normale Stack ja kaputt ist).
+//! In 64-bit mode segmentation is mostly disabled, but the CPU still wants to
+//! see valid code/data descriptors. The important part is the
+//! TSS: it contains the interrupt stack table (IST) - separate stacks the
+//! CPU switches to for certain exceptions (e.g. a double fault caused by a
+//! stack overflow, where the normal stack is unusable).
 
 use core::arch::asm;
 use core::mem::size_of;
@@ -14,15 +14,15 @@ pub const KERNEL_CODE_SELECTOR: u16 = 0x08;
 pub const KERNEL_DATA_SELECTOR: u16 = 0x10;
 pub const TSS_SELECTOR: u16 = 0x18;
 
-/// IST-Index (1-basiert wie im IDT-Eintrag) für den Double-Fault-Stack.
+/// IST index (1-based, as in the IDT entry) of the double fault stack.
 pub const DOUBLE_FAULT_IST: u8 = 1;
 const IST_STACK_SIZE: usize = 5 * 4096;
 
-/// 64-bit TSS-Layout laut Intel SDM Vol. 3, 8.7.
+/// 64-bit TSS layout according to Intel SDM Vol. 3, 8.7.
 #[repr(C, packed(4))]
 pub struct TaskStateSegment {
     _reserved0: u32,
-    /// Stacks für Wechsel nach Ring 0/1/2 (brauchen wir ab Userspace)
+    /// Stacks for switching to ring 0/1/2 (needed once we have user space)
     pub privilege_stacks: [u64; 3],
     _reserved1: u64,
     /// IST1..IST7 (Index 0 = IST1)
@@ -43,7 +43,7 @@ impl TaskStateSegment {
             interrupt_stacks: [0; 7],
             _reserved2: 0,
             _reserved3: 0,
-            iomap_base: size_of::<TaskStateSegment>() as u16, // keine I/O-Bitmap
+            iomap_base: size_of::<TaskStateSegment>() as u16, // no I/O permission bitmap
         }
     }
 }
@@ -53,13 +53,13 @@ struct Stack([u8; IST_STACK_SIZE]);
 
 static mut DOUBLE_FAULT_STACK: Stack = Stack([0; IST_STACK_SIZE]);
 
-/// Null, Kernel-Code, Kernel-Data, TSS (16 Byte = 2 Einträge)
+/// Null, kernel code, kernel data, TSS (16 bytes = 2 entries)
 const GDT_ENTRIES: usize = 5;
 
 #[repr(C, align(8))]
 pub struct Gdt([u64; GDT_ENTRIES]);
 
-// Deskriptor-Bits: P=present, S=code/data, E=executable, RW, L=64-bit, G=4K-Granularität
+// Descriptor bits: P=present, S=code/data, E=executable, RW, L=64-bit, G=4K granularity
 const KERNEL_CODE: u64 = 0x00AF_9A00_0000_FFFF; // P|DPL0|S|E|RW, L=1, G=1
 const KERNEL_DATA: u64 = 0x00CF_9200_0000_FFFF; // P|DPL0|S|RW, D/B=1, G=1
 
@@ -69,7 +69,7 @@ fn tss_descriptor(tss: &'static TaskStateSegment) -> (u64, u64) {
     let mut low = 0u64;
     low |= limit & 0xFFFF;
     low |= (base & 0xFF_FFFF) << 16;
-    low |= 0x89 << 40; // P=1, DPL=0, Typ 0x9 = verfügbarer 64-bit TSS
+    low |= 0x89 << 40; // P=1, DPL=0, type 0x9 = available 64-bit TSS
     low |= ((limit >> 16) & 0xF) << 48;
     low |= ((base >> 24) & 0xFF) << 56;
     let high = base >> 32;
@@ -89,7 +89,7 @@ pub fn init() {
     let tss = TSS.call_once(|| {
         let mut tss = TaskStateSegment::new();
         let stack_start = core::ptr::addr_of!(DOUBLE_FAULT_STACK) as u64;
-        // Stacks wachsen nach unten → Ende des Arrays eintragen
+        // Stacks grow downwards -> store the end of the array
         tss.interrupt_stacks[(DOUBLE_FAULT_IST - 1) as usize] = stack_start + IST_STACK_SIZE as u64;
         tss
     });
@@ -105,7 +105,7 @@ pub fn init() {
 
     unsafe {
         asm!("lgdt [{}]", in(reg) &ptr, options(readonly, nostack, preserves_flags));
-        // CS lässt sich nicht per `mov` setzen → far return auf das neue Segment
+        // CS cannot be set with `mov` -> far return into the new segment
         asm!(
             "push {sel}",
             "lea {tmp}, [rip + 2f]",
@@ -129,7 +129,7 @@ pub fn init() {
     }
 }
 
-/// Oberes Ende des Double-Fault-Stacks (für Tests).
+/// Top of the double fault stack (for tests).
 pub fn double_fault_stack_top() -> u64 {
     TSS.get().map(|t| t.interrupt_stacks[(DOUBLE_FAULT_IST - 1) as usize]).unwrap_or(0)
 }

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Bootet den Kernel headless, wartet und speichert einen Screenshot als PNG.
+"""Boots the kernel headless, waits, and saves a screenshot as PNG.
 
-Nutzung: scripts/screenshot.py <kernel-elf> <ausgabe.png> [wartezeit_s] [tasten...]
-Tasten (optional) werden nach der Wartezeit über den QEMU-Monitor gesendet
-(`sendkey`-Namen, z. B. h e l p ret), danach wird nochmal kurz gewartet.
-Die serielle Ausgabe landet in <ausgabe>.serial.txt.
+Usage: scripts/screenshot.py <kernel-elf> <output.png> [wait_s] [keys...]
+Keys (optional) are sent through the QEMU monitor after the wait time
+(`sendkey` names, e.g. h e l p ret), followed by another short wait.
+Serial output is written to <output>.serial.txt.
 """
 import os
 import socket
@@ -17,7 +17,7 @@ import zlib
 
 
 def ppm_to_png(ppm: bytes, out_path: str) -> None:
-    # P6-Header: "P6\n<w> <h>\n<max>\n"
+    # P6 header: "P6\n<w> <h>\n<max>\n"
     parts = ppm.split(b"\n", 3)
     w, h = map(int, parts[1].split())
     pixels = parts[3]

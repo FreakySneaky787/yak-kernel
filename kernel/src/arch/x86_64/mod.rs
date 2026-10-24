@@ -10,14 +10,14 @@ pub mod port;
 
 use core::arch::asm;
 
-/// Hält die CPU an, bis der nächste Interrupt kommt – für immer.
+/// Halts the CPU forever with interrupts disabled.
 pub fn halt_loop() -> ! {
     loop {
         unsafe { asm!("cli; hlt", options(nomem, nostack)) };
     }
 }
 
-/// Wartet mit `hlt` auf Interrupts (Interrupts bleiben an).
+/// Waits for interrupts with `hlt` forever (interrupts stay enabled).
 pub fn idle_loop() -> ! {
     loop {
         unsafe { asm!("sti; hlt", options(nomem, nostack)) };
@@ -40,9 +40,9 @@ pub fn disable_interrupts() {
     unsafe { asm!("cli", options(nomem, nostack)) };
 }
 
-/// Führt `f` mit gesperrten Interrupts aus und stellt den vorherigen Zustand
-/// wieder her. Nötig, wenn Code einen Lock hält, den auch ein
-/// Interrupt-Handler nehmen könnte (sonst Deadlock).
+/// Runs `f` with interrupts disabled and restores the previous state
+/// afterwards. Needed whenever code holds a lock that an
+/// interrupt handler might also take (otherwise: deadlock).
 pub fn without_interrupts<R>(f: impl FnOnce() -> R) -> R {
     let was_enabled = interrupts_enabled();
     if was_enabled {

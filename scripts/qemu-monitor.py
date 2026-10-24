@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Bootet den Kernel headless und führt Befehle im QEMU-Monitor aus.
+"""Boots the kernel headless and runs commands in the QEMU monitor.
 
-Nutzung: scripts/qemu-monitor.py <kernel-elf> [wartezeit_s] -- <befehl> [<befehl> ...]
-Beispiel: scripts/qemu-monitor.py kernel/target/x86_64-unknown-none/debug/kernel 3 -- "info pic" "info lapic"
+Usage: scripts/qemu-monitor.py <kernel-elf> [wait_s] -- <command> [<command> ...]
+Example: scripts/qemu-monitor.py kernel/target/x86_64-unknown-none/debug/kernel 3 -- "info pic" "info lapic"
 """
 import os
 import re
@@ -44,7 +44,7 @@ def main() -> int:
                 out += chunk
         except BlockingIOError:
             pass
-        # Monitor-Echo und Steuersequenzen entfernen
+        # strip monitor echo and terminal control sequences
         text = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", out.decode(errors="replace"))
         print("\n".join(l for l in text.splitlines() if l.strip() and not l.startswith("(qemu)")))
         return 0

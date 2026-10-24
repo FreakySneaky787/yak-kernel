@@ -1,10 +1,10 @@
-//! Übersetzt PS/2-Scancodes (Set 1) in Tastendrücke.
+//! Translates PS/2 scancodes (set 1) into key presses.
 //!
-//! Set 1: Ein Byte pro Taste beim Drücken („make“), beim Loslassen dasselbe
-//! Byte mit gesetztem Bit 7 („break“). Manche Tasten (Pfeile, AltGr, …)
-//! kommen mit Präfix 0xE0. Pause schickt eine 6-Byte-Folge mit 0xE1.
+//! Set 1: one byte per key when pressed ("make"), the same byte with bit 7 set
+//! when released ("break"). Some keys (arrows, AltGr, ...)
+//! come with a 0xE0 prefix. Pause sends a 6-byte sequence starting with 0xE1.
 //!
-//! Reine Logik ohne Hardware-Zugriff – darum komplett per Unit-Test prüfbar.
+//! Pure logic without hardware access - fully unit-testable.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Key {
@@ -35,7 +35,7 @@ pub struct KeyEvent {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Layout {
-    /// Deutsches QWERTZ
+    /// German QWERTZ
     De,
     /// US-QWERTY
     Us,
@@ -55,7 +55,7 @@ pub struct Decoder {
     layout: Layout,
     mods: Modifiers,
     extended: bool,
-    /// Noch zu überspringende Bytes der Pause-Sequenz
+    /// Remaining bytes of the pause sequence to skip
     skip: u8,
 }
 
@@ -88,8 +88,8 @@ impl Decoder {
         self.mods.caps_lock
     }
 
-    /// Ein Byte vom Keyboard verarbeiten. Liefert ein Event nur beim Drücken
-    /// einer Taste, die etwas erzeugt (nicht bei Modifiern oder Loslassen).
+    /// Process one byte from the keyboard. Returns an event only when a key
+    /// that produces something is pressed (not for modifiers or releases).
     pub fn feed(&mut self, byte: u8) -> Option<KeyEvent> {
         if self.skip > 0 {
             self.skip -= 1;
@@ -148,7 +148,7 @@ impl Decoder {
         let key = match code {
             0x1D => return self.set(|m| &mut m.ctrl, pressed),
             0x38 => return self.set(|m| &mut m.alt_gr, pressed),
-            0x2A | 0x36 => return None, // „Fake-Shift“ von Druck/Pos1 & Co.
+            0x2A | 0x36 => return None, // "fake shift" sent with PrintScreen/Home etc.
             _ if released => return None,
             0x1C => Key::Enter,
             0x35 => Key::Char('/'),
@@ -182,15 +182,15 @@ impl Decoder {
             return alt_gr;
         }
         let shift = self.mods.left_shift || self.mods.right_shift;
-        // Caps Lock wirkt nur auf Buchstaben (inkl. Umlaute), nicht auf Ziffern/Zeichen
+        // Caps Lock only affects letters (including umlauts), not digits/symbols
         let upper = if normal.is_alphabetic() { shift ^ self.mods.caps_lock } else { shift };
         Some(if upper { shifted } else { normal })
     }
 }
 
-/// (normal, mit Shift, mit AltGr) für eine Taste im gegebenen Layout.
+/// (normal, with Shift, with AltGr) for a key in the given layout.
 fn layout_table(layout: Layout, code: u8) -> Option<(char, char, Option<char>)> {
-    // Zuerst die layoutspezifischen Tasten …
+    // First the layout-specific keys ...
     let specific = match layout {
         Layout::De => match code {
             0x02 => ('1', '!', None),
@@ -218,7 +218,7 @@ fn layout_table(layout: Layout, code: u8) -> Option<(char, char, Option<char>)> 
             0x33 => (',', ';', None),
             0x34 => ('.', ':', None),
             0x35 => ('-', '_', None),
-            0x53 => (',', ',', None), // Ziffernblock-Komma
+            0x53 => (',', ',', None), // keypad comma
             0x56 => ('<', '>', Some('|')),
             _ => ('\0', '\0', None),
         },
@@ -254,7 +254,7 @@ fn layout_table(layout: Layout, code: u8) -> Option<(char, char, Option<char>)> 
     if specific.0 != '\0' {
         return Some(specific);
     }
-    // … dann die, die in beiden Layouts gleich sind
+    // ... then the keys that are identical in both layouts
     let letter = |c: char| Some((c, c.to_ascii_uppercase(), None));
     match code {
         0x11 => letter('w'),
@@ -282,7 +282,7 @@ fn layout_table(layout: Layout, code: u8) -> Option<(char, char, Option<char>)> 
         0x31 => letter('n'),
         0x32 => letter('m'),
         0x39 => Some((' ', ' ', None)),
-        // Ziffernblock (NumLock wird als „an“ angenommen)
+        // Keypad (NumLock is assumed to be on)
         0x37 => Some(('*', '*', None)),
         0x47 => Some(('7', '7', None)),
         0x48 => Some(('8', '8', None)),
@@ -366,7 +366,7 @@ mod tests {
         assert_eq!(ch(&mut d, &[0x1E]), Some('A'));
         assert_eq!(ch(&mut d, &[0x28]), Some('Ä'));
         assert_eq!(ch(&mut d, &[0x02]), Some('1'));
-        assert_eq!(ch(&mut d, &[0x2A, 0x1E]), Some('a')); // Shift hebt Caps auf
+        assert_eq!(ch(&mut d, &[0x2A, 0x1E]), Some('a')); // Shift cancels Caps Lock
     }
 
     #[test_case]
@@ -384,8 +384,8 @@ mod tests {
         assert_eq!(feed_all(&mut d, &[0xE0, 0x48]).unwrap().key, Key::Up);
         assert_eq!(feed_all(&mut d, &[0xE0, 0x53]).unwrap().key, Key::Delete);
         assert_eq!(d.feed(0xE0), None);
-        assert_eq!(d.feed(0xC8), None); // Up losgelassen
-        // Nach einer E0-Sequenz ist 0x48 wieder Ziffernblock-8
+        assert_eq!(d.feed(0xC8), None); // Up released
+        // After an E0 sequence, 0x48 is keypad 8 again
         assert_eq!(ch(&mut d, &[0x48]), Some('8'));
     }
 

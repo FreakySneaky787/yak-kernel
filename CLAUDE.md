@@ -1,51 +1,62 @@
-# KernelTry – Hobby-Kernel in Rust (x86_64, QEMU)
+# KernelTry – hobby kernel in Rust (x86_64, QEMU)
 
-Ein Kernel von Grund auf, gemeinsam mit AI geschrieben. Läuft nur in QEMU.
-Sprache der Doku und Kommentare: **Deutsch**. Bezeichner im Code: Englisch.
+A kernel written from scratch together with an AI. Runs in QEMU only.
 
-## Zuerst lesen
-1. `docs/PROGRESS.md` – wo wir stehen und was als Nächstes kommt
-2. `docs/DESIGN.md` – Architektur und Begründungen, bevor du etwas Grundlegendes änderst
-3. `docs/BUGS.md` – bekannte Fallen, vor allem bei Triple Faults und Boot-Problemen
+**Language rule:** everything in this repository (docs, code comments, kernel output, commit messages) is **English**.
+The conversation with the user happens in German.
 
-## Befehle
-| Befehl | Was |
+## Read first
+1. `docs/PROGRESS.md` – where we are and what comes next
+2. `docs/DESIGN.md` – architecture and rationale, before changing anything fundamental
+3. `docs/BUGS.md` – known pitfalls, especially for triple faults and boot problems
+
+## Commands
+| Command | What |
 |---|---|
-| `make build` | Kernel bauen (`kernel/target/x86_64-unknown-none/debug/kernel`) |
-| `make run` | QEMU mit Fenster (BIOS), Serial-Ausgabe im Terminal |
-| `make run-uefi` | wie run, aber mit OVMF/UEFI |
-| `make test` | alle In-Kernel-Tests headless in QEMU, Exitcode 0 = grün |
-| `make debug` + `make gdb` | QEMU wartet auf gdb an :1234 |
-| `python3 -I scripts/qemu-monitor.py <elf> [sek] -- "info pic" …` | QEMU-Monitor-Befehle gegen den laufenden Kernel |
-| `python3 -I scripts/screenshot.py <elf> <out.png> [sek] [tasten…]` | headless booten, optional Tasten senden (QEMU-`sendkey`-Namen, US-Positionen), Screenshot + Serial-Log |
+| `make build` | build the kernel (`kernel/target/x86_64-unknown-none/debug/kernel`) |
+| `make run` | QEMU with a window (BIOS), serial output in the terminal |
+| `make run-uefi` | same, with OVMF/UEFI firmware |
+| `make test` | all in-kernel tests headless in QEMU, exit status 0 = green |
+| `make debug` + `make gdb` | QEMU waits for gdb on :1234 |
+| `make disasm` / `make symbols` / `make sections` | GNU objdump / nm / readelf on the kernel ELF |
+| `make addr2line ADDR=0xffffffff8000...` | map a code address (e.g. RIP from a panic) to file:line |
+| `python3 -I scripts/qemu-monitor.py <elf> [s] -- "info pic" …` | run QEMU monitor commands against the running kernel |
+| `python3 -I scripts/screenshot.py <elf> <out.png> [s] [keys…]` | boot headless, optionally send keys (QEMU `sendkey` names = US key positions), save screenshot + serial log |
 
-Tests laufen ohne Fenster und brechen nach 30 s ab (`KERNEL_TEST_TIMEOUT`), du kannst sie also selbst ausführen.
-Bei Interrupt-Problemen: QEMU-Monitor (`-monitor unix:<sock>,server,nowait`) mit `info pic`, `info lapic`, `info registers`.
-Bei Triple Faults hilft es, an `scripts/run-qemu.sh` die Flags `-d int,cpu_reset` anzuhängen.
+Tests run headless and abort after 30 s (`KERNEL_TEST_TIMEOUT`), so Claude can run them unattended.
+Interrupt problems: QEMU monitor `info pic`, `info lapic`, `info registers`.
+Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.sh` invocation.
 
-## Arbeitsweise (verbindlich)
-- Kleine Meilensteine aus `docs/PROGRESS.md`, einer nach dem anderen.
-- Ablauf pro Schritt: implementieren → `make test` grün → Doku aktualisieren → Commit `M<n>: <was>` → Push.
-- Jeder Meilenstein bekommt mindestens einen Test. Jeder Bugfix bekommt einen Eintrag in `docs/BUGS.md` und, wenn möglich, einen Regressionstest.
-- Am Ende jeder Session muss in `docs/PROGRESS.md` unter „Nächster Schritt“ stehen, wo es weitergeht.
-- Der User arbeitet mit (Arbeitsweise im Mix). Aufgaben, die mit **[USER]** markiert sind, schreibt der User selbst. Du gibst Hinweise und reviewst.
-  Wenn du neue Subsysteme erklärst, kommt eine kurze Erklärung in `docs/LEARN.md`.
-- „From scratch“: GDT, IDT, Paging, Allokatoren und Treiber schreiben wir selbst.
-  Erlaubte Crates: `limine` (Boot-Protokoll), `spin` (Locks). Neue Crates erst nach Rücksprache.
+## Toolchain
+- Rust nightly via rustup, target `x86_64-unknown-none`.
+- **GNU tools preferred where they fit:** GNU ld (`ld.bfd`) links the kernel, GNU make drives everything,
+  gdb for debugging, binutils (objdump, nm, readelf, addr2line) for inspection, gcc builds host helpers (Limine utility).
+
+## Workflow (mandatory)
+- Small milestones from `docs/PROGRESS.md`, one after another.
+- Per step: implement → `make test` green → update docs → commit `M<n>: <what>` → push.
+- Every milestone gets at least one test. Every bug fix gets an entry in `docs/BUGS.md` and, if possible, a regression test.
+- At the end of a session, `docs/PROGRESS.md` must say under "Next step" where to continue.
+- Claude implements everything itself (the user decided this); new subsystems get a short explanation in `docs/LEARN.md`.
+- "From scratch": GDT, IDT, paging, allocators and drivers are our own code.
+  Allowed crates: `limine` (boot protocol), `spin` (locks). Ask before adding new crates.
+- `sudo` cannot be run by Claude (no TTY for the password) – ask the user to run installs in a separate terminal.
 
 ## Layout
-- `kernel/src/lib.rs` – Kernel als Library, `init()`, Unit-Test-Einstieg
-- `kernel/src/main.rs` – `kmain`, Panic-Handler (nur das Boot-Binary)
-- `kernel/src/testing.rs` – Test-Runner, `Testable`, Test-Panic-Handler
-- `kernel/tests/` – Integrationstests (je ein eigener Kernel)
-- `kernel/src/boot.rs` – Limine-Requests
-- `kernel/src/serial.rs` – COM1, Makros `serial_print!` / `serial_println!`
-- `kernel/src/font.rs` – PSF2-Parser, eingebauter Font aus `kernel/assets/`
-- `kernel/src/console.rs` – Framebuffer-Textkonsole, Makros `print!`/`println!` (Bildschirm + Serial)
-- `kernel/src/qemu.rs` – QEMU beenden (isa-debug-exit)
-- `kernel/src/arch/x86_64/` – CPU-spezifisches: `port.rs` (in/out), `gdt.rs` (GDT+TSS), `idt.rs` (IDT-Struktur), `interrupts.rs` (Exception-Handler, Kernel-IDT), `irq.rs` (Hardware-IRQs), `pic.rs`, `pit.rs`, `lapic.rs`, `msr.rs`, Interrupt-Helfer in `mod.rs`
-- `kernel/src/drivers/keyboard.rs` – PS/2-Treiber, Ringpuffer, `read_key()`; `drivers/scancode.rs` – Decoder + Layouts (DE/US)
-- `kernel/src/time.rs` – Ticks, `uptime_ms`, `sleep_ms`
-- `kernel/linker.ld` – Higher-Half-Layout ab `0xffffffff80000000`
-- `scripts/run-qemu.sh` – Cargo-Runner: ISO bauen und QEMU starten
-- `vendor/limine` – Limine-Binaries (nicht im Git, `make limine`)
+- `kernel/src/lib.rs` – kernel as a library, `init()`, unit test entry point
+- `kernel/src/main.rs` – `kmain` and panic handler of the boot binary
+- `kernel/src/boot.rs` – Limine requests
+- `kernel/src/serial.rs` – COM1, macros `serial_print!` / `serial_println!`
+- `kernel/src/font.rs` – PSF2 parser, built-in font from `kernel/assets/`
+- `kernel/src/console.rs` – framebuffer text console, macros `print!` / `println!` (screen + serial)
+- `kernel/src/testing.rs` – test runner, `Testable`, test panic handler
+- `kernel/src/qemu.rs` – exit QEMU (isa-debug-exit)
+- `kernel/src/time.rs` – ticks, `uptime_ms`, `sleep_ms`
+- `kernel/src/drivers/keyboard.rs` – PS/2 driver, ring buffer, `read_key()`; `drivers/scancode.rs` – decoder + layouts (DE/US)
+- `kernel/src/arch/x86_64/` – CPU specifics: `port.rs` (in/out), `gdt.rs` (GDT+TSS), `idt.rs` (IDT structure),
+  `interrupts.rs` (exception handlers, kernel IDT), `irq.rs` (hardware IRQs), `pic.rs`, `pit.rs`, `lapic.rs`, `msr.rs`,
+  interrupt helpers in `mod.rs`
+- `kernel/tests/` – integration tests (each one is a separate kernel)
+- `kernel/linker.ld` – higher-half layout at `0xffffffff80000000`
+- `scripts/run-qemu.sh` – cargo runner: builds the ISO and starts QEMU
+- `vendor/limine` – Limine binaries (not in git, `make limine`)

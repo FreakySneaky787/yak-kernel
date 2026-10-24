@@ -1,6 +1,6 @@
-//! Minimales Test-Framework für `#![feature(custom_test_frameworks)]`.
-//! Jede `#[test_case]`-Funktion wird vom Compiler gesammelt und an `runner`
-//! übergeben. Die Ausgabe geht über Serial, das Ergebnis über `qemu::exit`.
+//! Minimal test framework for `#![feature(custom_test_frameworks)]`.
+//! Every `#[test_case]` function is collected by the compiler and passed to `runner`.
+//! Output goes to the serial port, the result is reported via `qemu::exit`.
 
 use crate::qemu::{self, ExitCode};
 use crate::{serial_print, serial_println};
@@ -27,7 +27,7 @@ pub fn runner(tests: &[&dyn Testable]) -> ! {
     qemu::exit(ExitCode::Success)
 }
 
-/// Panic-Handler für Test-Binaries: Test als fehlgeschlagen melden.
+/// Panic handler for test binaries: report the current test as failed.
 pub fn test_panic_handler(info: &PanicInfo) -> ! {
     serial_println!("[failed]\n");
     serial_println!("Error: {}", info);

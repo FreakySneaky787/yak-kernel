@@ -1,6 +1,6 @@
-//! Integrationstest: Ein Schreibzugriff auf ungemappten Speicher löst einen
-//! Page Fault aus; CR2 enthält die Adresse, der Fehlercode sagt „nicht
-//! vorhanden + Schreiben“.
+//! Integration test: a write to unmapped memory raises a
+//! page fault; CR2 holds the address and the error code says "not
+//! present + write".
 
 #![no_std]
 #![no_main]
@@ -19,7 +19,7 @@ static TEST_IDT: Once<Idt> = Once::new();
 extern "x86-interrupt" fn test_page_fault(_frame: InterruptStackFrame, code: u64) {
     let cr2 = read_cr2();
     serial_println!("page fault: cr2={:#x} code={:#b}", cr2, code);
-    // Bit 0 = 0 (nicht vorhanden), Bit 1 = 1 (Schreiben), Bit 2 = 0 (Kernel)
+    // bit 0 = 0 (not present), bit 1 = 1 (write), bit 2 = 0 (kernel)
     if cr2 == UNMAPPED && code & 0b111 == 0b010 {
         serial_println!("[ok]");
         exit(ExitCode::Success)
@@ -41,7 +41,7 @@ extern "C" fn kmain() -> ! {
     idt.load();
 
     unsafe { (UNMAPPED as *mut u8).write_volatile(42) };
-    serial_println!("[kein page fault]");
+    serial_println!("[no page fault]");
     exit(ExitCode::Failed)
 }
 

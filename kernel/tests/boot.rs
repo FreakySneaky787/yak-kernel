@@ -1,5 +1,5 @@
-//! Integrationstest: Bootet der Kernel und liefert Limine die Antworten,
-//! die wir anfordern?
+//! Integration test: does the kernel boot and does Limine provide the
+//! responses we request?
 
 #![no_std]
 #![no_main]
@@ -28,20 +28,20 @@ fn base_revision_supported() {
 
 #[test_case]
 fn framebuffer_present() {
-    let resp = boot::FRAMEBUFFER.response().expect("keine Framebuffer-Antwort");
-    let fb = resp.framebuffers().first().expect("kein Framebuffer");
+    let resp = boot::FRAMEBUFFER.response().expect("no framebuffer response");
+    let fb = resp.framebuffers().first().expect("no framebuffer");
     assert!(fb.width > 0 && fb.height > 0);
 }
 
 #[test_case]
 fn hhdm_present() {
-    let hhdm = boot::HHDM.response().expect("keine HHDM-Antwort");
+    let hhdm = boot::HHDM.response().expect("no HHDM response");
     assert!(hhdm.offset >= 0xffff_8000_0000_0000);
 }
 
 #[test_case]
 fn memmap_has_usable_memory() {
-    let mm = boot::MEMMAP.response().expect("keine Memory-Map-Antwort");
+    let mm = boot::MEMMAP.response().expect("no memory map response");
     let usable = mm
         .entries()
         .iter()
@@ -52,5 +52,5 @@ fn memmap_has_usable_memory() {
 
 #[test_case]
 fn serial_println_does_not_panic() {
-    kernel::serial_println!("Testausgabe ueber COM1");
+    kernel::serial_println!("test output via COM1");
 }

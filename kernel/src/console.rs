@@ -1,20 +1,20 @@
-//! Textkonsole auf dem Framebuffer: Zeichen mit dem PSF-Font zeichnen,
-//! Cursor, Zeilenumbruch, Scrolling.
+//! Text console on the framebuffer: draws characters with the PSF font,
+//! cursor, line wrapping, scrolling.
 //!
-//! Die Konsole kennt nur eine `Surface` (Zeiger + Maße), dadurch lässt sie sich
-//! in Tests mit einem normalen Speicherpuffer statt dem echten Bildschirm prüfen.
+//! The console only knows a `Surface` (pointer + dimensions), so it can be
+//! tested against a plain memory buffer instead of the real screen.
 
 use crate::font::{FONT_DATA, Font};
 use core::fmt;
 use spin::Mutex;
 
-/// Eine 32-bit-Pixelfläche (0x00RRGGBB).
+/// A 32-bit pixel surface (0x00RRGGBB).
 #[derive(Clone, Copy)]
 pub struct Surface {
     pub base: *mut u32,
     pub width: usize,
     pub height: usize,
-    /// Abstand zwischen zwei Zeilen in Pixeln (nicht Bytes!)
+    /// Distance between two rows in pixels (not bytes!)
     pub stride: usize,
 }
 
@@ -89,7 +89,7 @@ impl Console {
                 }
             }
             '\x08' => {
-                // Backspace: einen Schritt zurück und Zelle löschen
+                // Backspace: step back and clear the cell
                 if self.col > 0 {
                     self.col -= 1;
                     self.draw_glyph(' ', self.col, self.row);
@@ -127,7 +127,7 @@ impl Console {
         }
     }
 
-    /// Alles eine Textzeile nach oben schieben, unterste Zeile leeren.
+    /// Move everything up by one text row and clear the bottom row.
     fn scroll(&mut self) {
         let fh = self.font.height;
         let s = self.surface;
@@ -154,7 +154,7 @@ impl fmt::Write for Console {
 
 pub static CONSOLE: Mutex<Option<Console>> = Mutex::new(None);
 
-/// Konsole auf dem ersten Limine-Framebuffer anlegen (falls vorhanden und 32 bpp).
+/// Create the console on the first Limine framebuffer (if present and 32 bpp).
 pub fn init() {
     let Some(resp) = crate::boot::FRAMEBUFFER.response() else { return };
     let Some(fb) = resp.framebuffers().first() else { return };
@@ -181,7 +181,7 @@ pub fn _print(args: fmt::Arguments) {
     });
 }
 
-/// Ausgabe auf Bildschirm **und** Serial.
+/// Prints to the screen **and** the serial port.
 #[macro_export]
 macro_rules! print {
     ($($arg:tt)*) => { $crate::console::_print(format_args!($($arg)*)) };
@@ -197,8 +197,8 @@ macro_rules! println {
 mod tests {
     use super::*;
 
-    const W: usize = 80; // 10 Spalten à 8 px
-    const H: usize = 64; // 4 Zeilen à 16 px
+    const W: usize = 80; // 10 columns of 8 px
+    const H: usize = 64; // 4 rows of 16 px
 
     fn test_console(buf: &mut [u32; W * H]) -> Console {
         Console::new(Surface { base: buf.as_mut_ptr(), width: W, height: H, stride: W })
@@ -220,7 +220,7 @@ mod tests {
         }
         assert_eq!(c.cursor(), (3, 0));
         for ch in "defghijk".chars() {
-            c.write_char(ch); // 11 Zeichen > 10 Spalten → Umbruch
+            c.write_char(ch); // 11 characters > 10 columns -> wrap
         }
         assert_eq!(c.cursor(), (1, 1));
         c.write_char('\n');
@@ -234,19 +234,19 @@ mod tests {
         c.write_char('A');
         let s = c.surface;
         let fg_pixels = (0..16).flat_map(|y| (0..8).map(move |x| (x, y))).filter(|&(x, y)| s.get(x, y) == DEFAULT_FG).count();
-        assert!(fg_pixels > 10, "'A' hat nur {} Vordergrund-Pixel", fg_pixels);
+        assert!(fg_pixels > 10, "'A' has only {} foreground pixels", fg_pixels);
     }
 
     #[test_case]
     fn scrolls_when_full() {
         let mut buf = [0u32; W * H];
         let mut c = test_console(&mut buf);
-        c.write_char('X'); // landet in Zeile 0
+        c.write_char('X'); // lands in row 0
         for _ in 0..4 {
-            c.write_char('\n'); // 4 Umbrüche bei 4 Zeilen → einmal gescrollt
+            c.write_char('\n'); // 4 newlines with 4 rows -> scrolled once
         }
         assert_eq!(c.cursor(), (0, 3));
-        // Zeile 0 ist jetzt die alte Zeile 1 (leer) → keine Vordergrund-Pixel mehr
+        // row 0 is now the old row 1 (empty) -> no foreground pixels left
         let s = c.surface;
         assert!((0..16).all(|y| (0..8).all(|x| s.get(x, y) == DEFAULT_BG)));
     }
@@ -257,7 +257,7 @@ mod tests {
         let mut c = test_console(&mut buf);
         use core::fmt::Write;
         for i in 0..200 {
-            writeln!(c, "Zeile {} äöü\tTab", i).unwrap();
+            writeln!(c, "line {} äöü\ttab", i).unwrap();
         }
         assert_eq!(c.cursor().1, 3);
     }

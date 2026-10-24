@@ -1,5 +1,5 @@
-//! Limine-Requests: statische Strukturen in einer eigenen Section, die
-//! Limine beim Laden findet und mit Antworten (Framebuffer, Memory Map …) füllt.
+//! Limine requests: static structures in a dedicated section that
+//! Limine finds while loading the kernel and fills with responses (framebuffer, memory map, ...).
 
 use limine::request::{FramebufferRequest, HhdmRequest, MemmapRequest};
 use limine::{BaseRevision, RequestsEndMarker, RequestsStartMarker};

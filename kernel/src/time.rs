@@ -1,4 +1,4 @@
-//! Zeitbasis des Kernels: Ticks vom PIT-Timer.
+//! Kernel time base: ticks from the PIT timer.
 
 use core::sync::atomic::{AtomicU64, Ordering};
 
@@ -7,7 +7,7 @@ pub const MS_PER_TICK: u64 = 1000 / TIMER_HZ as u64;
 
 static TICKS: AtomicU64 = AtomicU64::new(0);
 
-/// Wird vom Timer-Interrupt aufgerufen.
+/// Called from the timer interrupt.
 pub fn tick() {
     TICKS.fetch_add(1, Ordering::Relaxed);
 }
@@ -20,8 +20,8 @@ pub fn uptime_ms() -> u64 {
     ticks() * MS_PER_TICK
 }
 
-/// Schläft mindestens `ms` Millisekunden (Auflösung: ein Tick = 10 ms).
-/// Benötigt eingeschaltete Interrupts.
+/// Sleeps for at least `ms` milliseconds (resolution: one tick = 10 ms).
+/// Requires interrupts to be enabled.
 pub fn sleep_ms(ms: u64) {
     let target = ticks() + ms.div_ceil(MS_PER_TICK);
     while ticks() < target {

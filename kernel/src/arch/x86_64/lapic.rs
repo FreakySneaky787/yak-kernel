@@ -1,9 +1,9 @@
-//! Local APIC – der moderne Interrupt-Controller in jedem CPU-Kern.
+//! Local APIC - the modern interrupt controller in every CPU core.
 //!
-//! Solange wir den alten 8259-PIC benutzen, schalten wir den Local APIC ab:
-//! Limine maskiert seinen Eingang LINT0 (über den PIC-Interrupts als „ExtINT“
-//! hereinkommen), siehe docs/BUGS.md #2. Ist der APIC global abgeschaltet,
-//! landen PIC-Interrupts direkt am INTR-Pin der CPU.
+//! As long as we use the legacy 8259 PIC, we disable the local APIC:
+//! Limine masks its LINT0 input (through which PIC interrupts arrive as "ExtINT"),
+//! see docs/BUGS.md #2. With the APIC globally disabled,
+//! PIC interrupts go straight to the CPU's INTR pin.
 
 use super::msr::{self, IA32_APIC_BASE};
 

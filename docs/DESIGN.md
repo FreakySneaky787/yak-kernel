@@ -1,63 +1,69 @@
-# Design-Entscheidungen
+# Design decisions
 
-## Grundlagen
-| Thema | Entscheidung | Warum |
+## Basics
+| Topic | Decision | Why |
 |---|---|---|
-| Sprache | Rust nightly, `#![no_std]`, etwas Inline-Assembly | Speichersicherheit; nightly wird für `custom_test_frameworks` und `abi_x86_interrupt` gebraucht |
-| Target | `x86_64-unknown-none` (eingebaut) | Bare Metal, Soft-Float (kein SSE im Kernel) → keine eigene Target-JSON nötig |
-| Architektur | x86_64 | entspricht dem Host-PC, beste Doku (OSDev, Intel SDM) |
-| Bootloader | Limine v11, Boot-Protokoll Base Revision 6, Crate `limine` 0.6.5 | Startet direkt im Long Mode mit Paging, liefert Memory Map, HHDM und Framebuffer |
-| Boot-Medium | Hybrid-ISO (BIOS + UEFI) über xorriso | Lässt sich in QEMU mit `-cdrom` booten, beide Firmware-Pfade sind testbar |
-| Externe Crates | nur `limine`, `spin` | Alles andere schreiben wir „from scratch“ |
+| Language | Rust nightly, `#![no_std]`, some inline assembly | memory safety; nightly is needed for `custom_test_frameworks` and `abi_x86_interrupt` |
+| Target | `x86_64-unknown-none` (built-in) | bare metal, soft-float (no SSE in the kernel) → no custom target JSON needed |
+| Linker | **GNU ld** (`ld.bfd`, binutils 2.46), flavor `ld` | user preference for GNU tools; linker script `kernel/linker.ld` |
+| Architecture | x86_64 | matches the host PC, best documentation (OSDev, Intel SDM) |
+| Bootloader | Limine v11, boot protocol base revision 6, crate `limine` 0.6.5 | starts directly in long mode with paging, provides memory map, HHDM and framebuffer |
+| Boot medium | hybrid ISO (BIOS + UEFI) built with xorriso | boots in QEMU with `-cdrom`, both firmware paths testable |
+| External crates | only `limine`, `spin` | everything else is written from scratch |
+| Tools | GNU make, gdb, binutils (objdump/nm/readelf/addr2line), gcc for host helpers | user preference: Rust kernel, GNU tooling around it |
 
-## Speicherlayout
-- Kernel liegt im Higher Half ab `0xffffffff80000000` (die oberen 2 GiB), `code-model=kernel`, `relocation-model=static`.
-- Limine mappt den gesamten physischen Speicher zusätzlich ab dem HHDM-Offset (`boot::HHDM`).
-  Eine physische Adresse `p` erreichen wir also über `p + hhdm_offset`.
-- Linker-Sections: `.limine_requests` (zwischen Start- und End-Marker), `.text`, `.rodata`, `.data`/`.bss`, jede auf Seitengröße ausgerichtet und mit eigenem PT_LOAD.
-
-## Tastatur
-- IRQ1-Handler liest nur Port 0x60 und legt das Byte in einen `RingBuffer<128>`. Übersetzt wird außerhalb des Interrupts in `drivers::scancode::Decoder`.
-- Scancode Set 1 (der 8042-Controller übersetzt standardmäßig). Layout umschaltbar (`keyboard::set_layout`), Default **DE**.
-  QEMU schickt physische Tasten, das Layout im Kernel muss also zur echten Tastatur des Users passen.
-- `keyboard::inject_scancode()` speist Bytes ohne Hardware ein (Tests, später z. B. Serial-Eingabe).
-
-## Ausgabe
-- `serial_println!`: nur COM1. `println!`: Konsole **und** COM1. Beide sperren Interrupts, während sie den Lock halten (`without_interrupts`).
-- Panic-Handler nutzen nur Serial, denn der Konsolen-Lock könnte beim Panic noch gehalten sein.
-- Konsole: arbeitet auf einer `Surface` (32 bpp, Stride in Pixeln). Scrollen per Zeilen-Memcopy im Framebuffer. Das ist langsam auf echter Hardware, in QEMU aber okay.
-  Font: Terminus 8×16 (PSF2) per `include_bytes!`. Latin-1-Zeichen gehen über die Unicode-Tabelle, unbekannte Zeichen werden zu `?`.
-
-## Testen
-- Crate-Aufbau: `src/lib.rs` enthält den ganzen Kernel. `src/main.rs` ist nur `kmain` + Panic-Handler.
-  Jedes Test-Binary (lib-Unit-Tests, `tests/*.rs`) definiert sein eigenes `kmain`. Der Linker nutzt in allen `ENTRY(kmain)`.
-- Unit-Tests: `#[test_case]` direkt im Modul. Integrationstests: `kernel/tests/<name>.rs` mit eigenem Harness-Setup (siehe `tests/boot.rs`).
-  Tests, die panicken müssen, bekommen `harness = false` in `Cargo.toml` (siehe `tests/should_panic.rs`).
-- `scripts/run-qemu.sh` ist der Cargo-Runner. Liegt das ELF unter `deps/`, ist es ein Test-Binary, dann laufen QEMU headless und ein Timeout.
-- Ergebnis über das `isa-debug-exit`-Gerät an Port 0xF4: Wert 0x10 → QEMU-Exitcode 33 = PASS, 0x11 → 35 = FAIL.
-- Alle Testausgaben gehen über COM1 (`serial_println!`).
+## Memory layout
+- The kernel lives in the higher half at `0xffffffff80000000` (top 2 GiB), `code-model=kernel`, `relocation-model=static`.
+- Limine additionally maps all physical memory at the HHDM offset (`boot::HHDM`):
+  physical address `p` is reachable at `p + hhdm_offset`.
+- Linker sections: `.limine_requests` (between start and end marker), `.text`, `.rodata`, `.data`/`.bss`,
+  each page-aligned with its own PT_LOAD segment.
 
 ## GDT / TSS
-| Selector | Eintrag |
+| Selector | Entry |
 |---|---|
-| 0x00 | Null |
-| 0x08 | Kernel-Code (64-bit, DPL 0) |
-| 0x10 | Kernel-Data (DPL 0), auch SS/DS/ES/FS/GS |
-| 0x18 | TSS (16 Byte, belegt 2 Slots) |
+| 0x00 | null |
+| 0x08 | kernel code (64-bit, DPL 0) |
+| 0x10 | kernel data (DPL 0), also used for SS/DS/ES/FS/GS |
+| 0x18 | TSS (16 bytes, occupies 2 slots) |
 
-IST1 (`gdt::DOUBLE_FAULT_IST`) = 20 KiB statischer Stack für Double Faults. User-Segmente kommen erst mit Userspace dazu.
+IST1 (`gdt::DOUBLE_FAULT_IST`) = 20 KiB static stack for double faults. User segments will be added together with user space.
 
-## Interrupt-Vektoren
-| Vektor | Was |
+## Interrupt vectors
+| Vector | What |
 |---|---|
-| 0–31 | CPU-Exceptions (`arch/x86_64/interrupts.rs`), Double Fault (8) auf IST1 |
-| 32 | IRQ0 – PIT-Timer, 100 Hz |
-| 33 | IRQ1 – PS/2-Tastatur (ab M7) |
-| 39 / 47 | IRQ7 / IRQ15 – Spurious-Behandlung |
-| 34–47 (Rest) | weitere PIC-IRQs, maskiert |
+| 0–31 | CPU exceptions (`arch/x86_64/interrupts.rs`), double fault (8) on IST1 |
+| 32 | IRQ0 – PIT timer, 100 Hz |
+| 33 | IRQ1 – PS/2 keyboard |
+| 39 / 47 | IRQ7 / IRQ15 – spurious IRQ handling |
+| 34–47 (rest) | other PIC IRQs, masked |
 
-- Interrupt-Controller: 8259-PIC (Legacy). Der **Local APIC ist per MSR abgeschaltet** (siehe BUGS #2), bis wir auf APIC umsteigen.
-- `kernel::init()` schaltet Interrupts am Ende mit `sti` ein. Alles, was einen Lock hält, den ein Handler auch nimmt, muss `without_interrupts` benutzen.
-- Handler nutzen `extern "x86-interrupt"` (nightly `abi_x86_interrupt`). Der Compiler sichert dabei die Register und erzeugt `iretq`. Die IDT-Struktur und alle Gates schreiben wir selbst.
-- `interrupts::install_exception_handlers(&mut Idt)` ist getrennt von `init()`. Tests bauen sich eigene IDTs (siehe `tests/page_fault.rs`).
-- Die Adresse `0x0000_4000_0000_0000` (untere Hälfte) ist unter Limine ungemappt und dient in Tests als „garantiert faultende“ Adresse.
+- Interrupt controller: legacy 8259 PIC. The **local APIC is disabled via MSR** (see BUGS #2) until we switch to the APIC.
+- `kernel::init()` enables interrupts with `sti` at the very end. Anything holding a lock that a handler also takes must use `without_interrupts`.
+- Handlers use `extern "x86-interrupt"` (nightly `abi_x86_interrupt`): the compiler saves registers and emits `iretq`.
+  The IDT structure and all gate descriptors are our own code.
+- `interrupts::install_exception_handlers(&mut Idt)` is separate from `init()`; tests build their own IDTs (see `tests/page_fault.rs`).
+- Address `0x0000_4000_0000_0000` (lower half) is unmapped under Limine and is used by tests as a "guaranteed to fault" address.
+
+## Keyboard
+- The IRQ1 handler only reads port 0x60 and pushes the byte into a `RingBuffer<128>`; translation happens outside the
+  interrupt in `drivers::scancode::Decoder`.
+- Scancode set 1 (the 8042 controller translates by default). Layout switchable (`keyboard::set_layout`), default **DE**.
+  QEMU forwards physical keys, so the kernel layout must match the user's real keyboard.
+- `keyboard::inject_scancode()` feeds bytes without hardware (tests, later e.g. serial input).
+
+## Output
+- `serial_println!`: COM1 only. `println!`: console **and** COM1. Both disable interrupts while holding their lock (`without_interrupts`).
+- Panic handlers only use serial, because the console lock might still be held when the panic happens.
+- Console: works on a `Surface` (32 bpp, stride in pixels). Scrolling copies pixel rows inside the framebuffer
+  (slow on real hardware, fine in QEMU). Font: Terminus 8×16 (PSF2) via `include_bytes!`; Latin-1 characters through the
+  Unicode table, unknown characters become `?`.
+
+## Testing
+- Crate layout: `src/lib.rs` contains the whole kernel, `src/main.rs` only `kmain` + panic handler.
+  Every test binary (lib unit tests, `tests/*.rs`) defines its own `kmain`; the linker uses `ENTRY(kmain)` for all of them.
+- Unit tests: `#[test_case]` inside the module. Integration tests: `kernel/tests/<name>.rs` with their own harness setup (see `tests/boot.rs`).
+  Tests that must panic or fault get `harness = false` in `Cargo.toml` (see `tests/should_panic.rs`).
+- `scripts/run-qemu.sh` is the cargo runner. A hash suffix in the ELF name means test binary → headless QEMU with a timeout.
+- Result via the `isa-debug-exit` device on port 0xF4: value 0x10 → QEMU exit status 33 = PASS, 0x11 → 35 = FAIL.
+- All test output goes through COM1 (`serial_println!`).

@@ -1,13 +1,13 @@
-//! Interrupt Descriptor Table: 256 Einträge, einer pro Interrupt-Vektor.
-//! Jeder Eintrag sagt der CPU, wohin sie bei diesem Vektor springen soll,
-//! mit welchem Code-Segment und optional auf welchem IST-Stack.
+//! Interrupt Descriptor Table: 256 entries, one per interrupt vector.
+//! Each entry tells the CPU where to jump for that vector,
+//! with which code segment, and optionally on which IST stack.
 
 use super::gdt::KERNEL_CODE_SELECTOR;
 use core::arch::asm;
 use core::fmt;
 use core::mem::size_of;
 
-/// Was die CPU beim Interrupt auf den Stack legt (in dieser Reihenfolge ab RSP).
+/// What the CPU pushes onto the stack on an interrupt (in this order from RSP).
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct InterruptStackFrame {
@@ -33,15 +33,15 @@ pub type HandlerWithErrorCode = extern "x86-interrupt" fn(InterruptStackFrame, u
 pub type DivergingHandlerWithErrorCode = extern "x86-interrupt" fn(InterruptStackFrame, u64) -> !;
 pub type DivergingHandler = extern "x86-interrupt" fn(InterruptStackFrame) -> !;
 
-/// Ein 16-Byte-Gate-Deskriptor (Intel SDM Vol. 3, 6.14.1).
+/// A 16-byte gate descriptor (Intel SDM Vol. 3, 6.14.1).
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct Entry {
     offset_low: u16,
     selector: u16,
-    /// Bits 0–2: IST-Index (0 = keiner)
+    /// bits 0-2: IST index (0 = none)
     ist: u8,
-    /// P | DPL | 0 | Typ (0xE = Interrupt Gate: IF wird beim Eintritt gelöscht)
+    /// P | DPL | 0 | type (0xE = interrupt gate: IF is cleared on entry)
     type_attr: u8,
     offset_mid: u16,
     offset_high: u32,
@@ -66,7 +66,7 @@ impl Entry {
         self
     }
 
-    /// Bei diesem Vektor auf IST-Stack `index` (1..=7) umschalten.
+    /// Switch to IST stack `index` (1..=7) for this vector.
     pub fn set_ist(&mut self, index: u8) -> &mut Entry {
         assert!((1..=7).contains(&index));
         self.ist = index;
@@ -118,7 +118,7 @@ impl Idt {
         &self.entries[vector as usize]
     }
 
-    /// IDT in das IDTR-Register laden. `'static`, weil die CPU sie für immer benutzt.
+    /// Load the IDT into IDTR. `'static` because the CPU uses it forever.
     pub fn load(&'static self) {
         #[repr(C, packed)]
         struct Pointer {
@@ -130,7 +130,7 @@ impl Idt {
     }
 }
 
-/// CR2 enthält bei einem Page Fault die Adresse, auf die zugegriffen wurde.
+/// On a page fault, CR2 holds the address that was accessed.
 pub fn read_cr2() -> u64 {
     let value: u64;
     unsafe { asm!("mov {}, cr2", out(reg) value, options(nomem, nostack, preserves_flags)) };

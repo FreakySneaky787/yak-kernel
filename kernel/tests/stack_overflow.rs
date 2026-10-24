@@ -1,10 +1,10 @@
-//! Integrationstest: Ein kaputter Stack führt zu einem Double Fault, der auf
-//! dem IST-Stack aus dem TSS behandelt wird statt in einem Triple Fault zu enden.
+//! Integration test: a broken stack leads to a double fault that is handled on
+//! the IST stack from the TSS instead of ending in a triple fault.
 //!
-//! Limine legt unseren Stack in komplett gemappten Speicher – ein echter
-//! Overflow würde dort nicht faulten. Wir simulieren ihn deshalb, indem wir RSP
-//! auf eine ungemappte Adresse setzen und `push` ausführen: Page Fault → die CPU
-//! kann den Exception-Frame nicht auf den Stack legen → Double Fault.
+//! Limine places our stack in fully mapped memory - a real
+//! overflow would not fault there. So we simulate it by pointing RSP
+//! at an unmapped address and executing `push`: page fault -> the CPU
+//! cannot push the exception frame onto the stack -> double fault.
 
 #![no_std]
 #![no_main]
@@ -17,18 +17,18 @@ use kernel::qemu::{ExitCode, exit};
 use kernel::serial_println;
 use spin::Once;
 
-/// Kanonische Adresse in der unteren Hälfte, die Limine nicht mappt.
+/// Canonical lower-half address that Limine does not map.
 const UNMAPPED: u64 = 0x0000_4000_0000_0000;
 
 static TEST_IDT: Once<Idt> = Once::new();
 
 extern "x86-interrupt" fn test_double_fault(frame: InterruptStackFrame, _code: u64) -> ! {
-    // Wir müssen auf dem IST-Stack laufen
+    // We must be running on the IST stack
     let rsp: u64;
     unsafe { core::arch::asm!("mov {}, rsp", out(reg) rsp) };
     let top = gdt::double_fault_stack_top();
     let on_ist = rsp <= top && rsp > top - 5 * 4096;
-    serial_println!("double fault abgefangen, rip={:#x}, rsp auf IST: {}", frame.rip, on_ist);
+    serial_println!("double fault caught, rip={:#x}, rsp on IST: {}", frame.rip, on_ist);
     if on_ist {
         serial_println!("[ok]");
         exit(ExitCode::Success)

@@ -1,8 +1,8 @@
-//! PS/2-Tastatur: IRQ1 liest das Scancode-Byte aus Port 0x60 und legt es in
-//! einen Ringpuffer. Der Rest des Kernels holt sich daraus Tastendrücke.
+//! PS/2 keyboard: IRQ1 reads the scancode byte from port 0x60 and stores it in
+//! a ring buffer. The rest of the kernel pulls key presses from there.
 //!
-//! Der Interrupt-Handler macht bewusst so wenig wie möglich (nur Byte
-//! speichern); das Übersetzen passiert außerhalb im `Decoder`.
+//! The interrupt handler deliberately does as little as possible (just store the
+//! byte); translation happens outside of it in the `Decoder`.
 
 use super::scancode::{Decoder, KeyEvent, Layout};
 use crate::arch::x86_64::port::inb;
@@ -13,7 +13,7 @@ const DATA_PORT: u16 = 0x60;
 const STATUS_PORT: u16 = 0x64;
 const STATUS_OUTPUT_FULL: u8 = 0x01;
 
-/// Fester Ringpuffer ohne Heap. Ist er voll, werden neue Bytes verworfen.
+/// Fixed-size ring buffer without heap. When full, new bytes are dropped.
 pub struct RingBuffer<const N: usize> {
     buf: [u8; N],
     head: usize,
@@ -25,7 +25,7 @@ impl<const N: usize> RingBuffer<N> {
         RingBuffer { buf: [0; N], head: 0, len: 0 }
     }
 
-    /// `false`, wenn der Puffer voll war.
+    /// Returns `false` if the buffer was full.
     pub fn push(&mut self, byte: u8) -> bool {
         if self.len == N {
             return false;
@@ -63,7 +63,7 @@ impl<const N: usize> Default for RingBuffer<N> {
 static SCANCODES: Mutex<RingBuffer<128>> = Mutex::new(RingBuffer::new());
 static DECODER: Mutex<Decoder> = Mutex::new(Decoder::new(Layout::De));
 
-/// Ausgabepuffer des PS/2-Controllers leeren (Reste von Firmware/Bootloader).
+/// Drain the PS/2 controller output buffer (leftovers from firmware/bootloader).
 pub fn init() {
     for _ in 0..32 {
         if unsafe { inb(STATUS_PORT) } & STATUS_OUTPUT_FULL == 0 {
@@ -73,18 +73,18 @@ pub fn init() {
     }
 }
 
-/// Wird aus dem IRQ1-Handler aufgerufen (Interrupts sind dort aus).
+/// Called from the IRQ1 handler (interrupts are disabled there).
 pub fn handle_interrupt() {
     let byte = unsafe { inb(DATA_PORT) };
     SCANCODES.lock().push(byte);
 }
 
-/// Ein Byte von außen einspeisen (für Tests und spätere Eingabequellen).
+/// Inject a byte from outside (for tests and future input sources).
 pub fn inject_scancode(byte: u8) {
     without_interrupts(|| SCANCODES.lock().push(byte));
 }
 
-/// Nächsten Tastendruck holen, ohne zu warten.
+/// Fetch the next key press without waiting.
 pub fn try_read_key() -> Option<KeyEvent> {
     loop {
         let byte = without_interrupts(|| SCANCODES.lock().pop())?;
@@ -94,14 +94,14 @@ pub fn try_read_key() -> Option<KeyEvent> {
     }
 }
 
-/// Auf den nächsten Tastendruck warten (schläft mit `hlt` zwischen Interrupts).
+/// Wait for the next key press (sleeps with `hlt` between interrupts).
 pub fn read_key() -> KeyEvent {
     loop {
         if let Some(event) = try_read_key() {
             return event;
         }
-        // Atomar prüfen und schlafen: sonst könnte der IRQ zwischen Prüfen
-        // und `hlt` kommen, und wir würden bis zum nächsten Interrupt hängen.
+        // Check and sleep atomically: otherwise the IRQ could arrive between the
+        // check and `hlt`, and we would hang until the next interrupt.
         crate::arch::x86_64::disable_interrupts();
         if SCANCODES.lock().is_empty() {
             unsafe { core::arch::asm!("sti; hlt", options(nomem, nostack)) };
@@ -128,9 +128,9 @@ mod tests {
     fn ring_buffer_fifo_and_overflow() {
         let mut rb: RingBuffer<3> = RingBuffer::new();
         assert!(rb.push(1) && rb.push(2) && rb.push(3));
-        assert!(!rb.push(4)); // voll
+        assert!(!rb.push(4)); // full
         assert_eq!(rb.pop(), Some(1));
-        assert!(rb.push(5)); // Wrap-around
+        assert!(rb.push(5)); // wrap-around
         assert_eq!((rb.pop(), rb.pop(), rb.pop(), rb.pop()), (Some(2), Some(3), Some(5), None));
     }
 

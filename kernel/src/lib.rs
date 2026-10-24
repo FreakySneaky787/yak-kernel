@@ -1,5 +1,5 @@
-//! KernelTry-Kernel als Library: `main.rs`, die Unit-Tests und die
-//! Integrationstests in `tests/` nutzen alle denselben Code.
+//! The KernelTry kernel as a library: `main.rs`, the unit tests and the
+//! integration tests in `tests/` all share this code.
 
 #![no_std]
 #![cfg_attr(test, no_main)]
@@ -18,7 +18,7 @@ pub mod serial;
 pub mod testing;
 pub mod time;
 
-/// Gemeinsame Initialisierung für Kernel und alle Test-Binaries.
+/// Common initialization for the kernel and all test binaries.
 pub fn init() {
     serial::init();
     arch::x86_64::gdt::init();
@@ -27,7 +27,7 @@ pub fn init() {
     console::init();
     if !boot::BASE_REVISION.is_supported() {
         serial_println!(
-            "Limine unterstuetzt Base Revision nicht (aktiv: {:?})",
+            "Limine does not support our base revision (active: {:?})",
             boot::BASE_REVISION.actual_revision()
         );
         arch::x86_64::halt_loop();
@@ -35,7 +35,7 @@ pub fn init() {
     arch::x86_64::enable_interrupts();
 }
 
-/// Einsprungpunkt für `cargo test --lib`.
+/// Entry point for `cargo test --lib`.
 #[cfg(test)]
 #[unsafe(no_mangle)]
 extern "C" fn kmain() -> ! {

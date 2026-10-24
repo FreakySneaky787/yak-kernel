@@ -1,4 +1,4 @@
-# KernelTry – Einstiegspunkt für alle Aufgaben. Siehe CLAUDE.md.
+# KernelTry - entry point for all tasks. See CLAUDE.md.
 SHELL      := /bin/bash
 CARGO      := source $$HOME/.cargo/env && cd kernel && cargo
 LIMINE_DIR := vendor/limine
@@ -6,7 +6,8 @@ LIMINE_BRANCH := v11.x-binary
 KERNEL_ELF := kernel/target/x86_64-unknown-none/debug/kernel
 OVMF       := /usr/share/edk2/ovmf/OVMF_CODE.fd
 
-.PHONY: all limine build run run-uefi debug gdb test clean distclean
+.PHONY: all limine limine-tool build run run-uefi debug gdb test \
+        disasm symbols sections addr2line clean distclean
 
 all: build
 
@@ -14,26 +15,51 @@ limine: $(LIMINE_DIR)/limine-bios-cd.bin
 $(LIMINE_DIR)/limine-bios-cd.bin:
 	git clone --depth=1 --branch=$(LIMINE_BRANCH) https://github.com/limine-bootloader/limine.git $(LIMINE_DIR)
 
+# Host utility for `limine bios-install` (makes the ISO bootable as a hard disk / USB image).
+# Optional: needs gcc. run-qemu.sh uses it automatically when it exists.
+limine-tool: limine
+	$(MAKE) -C $(LIMINE_DIR) CC=gcc
+
 build: limine
 	$(CARGO) build
 
-# Fenster + Serial-Ausgabe im Terminal
+# Window + serial output in the terminal
 run: limine
 	$(CARGO) run
 
 run-uefi: build
 	scripts/run-qemu.sh $(KERNEL_ELF) -drive if=pflash,format=raw,readonly=on,file=$(OVMF)
 
-# QEMU wartet auf gdb; in zweitem Terminal: make gdb
+# QEMU waits for gdb; in a second terminal run: make gdb
 debug: build
 	KERNEL_DEBUG=1 scripts/run-qemu.sh $(KERNEL_ELF)
 
 gdb:
-	gdb -q $(KERNEL_ELF) -ex 'target remote :1234'
+	gdb -q $(KERNEL_ELF) -ex 'set disassembly-flavor intel' -ex 'target remote :1234'
 
-# Alle In-Kernel-Tests in QEMU, Exitcode 0 = alles grün
+# All in-kernel tests in QEMU, exit status 0 = all green
 test: limine
 	$(CARGO) test
+
+# ---- GNU binutils helpers ----------------------------------------------------
+
+# Disassembly with source interleaved (Intel syntax), paged through less
+disasm: build
+	objdump -d -S -C -M intel --no-show-raw-insn $(KERNEL_ELF) | less
+
+# All symbols sorted by address
+symbols: build
+	nm -C -n $(KERNEL_ELF)
+
+# Program headers (what Limine loads) and sections
+sections: build
+	readelf -lSW $(KERNEL_ELF)
+
+# Map an address (e.g. RIP from a panic message) to function + file:line
+#   make addr2line ADDR=0xffffffff80004d9f
+addr2line: build
+	@test -n "$(ADDR)" || { echo "usage: make addr2line ADDR=0x..."; exit 1; }
+	addr2line -f -C -i -e $(KERNEL_ELF) $(ADDR)
 
 clean:
 	$(CARGO) clean

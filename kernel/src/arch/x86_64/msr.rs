@@ -1,5 +1,5 @@
-//! Model Specific Registers: CPU-Konfigurationsregister, gelesen/geschrieben
-//! mit `rdmsr`/`wrmsr` (Nummer in ECX, Wert in EDX:EAX).
+//! Model specific registers: CPU configuration registers, read/written
+//! with `rdmsr`/`wrmsr` (number in ECX, value in EDX:EAX).
 
 use core::arch::asm;
 

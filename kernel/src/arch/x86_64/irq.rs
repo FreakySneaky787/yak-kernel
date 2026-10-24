@@ -1,4 +1,4 @@
-//! Hardware-Interrupts (IRQs) über den PIC: Handler und Initialisierung.
+//! Hardware interrupts (IRQs) via the PIC: handlers and initialization.
 
 use super::idt::{Idt, InterruptStackFrame};
 use super::pic::{self, PIC1_OFFSET};
@@ -18,8 +18,8 @@ pub fn install_irq_handlers(idt: &mut Idt) {
     idt.set(vector(15), spurious_slave);
 }
 
-/// PIC + PIT einrichten und die benötigten IRQs freischalten.
-/// Interrupts werden hier noch **nicht** eingeschaltet (das macht `kernel::init`).
+/// Set up PIC + PIT and unmask the IRQs we need.
+/// Interrupts are **not** enabled here yet (`kernel::init` does that).
 pub fn init() {
     super::lapic::disable();
     pic::init();
@@ -39,8 +39,8 @@ extern "x86-interrupt" fn keyboard(_frame: InterruptStackFrame) {
     pic::end_of_interrupt(KEYBOARD_IRQ);
 }
 
-// Spurious IRQs: Der PIC meldet IRQ 7/15, obwohl nichts anliegt. Dann darf
-// kein EOI an diesen PIC gehen (beim Slave aber an den Master, wegen Kaskade).
+// Spurious IRQs: the PIC reports IRQ 7/15 although nothing is pending. Then no
+// EOI may go to that PIC (for the slave the master still needs one, due to the cascade).
 extern "x86-interrupt" fn spurious_master(_frame: InterruptStackFrame) {
     if pic::in_service() & (1 << 7) != 0 {
         pic::end_of_interrupt(7);
@@ -51,7 +51,7 @@ extern "x86-interrupt" fn spurious_slave(_frame: InterruptStackFrame) {
     if pic::in_service() & (1 << 15) != 0 {
         pic::end_of_interrupt(15);
     } else {
-        pic::end_of_interrupt(0); // nur Master-EOI
+        pic::end_of_interrupt(0); // master EOI only
     }
 }
 
@@ -67,14 +67,14 @@ mod tests {
     #[test_case]
     fn timer_irq_unmasked() {
         let (master, _slave) = pic::masks();
-        assert_eq!(master & 1, 0, "IRQ0 ist maskiert");
+        assert_eq!(master & 1, 0, "IRQ0 is masked");
     }
 
     #[test_case]
     fn timer_ticks_advance() {
         assert!(super::super::interrupts_enabled());
         let start = time::ticks();
-        // `hlt` wartet auf den nächsten Interrupt → höchstens ein paar Durchläufe
+        // `hlt` waits for the next interrupt -> only a few iterations needed
         for _ in 0..1000 {
             if time::ticks() >= start + 5 {
                 break;

@@ -1,5 +1,5 @@
-//! Integrationstest: prüft, dass ein Panic im Test erkannt wird.
-//! Ohne Test-Harness: Panic = Erfolg, normales Ende = Fehler.
+//! Integration test: checks that a panic inside a test is detected.
+//! No test harness: panic = success, returning normally = failure.
 
 #![no_std]
 #![no_main]

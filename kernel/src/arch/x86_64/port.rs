@@ -1,5 +1,5 @@
-//! I/O-Ports: x86 hat neben dem Speicher einen eigenen 16-bit Adressraum
-//! für Geräte, angesprochen mit den Befehlen `in` und `out`.
+//! I/O ports: besides memory, x86 has a separate 16-bit address space
+//! for devices, accessed with the `in` and `out` instructions.
 
 use core::arch::asm;
 

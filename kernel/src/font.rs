@@ -1,8 +1,8 @@
-//! PSF2-Bitmap-Font (das Format der Linux-Konsole).
+//! PSF2 bitmap font (the Linux console font format).
 //!
-//! Aufbau: 32-Byte-Header, danach `count` Glyphen à `bytes_per_glyph` Bytes
-//! (eine Zeile = ein Byte bei 8 Pixeln Breite, MSB = linkes Pixel), danach
-//! optional eine Unicode-Tabelle: pro Glyph UTF-8-Sequenzen, abgeschlossen mit 0xFF.
+//! Layout: 32-byte header, then `count` glyphs of `bytes_per_glyph` bytes each
+//! (one row = one byte for 8-pixel-wide glyphs, MSB = leftmost pixel), followed by
+//! an optional Unicode table: UTF-8 sequences per glyph, terminated by 0xFF.
 
 const PSF2_MAGIC: u32 = 0x864a_b572;
 const PSF2_HAS_UNICODE_TABLE: u32 = 0x01;
@@ -14,7 +14,7 @@ pub struct Font {
     bytes_per_glyph: usize,
     pub width: usize,
     pub height: usize,
-    /// Codepoint (< 256) → Glyph-Index. `u16::MAX` = nicht vorhanden.
+    /// Code point (< 256) -> glyph index. `u16::MAX` = not present.
     latin1_map: [u16; 256],
 }
 
@@ -44,7 +44,7 @@ impl Font {
         let height = read_u32(data, 24) as usize;
         let width = read_u32(data, 28) as usize;
 
-        // Wir unterstützen nur Glyphen bis 8 Pixel Breite (1 Byte pro Zeile)
+        // We only support glyphs up to 8 pixels wide (1 byte per row)
         if width == 0 || width > 8 || bytes_per_glyph != height {
             return Err(FontError::Unsupported);
         }
@@ -73,7 +73,7 @@ impl Font {
         })
     }
 
-    /// Bitmap-Zeilen des Glyphen für `c`; unbekannte Zeichen werden zu '?'.
+    /// Bitmap rows of the glyph for `c`; unknown characters become '?'.
     pub fn glyph(&self, c: char) -> &[u8] {
         let index = self.index_of(c).or_else(|| self.index_of('?')).unwrap_or(0);
         let start = self.glyph_offset + index * self.bytes_per_glyph;
@@ -103,7 +103,7 @@ fn parse_unicode_table(table: &[u8], glyph_count: usize, map: &mut [u16; 256]) {
                 glyph += 1;
                 i += 1;
             }
-            0xFE => i += 1, // Beginn von Kombinationssequenzen – überspringen
+            0xFE => i += 1, // start of combining sequences - skip
             _ => {
                 let len = match b {
                     0x00..=0x7F => 1,
@@ -137,9 +137,9 @@ fn parses_builtin_font() {
 fn ascii_and_umlauts_have_glyphs() {
     let font = Font::parse(FONT_DATA).unwrap();
     for c in ['A', 'z', '0', '~', 'ä', 'ö', 'ü', 'ß'] {
-        assert!(font.index_of(c).is_some(), "kein Glyph fuer {}", c);
+        assert!(font.index_of(c).is_some(), "no glyph for {}", c);
     }
-    // Leerzeichen ist leer, 'A' nicht
+    // space is blank, 'A' is not
     assert!(font.glyph(' ').iter().all(|&row| row == 0));
     assert!(font.glyph('A').iter().any(|&row| row != 0));
 }
