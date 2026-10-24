@@ -41,7 +41,7 @@ Bei Triple Faults hilft es, an `scripts/run-qemu.sh` die Flags `-d int,cpu_reset
 - `kernel/src/font.rs` – PSF2-Parser, eingebauter Font aus `kernel/assets/`
 - `kernel/src/console.rs` – Framebuffer-Textkonsole, Makros `print!`/`println!` (Bildschirm + Serial)
 - `kernel/src/qemu.rs` – QEMU beenden (isa-debug-exit)
-- `kernel/src/arch/x86_64/` – CPU-spezifisches: `port.rs` (in/out), `gdt.rs` (GDT+TSS), Interrupt-Helfer in `mod.rs`
+- `kernel/src/arch/x86_64/` – CPU-spezifisches: `port.rs` (in/out), `gdt.rs` (GDT+TSS), `idt.rs` (IDT-Struktur), `interrupts.rs` (Exception-Handler, Kernel-IDT), `irq.rs` (Hardware-IRQs), Interrupt-Helfer in `mod.rs`
 - `kernel/linker.ld` – Higher-Half-Layout ab `0xffffffff80000000`
 - `scripts/run-qemu.sh` – Cargo-Runner: ISO bauen und QEMU starten
 - `vendor/limine` – Limine-Binaries (nicht im Git, `make limine`)

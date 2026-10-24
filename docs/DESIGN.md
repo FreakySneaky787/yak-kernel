@@ -42,4 +42,11 @@
 IST1 (`gdt::DOUBLE_FAULT_IST`) = 20 KiB statischer Stack für Double Faults. User-Segmente kommen erst mit Userspace dazu.
 
 ## Interrupt-Vektoren
-_(kommt mit M5/M6)_
+| Vektor | Was |
+|---|---|
+| 0–31 | CPU-Exceptions (`arch/x86_64/interrupts.rs`), Double Fault (8) auf IST1 |
+| 32–47 | IRQs vom PIC (ab M6) |
+
+- Handler nutzen `extern "x86-interrupt"` (nightly `abi_x86_interrupt`). Der Compiler sichert dabei die Register und erzeugt `iretq`. Die IDT-Struktur und alle Gates schreiben wir selbst.
+- `interrupts::install_exception_handlers(&mut Idt)` ist getrennt von `init()`. Tests bauen sich eigene IDTs (siehe `tests/page_fault.rs`).
+- Die Adresse `0x0000_4000_0000_0000` (untere Hälfte) ist unter Limine ungemappt und dient in Tests als „garantiert faultende“ Adresse.

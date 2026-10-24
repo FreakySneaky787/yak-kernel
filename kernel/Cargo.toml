@@ -16,6 +16,14 @@ bench = false
 name = "should_panic"
 harness = false
 
+[[test]]
+name = "stack_overflow"
+harness = false
+
+[[test]]
+name = "page_fault"
+harness = false
+
 [profile.dev]
 panic = "abort"
 

@@ -1,4 +1,7 @@
 pub mod gdt;
+pub mod idt;
+pub mod interrupts;
+pub mod irq;
 pub mod port;
 
 use core::arch::asm;

@@ -10,7 +10,7 @@ Legende: ✅ erledigt · 🔨 in Arbeit · ⬜ offen · **[USER]** = schreibt de
 | 2 | Test-Framework + `make test` | ✅ | 7 Tests: lib, boot, should_panic + manuelle Fail-Gegenprobe |
 | 3 | Framebuffer-Textkonsole (Bitmap-Font), `println!` | ✅ | 9 Unit-Tests (Font, Konsole) + Screenshot |
 | 4 | GDT + TSS (Double-Fault-Stack) | ✅ | 3 Tests: CS/TR/GDTR, IST-Stack |
-| 5 | IDT + Exception-Handler | ⬜ | |
+| 5 | IDT + Exception-Handler | ✅ | 3 Unit-Tests + Integrationstests `page_fault`, `stack_overflow` |
 | 6 | PIC remappen + PIT-Timer | ⬜ | |
 | 7 | PS/2-Tastatur | ⬜ | |
 | 8 | Frame-Allocator aus der Limine-Memory-Map | ⬜ | |
@@ -31,6 +31,12 @@ Legende: ✅ erledigt · 🔨 in Arbeit · ⬜ offen · **[USER]** = schreibt de
 
 - **2026-10-24** – M4: Eigene GDT (Null, Kernel-Code 0x08, Kernel-Data 0x10, TSS 0x18) und TSS mit IST1 = 20-KiB-Double-Fault-Stack. CS wird per `retfq` neu geladen.
 
+- **2026-10-24** – M5: Eigene IDT (`idt.rs`), Handler für alle Exceptions 0–21 (`interrupts.rs`), lesbare Ausgabe des Page-Fault-Fehlercodes.
+  Double Fault läuft auf IST1, per Test nachgewiesen. **Einschränkung:** Echte Stack Overflows faulten noch nicht, weil der Limine-Stack keine Guard-Page hat. Das kommt mit M9.
+
+## Offene Punkte / später
+- Eigener Kernel-Stack mit Guard-Page (nach M9), danach einen echten Rekursions-Stack-Overflow-Test schreiben.
+
 ## Nächster Schritt
-**M5:** IDT mit 256 Einträgen und Handlern für alle CPU-Exceptions (Vektoren 0–31) über `extern "x86-interrupt"`. Double Fault läuft auf IST1, Page Fault liest CR2.
-Tests: `int3` kommt zurück, Integrationstests für Stack Overflow → Double Fault und für Page Fault mit CR2-Prüfung.
+**M6:** 8259-PIC auf die Vektoren 32–47 umlegen, PIT auf 100 Hz, Timer-Handler zählt Ticks und sendet EOI. Interrupts mit `sti` einschalten.
+Test: Ticks steigen innerhalb kurzer Zeit. Danach M7, die Tastatur an IRQ1.

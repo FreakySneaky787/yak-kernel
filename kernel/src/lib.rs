@@ -4,6 +4,7 @@
 #![no_std]
 #![cfg_attr(test, no_main)]
 #![feature(custom_test_frameworks)]
+#![feature(abi_x86_interrupt)]
 #![test_runner(crate::testing::runner)]
 #![reexport_test_harness_main = "test_main"]
 
@@ -19,6 +20,7 @@ pub mod testing;
 pub fn init() {
     serial::init();
     arch::x86_64::gdt::init();
+    arch::x86_64::interrupts::init();
     console::init();
     if !boot::BASE_REVISION.is_supported() {
         serial_println!(
