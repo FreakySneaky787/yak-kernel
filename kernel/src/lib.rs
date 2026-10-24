@@ -11,6 +11,7 @@
 pub mod arch;
 pub mod boot;
 pub mod console;
+pub mod drivers;
 pub mod font;
 pub mod qemu;
 pub mod serial;

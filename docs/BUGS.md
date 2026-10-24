@@ -15,7 +15,7 @@ Format: Datum · Symptom · Ursache · Fix · Test/Commit
   `info lapic` → `LVT0 0x00018700 … masked ExtINT`: Limine maskiert LINT0 des Local APIC, und genau darüber laufen die PIC-Interrupts.
 - **Fix:** `lapic::disable()` löscht Bit 11 (global enable) in MSR `IA32_APIC_BASE`. Dann gehen PIC-Interrupts direkt an den INTR-Pin der CPU.
 - **Test:** `irq::tests::local_apic_disabled_for_pic_mode`, `timer_ticks_advance`, `sleep_waits_roughly`. Unter BIOS und UEFI geprüft.
-- **Merken:** Bei „Interrupts kommen nicht an“ zuerst `info pic` / `info lapic` im QEMU-Monitor anschauen. Hilfsscript dafür steht im Log von Session 1 (Monitor über Unix-Socket).
+- **Merken:** Bei „Interrupts kommen nicht an“ zuerst `info pic` / `info lapic` im QEMU-Monitor anschauen. Dafür gibt es `scripts/qemu-monitor.py <elf> [sek] -- "info pic" "info lapic"`.
 
 ## Bekannte Stolperfallen (kein Bug, aber merken)
 - **Limine-Hostprogramm (`limine bios-install`) lässt sich nicht bauen**, weil kein C-Compiler installiert ist.

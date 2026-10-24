@@ -48,3 +48,10 @@ Kurze Erklärungen zu jedem Subsystem: was es ist und warum wir es brauchen.
 - Der **PIT** ist ein Zähler mit 1,19 MHz. Teiler 11932 ergibt ~100 Interrupts pro Sekunde, also einen „Tick“ alle 10 ms. Daraus bauen wir Uptime und `sleep`.
 - `hlt` legt die CPU schlafen, bis der nächste Interrupt kommt. So wartet der Kernel, ohne 100 % CPU zu verbrauchen.
 - **APIC**: Moderne CPUs haben pro Kern einen Local APIC. Er sitzt zwischen PIC und CPU. Limine hat seinen PIC-Eingang gesperrt, darum schalten wir ihn vorerst ganz ab (Bug #2).
+
+## M7 – Tastatur
+- Drückt man eine Taste, schickt der PS/2-Controller einen **Scancode** und löst IRQ1 aus. Wir lesen das Byte aus Port 0x60.
+- Scancodes beschreiben die **Position** der Taste, nicht den Buchstaben. Auf QWERTZ und QWERTY hat die Taste neben T denselben Code (0x15), sie bedeutet aber „z“ bzw. „y“. Deshalb braucht es ein **Layout**.
+- Drücken = Code, Loslassen = Code + 0x80. Shift, Ctrl und AltGr merken wir uns als Zustand. Caps Lock wechselt bei jedem Druck.
+- Der Interrupt-Handler macht fast nichts (Byte in einen Ringpuffer), damit er schnell fertig ist. Die Arbeit passiert außerhalb.
+- **Race beim Warten**: „Puffer leer? → `hlt`“ ist gefährlich, wenn der Interrupt genau dazwischen kommt. Dann schläft die CPU, obwohl schon eine Taste da ist. Lösung: Interrupts aus, prüfen, dann `sti; hlt`. Die CPU garantiert, dass zwischen `sti` und `hlt` kein Interrupt reinrutscht.

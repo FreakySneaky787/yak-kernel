@@ -13,6 +13,7 @@ pub const fn vector(irq: u8) -> u8 {
 
 pub fn install_irq_handlers(idt: &mut Idt) {
     idt.set(vector(TIMER_IRQ), timer);
+    idt.set(vector(KEYBOARD_IRQ), keyboard);
     idt.set(vector(7), spurious_master);
     idt.set(vector(15), spurious_slave);
 }
@@ -24,11 +25,18 @@ pub fn init() {
     pic::init();
     super::pit::init(time::TIMER_HZ);
     pic::unmask(TIMER_IRQ);
+    crate::drivers::keyboard::init();
+    pic::unmask(KEYBOARD_IRQ);
 }
 
 extern "x86-interrupt" fn timer(_frame: InterruptStackFrame) {
     time::tick();
     pic::end_of_interrupt(TIMER_IRQ);
+}
+
+extern "x86-interrupt" fn keyboard(_frame: InterruptStackFrame) {
+    crate::drivers::keyboard::handle_interrupt();
+    pic::end_of_interrupt(KEYBOARD_IRQ);
 }
 
 // Spurious IRQs: Der PIC meldet IRQ 7/15, obwohl nichts anliegt. Dann darf

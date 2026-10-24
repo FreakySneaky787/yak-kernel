@@ -12,7 +12,7 @@ Legende: ✅ erledigt · 🔨 in Arbeit · ⬜ offen · **[USER]** = schreibt de
 | 4 | GDT + TSS (Double-Fault-Stack) | ✅ | 3 Tests: CS/TR/GDTR, IST-Stack |
 | 5 | IDT + Exception-Handler | ✅ | 3 Unit-Tests + Integrationstests `page_fault`, `stack_overflow` |
 | 6 | PIC remappen + PIT-Timer | ✅ | 4 Tests: Ticks, sleep_ms, PIC-Maske, APIC aus |
-| 7 | PS/2-Tastatur | ⬜ | |
+| 7 | PS/2-Tastatur | ✅ | 13 Unit-Tests + E2E per `sendkey` (QWERTZ, Umlaute, AltGr, Caps) |
 | 8 | Frame-Allocator aus der Limine-Memory-Map | ⬜ | |
 | 9 | Paging: map/unmap | ⬜ | |
 | 10 | Kernel-Heap → `alloc` | ⬜ | |
@@ -37,10 +37,17 @@ Legende: ✅ erledigt · 🔨 in Arbeit · ⬜ offen · **[USER]** = schreibt de
 - **2026-10-24** – M6: 8259-PIC auf 32–47 umgelegt, PIT auf 100 Hz, `time.rs` (Ticks, `uptime_ms`, `sleep_ms`), Behandlung von Spurious IRQ 7/15.
   Bug #2: Limine maskiert LAPIC LINT0, deshalb kamen keine PIC-Interrupts an. Der Local APIC wird jetzt per MSR abgeschaltet. Läuft unter BIOS und UEFI.
 
+- **2026-10-24** – M7: PS/2-Tastatur an IRQ1. Ringpuffer im Handler, `scancode::Decoder` (Set 1, Shift, Caps, Ctrl, Alt, AltGr, E0/E1).
+  Layouts: DE (Default) und US. `keyboard::read_key()` schläft race-frei mit `sti; hlt`. `main.rs` hat bis zur Shell einen Echo-Modus.
+  Neu: `scripts/qemu-monitor.py` zum Abfragen des QEMU-Monitors.
+
 ## Offene Punkte / später
+- Konsole hat noch keinen sichtbaren Cursor (spätestens für die Shell in M11).
+- Automatisierter E2E-Tastaturtest: Runner müsste über den Monitor `sendkey` schicken. Sinnvoll mit der Shell (M11).
 - Umstieg auf Local APIC + I/O APIC (braucht MMIO-Mapping, also nach M9). Dann `lapic::disable()` wieder entfernen.
 - Eigener Kernel-Stack mit Guard-Page (nach M9), danach einen echten Rekursions-Stack-Overflow-Test schreiben.
 
 ## Nächster Schritt
-**M7:** PS/2-Tastatur an IRQ1. Der Handler liest Port 0x60 und legt den Scancode in einen Ringpuffer. Ein Decoder (Scancode Set 1 → `KeyEvent`) verwaltet Shift, Caps Lock, Ctrl und AltGr.
-Layouts: deutsches QWERTZ (Default) und US. Unit-Tests für den Decoder, Ende-zu-Ende-Check per `screenshot.py` mit `sendkey`.
+**M8:** Physischer Frame-Allocator. Usable-Bereiche aus der Limine-Memory-Map lesen, Bitmap-Allocator für 4-KiB-Frames
+(die Bitmap selbst liegt in einem Usable-Bereich, Zugriff über die HHDM). API: `alloc_frame()`, `free_frame()`, Statistik (frei/gesamt).
+Tests: Alloc/Free, keine doppelte Vergabe, Ausrichtung, Statistik stimmt.

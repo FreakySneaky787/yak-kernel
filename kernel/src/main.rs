@@ -2,7 +2,9 @@
 #![no_main]
 
 use core::panic::PanicInfo;
-use kernel::{arch, println};
+use kernel::drivers::keyboard;
+use kernel::drivers::scancode::Key;
+use kernel::{arch, print, println};
 
 /// Einsprungpunkt – Limine springt hierher (siehe `ENTRY(kmain)` in linker.ld).
 /// Wir laufen bereits im 64-bit Long Mode, Paging ist aktiv, Interrupts sind aus.
@@ -15,9 +17,21 @@ extern "C" fn kmain() -> ! {
         kernel::serial_println!("Konsole: {}x{} Zeichen", cols, rows);
     }
     println!("Hello from KernelTry! Grüße aus dem Kernel. äöüß");
-    kernel::time::sleep_ms(1000);
-    println!("Timer laeuft: {} ms seit Boot", kernel::time::uptime_ms());
-    arch::x86_64::idle_loop()
+    println!("Uptime: {} ms, Tastatur-Layout: {:?}", kernel::time::uptime_ms(), keyboard::layout());
+    println!("Tippe etwas (Echo-Modus, die Shell kommt in M11):");
+    print!("> ");
+
+    // M7: einfacher Echo-Modus, bis die Shell kommt
+    loop {
+        let event = keyboard::read_key();
+        match event.key {
+            Key::Char(c) => print!("{}", c),
+            Key::Enter => print!("\n> "),
+            Key::Backspace => print!("\x08"),
+            Key::Tab => print!("\t"),
+            other => kernel::serial_println!("[Taste: {:?}]", other),
+        }
+    }
 }
 
 #[panic_handler]

@@ -16,6 +16,12 @@
   Eine physische Adresse `p` erreichen wir also über `p + hhdm_offset`.
 - Linker-Sections: `.limine_requests` (zwischen Start- und End-Marker), `.text`, `.rodata`, `.data`/`.bss`, jede auf Seitengröße ausgerichtet und mit eigenem PT_LOAD.
 
+## Tastatur
+- IRQ1-Handler liest nur Port 0x60 und legt das Byte in einen `RingBuffer<128>`. Übersetzt wird außerhalb des Interrupts in `drivers::scancode::Decoder`.
+- Scancode Set 1 (der 8042-Controller übersetzt standardmäßig). Layout umschaltbar (`keyboard::set_layout`), Default **DE**.
+  QEMU schickt physische Tasten, das Layout im Kernel muss also zur echten Tastatur des Users passen.
+- `keyboard::inject_scancode()` speist Bytes ohne Hardware ein (Tests, später z. B. Serial-Eingabe).
+
 ## Ausgabe
 - `serial_println!`: nur COM1. `println!`: Konsole **und** COM1. Beide sperren Interrupts, während sie den Lock halten (`without_interrupts`).
 - Panic-Handler nutzen nur Serial, denn der Konsolen-Lock könnte beim Panic noch gehalten sein.

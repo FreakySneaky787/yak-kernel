@@ -16,7 +16,8 @@ Sprache der Doku und Kommentare: **Deutsch**. Bezeichner im Code: Englisch.
 | `make run-uefi` | wie run, aber mit OVMF/UEFI |
 | `make test` | alle In-Kernel-Tests headless in QEMU, Exitcode 0 = grün |
 | `make debug` + `make gdb` | QEMU wartet auf gdb an :1234 |
-| `python3 -I scripts/screenshot.py <elf> <out.png> [sek] [tasten…]` | headless booten, optional Tasten senden, Screenshot + Serial-Log |
+| `python3 -I scripts/qemu-monitor.py <elf> [sek] -- "info pic" …` | QEMU-Monitor-Befehle gegen den laufenden Kernel |
+| `python3 -I scripts/screenshot.py <elf> <out.png> [sek] [tasten…]` | headless booten, optional Tasten senden (QEMU-`sendkey`-Namen, US-Positionen), Screenshot + Serial-Log |
 
 Tests laufen ohne Fenster und brechen nach 30 s ab (`KERNEL_TEST_TIMEOUT`), du kannst sie also selbst ausführen.
 Bei Interrupt-Problemen: QEMU-Monitor (`-monitor unix:<sock>,server,nowait`) mit `info pic`, `info lapic`, `info registers`.
@@ -43,6 +44,7 @@ Bei Triple Faults hilft es, an `scripts/run-qemu.sh` die Flags `-d int,cpu_reset
 - `kernel/src/console.rs` – Framebuffer-Textkonsole, Makros `print!`/`println!` (Bildschirm + Serial)
 - `kernel/src/qemu.rs` – QEMU beenden (isa-debug-exit)
 - `kernel/src/arch/x86_64/` – CPU-spezifisches: `port.rs` (in/out), `gdt.rs` (GDT+TSS), `idt.rs` (IDT-Struktur), `interrupts.rs` (Exception-Handler, Kernel-IDT), `irq.rs` (Hardware-IRQs), `pic.rs`, `pit.rs`, `lapic.rs`, `msr.rs`, Interrupt-Helfer in `mod.rs`
+- `kernel/src/drivers/keyboard.rs` – PS/2-Treiber, Ringpuffer, `read_key()`; `drivers/scancode.rs` – Decoder + Layouts (DE/US)
 - `kernel/src/time.rs` – Ticks, `uptime_ms`, `sleep_ms`
 - `kernel/linker.ld` – Higher-Half-Layout ab `0xffffffff80000000`
 - `scripts/run-qemu.sh` – Cargo-Runner: ISO bauen und QEMU starten
