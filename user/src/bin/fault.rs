@@ -17,8 +17,7 @@ fn recurse(depth: u64) -> u64 {
     recurse(depth + 1) + frame[0]
 }
 
-fn main(args: &str) -> i32 {
-    let mut words = args.split_whitespace();
+fn main(mut words: ulib::Args) -> i32 {
     match words.next() {
         Some("null") => {
             println!("writing to address 0 ...");

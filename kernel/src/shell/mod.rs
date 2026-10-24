@@ -6,7 +6,8 @@
 //!
 //! A word that is not a built-in command is looked up as a program: a path
 //! (`./prog`, `/bin/hello`) or a name in `/bin`. Programs run as user
-//! processes and write directly to the console.
+//! processes in the shell's current directory and write directly to the
+//! console (`ls`, `cat`, `cp` are such programs since M17).
 
 pub mod line_editor;
 pub mod parser;
@@ -20,9 +21,11 @@ use crate::process::{self, ExitStatus};
 use crate::{boot, input, task, time};
 use alloc::format;
 use alloc::string::String;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt::{self, Write};
 use line_editor::{EditResult, LineEditor};
+use spin::Mutex;
 
 /// Prompt: "kernel:<current directory>> " (with colours).
 fn prompt(cwd: &str) -> String {
@@ -158,12 +161,6 @@ pub static COMMANDS: &[Command] = &[
         run: cmd_colors,
     },
     Command {
-        name: "ls",
-        usage: "ls [path]",
-        help: "list a directory",
-        run: cmd_ls,
-    },
-    Command {
         name: "cd",
         usage: "cd [path]",
         help: "change the current directory",
@@ -174,12 +171,6 @@ pub static COMMANDS: &[Command] = &[
         usage: "pwd",
         help: "print the current directory",
         run: cmd_pwd,
-    },
-    Command {
-        name: "cat",
-        usage: "cat <file>...",
-        help: "print files",
-        run: cmd_cat,
     },
     Command {
         name: "write",
@@ -295,6 +286,9 @@ pub struct Shell {
     editor: LineEditor,
     /// Current directory (absolute, normalized).
     cwd: String,
+    /// Collect program output and pass it to the command's `out` (tests)
+    /// instead of letting programs write to the console.
+    capture_programs: bool,
 }
 
 impl Default for Shell {
@@ -308,6 +302,7 @@ impl Shell {
         Shell {
             editor: LineEditor::new(),
             cwd: String::from("/"),
+            capture_programs: false,
         }
     }
 
@@ -326,7 +321,7 @@ impl Shell {
         let result = match find_command(name) {
             Some(command) => (command.run)(self, &words[1..], out),
             None => match self.find_program(name) {
-                Some(path) => run_program(&path, &words[1..]),
+                Some(path) => self.run_program(&path, &words[1..], out),
                 None => Err(format!("unknown command '{}' (try 'help')", name)),
             },
         };
@@ -732,12 +727,31 @@ impl Shell {
     }
 }
 
-/// Loads `path` from the disk, runs it with `args` and waits for it.
-fn run_program(path: &str, args: &[String]) -> Result<(), String> {
-    let image = fs::with_root(|fs| fs.read_file(path)).map_err(|e| fs_err(path, e))?;
-    let name = path.rsplit('/').next().unwrap_or(path);
-    let status = process::run(name, &image, &args.join(" "), process::Output::Console)
-        .map_err(|e| format!("{}: {}", path, e))?;
+impl Shell {
+    /// Makes programs write into the command's `out` (for tests).
+    pub fn capture_programs(&mut self) {
+        self.capture_programs = true;
+    }
+
+    /// Loads `path` from the disk, runs it with `args` in the current
+    /// directory and waits for it. Arguments are passed NUL-separated.
+    fn run_program(&self, path: &str, args: &[String], out: &mut dyn Write) -> Result<(), String> {
+        let image = fs::with_root(|fs| fs.read_file(path)).map_err(|e| fs_err(path, e))?;
+        let name = path.rsplit('/').next().unwrap_or(path);
+        let sink = Arc::new(Mutex::new(Vec::new()));
+        let output = if self.capture_programs {
+            process::Output::Capture(sink.clone())
+        } else {
+            process::Output::Console
+        };
+        let status = process::run_in(&self.cwd, name, &image, &args.join("\0"), output)
+            .map_err(|e| format!("{}: {}", path, e))?;
+        out.write_str(&String::from_utf8_lossy(&sink.lock())).ok();
+        exit_status_result(name, status)
+    }
+}
+
+fn exit_status_result(name: &str, status: ExitStatus) -> Result<(), String> {
     match status {
         ExitStatus::Exited(0) => Ok(()),
         ExitStatus::Exited(code) => Err(format!("{} exited with code {}", name, code)),
@@ -745,10 +759,10 @@ fn run_program(path: &str, args: &[String]) -> Result<(), String> {
     }
 }
 
-fn cmd_run(shell: &mut Shell, args: &[String], _: &mut dyn Write) -> Result<(), String> {
+fn cmd_run(shell: &mut Shell, args: &[String], out: &mut dyn Write) -> Result<(), String> {
     let program = arg(args, 0, "run <program> [args...]")?;
     let path = shell.path(program);
-    run_program(&path, &args[1..])
+    shell.run_program(&path, &args[1..], out)
 }
 
 // ---- file system commands ----
@@ -773,30 +787,6 @@ fn arg<'a>(args: &'a [String], i: usize, usage: &str) -> Result<&'a str, String>
         .ok_or_else(|| format!("usage: {}", usage))
 }
 
-fn cmd_ls(shell: &mut Shell, args: &[String], out: &mut dyn Write) -> Result<(), String> {
-    let path = shell.path(args.first().map_or(".", |s| s.as_str()));
-    let entry = fs::with_root(|fs| fs.lookup(&path)).map_err(|e| fs_err(&path, e))?;
-    let entries = if entry.is_dir() {
-        fs::with_root(|fs| fs.read_dir(&path)).map_err(|e| fs_err(&path, e))?
-    } else {
-        alloc::vec![entry]
-    };
-    for e in entries {
-        let size = if e.is_dir() {
-            String::from("<DIR>")
-        } else {
-            format!("{}", e.size)
-        };
-        let name = if e.is_dir() {
-            format!("\x1b[94m{}/\x1b[0m", e.name)
-        } else {
-            e.name.clone()
-        };
-        writeln!(out, "  {:>10}  {}  {}", size, e.modified, name).ok();
-    }
-    Ok(())
-}
-
 fn cmd_cd(shell: &mut Shell, args: &[String], _: &mut dyn Write) -> Result<(), String> {
     let path = shell.path(args.first().map_or("/", |s| s.as_str()));
     let entry = fs::with_root(|fs| fs.lookup(&path)).map_err(|e| fs_err(&path, e))?;
@@ -809,20 +799,6 @@ fn cmd_cd(shell: &mut Shell, args: &[String], _: &mut dyn Write) -> Result<(), S
 
 fn cmd_pwd(shell: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), String> {
     writeln!(out, "{}", shell.cwd).ok();
-    Ok(())
-}
-
-fn cmd_cat(shell: &mut Shell, args: &[String], out: &mut dyn Write) -> Result<(), String> {
-    arg(args, 0, "cat <file>...")?;
-    for a in args {
-        let path = shell.path(a);
-        let data = fs::with_root(|fs| fs.read_file(&path)).map_err(|e| fs_err(&path, e))?;
-        let text = String::from_utf8_lossy(&data);
-        out.write_str(&text).ok();
-        if !text.is_empty() && !text.ends_with('\n') {
-            writeln!(out).ok();
-        }
-    }
     Ok(())
 }
 
@@ -957,6 +933,7 @@ mod tests {
 
     fn run(line: &str) -> (bool, String) {
         let mut shell = Shell::new();
+        shell.capture_programs();
         let mut out = String::new();
         let ok = shell.execute(line, &mut out);
         (ok, out)
@@ -1046,6 +1023,7 @@ mod tests {
     #[test_case]
     fn file_commands() {
         let mut shell = Shell::new();
+        shell.capture_programs();
         let mut out = String::new();
         let mut ok = |shell: &mut Shell, line: &str| {
             out.clear();
@@ -1058,6 +1036,12 @@ mod tests {
         assert!(ok(&mut shell, "write notes.txt hello file system").0);
         assert!(ok(&mut shell, "append notes.txt second line").0);
         assert_eq!(ok(&mut shell, "cat notes.txt").1, "hello file system\nsecond line\n");
+        assert!(ok(&mut shell, "cp notes.txt \"copy of notes\"").0);
+        assert_eq!(
+            ok(&mut shell, "cat \"copy of notes\"").1,
+            "hello file system\nsecond line\n"
+        );
+        assert!(ok(&mut shell, "rm \"copy of notes\"").0);
         assert!(ok(&mut shell, "ls").1.contains("notes.txt"));
         assert!(ok(&mut shell, "mv notes.txt \"renamed notes.txt\"").0);
         assert!(ok(&mut shell, "stat \"renamed notes.txt\"").1.contains("30 bytes"));
@@ -1078,7 +1062,10 @@ mod tests {
     /// Needs the programs from `make user` on the test disk (`/bin`).
     #[test_case]
     fn programs_run_from_bin() {
-        assert!(run("hello from a test").0);
+        let (ok, out) = run("hello from \"a test\"");
+        assert!(ok && out.contains("arg 1: from\n  arg 2: a test\n"), "{}", out);
+        let (ok, out) = run("fstest");
+        assert!(ok && out.contains("fstest: all checks passed"), "{}", out);
         assert!(run("/bin/fault exit 0").0);
         let (ok, out) = run("run /bin/fault exit 3");
         assert!(!ok && out.contains("fault exited with code 3"), "{}", out);

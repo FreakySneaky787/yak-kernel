@@ -11,6 +11,13 @@ pub const SLEEP_MS: u64 = 3;
 pub const GETPID: u64 = 4;
 pub const UPTIME_MS: u64 = 5;
 pub const YIELD: u64 = 6;
+pub const OPEN: u64 = 7;
+pub const CLOSE: u64 = 8;
+pub const READDIR: u64 = 9;
+pub const STAT: u64 = 10;
+pub const GETCWD: u64 = 11;
+pub const UNLINK: u64 = 12;
+pub const MKDIR: u64 = 13;
 
 pub const STDIN: u64 = 0;
 pub const STDOUT: u64 = 1;
@@ -63,4 +70,70 @@ pub fn uptime_ms() -> u64 {
 
 pub fn yield_now() {
     unsafe { syscall3(YIELD, 0, 0, 0) };
+}
+
+/// `open` flags (see the kernel's `open_flags`).
+pub const O_READ: u64 = 1;
+/// Writes always append to the end of the file.
+pub const O_WRITE: u64 = 2;
+pub const O_CREATE: u64 = 4;
+pub const O_TRUNCATE: u64 = 8;
+
+pub const KIND_FILE: u32 = 1;
+pub const KIND_DIR: u32 = 2;
+
+/// Same layout as the kernel's `process::syscall::Stat`.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Stat {
+    pub size: u64,
+    pub kind: u32,
+    pub _reserved: u32,
+    /// year, month, day, hour, minute, second
+    pub modified: [u16; 6],
+    pub _pad: u32,
+}
+
+/// Same layout as the kernel's `process::syscall::DirEntryInfo`.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct DirEntryInfo {
+    pub stat: Stat,
+    pub name_len: u32,
+    pub _pad: u32,
+    pub name: [u8; 256],
+}
+
+const _: () = assert!(core::mem::size_of::<Stat>() == 32 && core::mem::size_of::<DirEntryInfo>() == 296);
+
+/// Returns a file descriptor or -errno.
+pub fn open(path: &str, flags: u64) -> i64 {
+    unsafe { syscall3(OPEN, path.as_ptr() as u64, path.len() as u64, flags) }
+}
+
+pub fn close(fd: u64) -> i64 {
+    unsafe { syscall3(CLOSE, fd, 0, 0) }
+}
+
+/// 1 = `info` filled, 0 = end of the directory, < 0 = -errno.
+pub fn readdir(fd: u64, info: &mut DirEntryInfo) -> i64 {
+    unsafe { syscall3(READDIR, fd, info as *mut DirEntryInfo as u64, 0) }
+}
+
+pub fn stat(path: &str, stat: &mut Stat) -> i64 {
+    unsafe { syscall3(STAT, path.as_ptr() as u64, path.len() as u64, stat as *mut Stat as u64) }
+}
+
+/// Length of the path written to `buf`, or -errno.
+pub fn getcwd(buf: &mut [u8]) -> i64 {
+    unsafe { syscall3(GETCWD, buf.as_mut_ptr() as u64, buf.len() as u64, 0) }
+}
+
+/// Removes a file or an empty directory.
+pub fn unlink(path: &str) -> i64 {
+    unsafe { syscall3(UNLINK, path.as_ptr() as u64, path.len() as u64, 0) }
+}
+
+pub fn mkdir(path: &str) -> i64 {
+    unsafe { syscall3(MKDIR, path.as_ptr() as u64, path.len() as u64, 0) }
 }

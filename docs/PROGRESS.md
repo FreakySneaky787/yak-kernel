@@ -27,6 +27,13 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 | 15 | FAT32 file system (read/write, long names), persistent across reboots | ✅ | 30 tests + `fsck.fat`/mtools check of all test disks + 45-step E2E incl. reboot (BIOS + UEFI) |
 | 16 | User space: ring 3, syscalls, ELF loader | ✅ | 26 new unit tests (hand-assembled programs) + integration test `userspace` (real programs from disk) + 7 E2E steps |
 
+## Stage 3: a real user space (agreed with the user on 2026-10-24)
+| # | Milestone | Status | Tests |
+|---|---|---|---|
+| 17 | Files for programs: fd table, `open`/`close`/`readdir`/`stat`/`getcwd`/`unlink`/`mkdir`, `cat`/`ls`/`cp` as programs | ✅ | `read_at` unit test, `fstest` (25 syscall checks incl. errors), integration test, mtools check of a `cp` copy, 6 E2E steps |
+| 18 | User heap: `brk`-style syscall + allocator in `ulib` (`alloc` in programs) | ⬜ | |
+| 19 | Processes from processes: `spawn`/`wait`/`kill` syscalls, Ctrl+C, shell as a user program (`init`) | ⬜ | |
+
 ## Log
 - **2026-10-24** – Setup: Rust nightly 1.101 (rustup), target `x86_64-unknown-none`, Limine v11.x-binary.
   M1: kernel boots via BIOS and UEFI, prints "Hello from KernelTry!" on serial, colour bars on the framebuffer (1280×800×32).
@@ -106,6 +113,14 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   Found: Limine sets USER on its upper-half intermediate page tables – cleared in `paging::init` (BUGS.md pitfalls).
   **Stage 2 complete: 156 in-kernel tests + 6 test kernels + 52 E2E steps green (BIOS and UEFI).**
 
+- **2026-10-24** – User agreed to stage 3 (M17–M19) as proposed.
+- **2026-10-24** – M17: per-process file descriptor table (`process::Handle`: stdin, stdout, file with offset, directory snapshot;
+  max 32) and current directory (inherited from the shell). New syscalls 7–13: `open` (READ/WRITE/CREATE/TRUNCATE, writes append),
+  `close`, `readdir`, `stat`, `getcwd`, `unlink`, `mkdir`; `read`/`write` work on files. `FatFs::read_at` reads at an offset.
+  The process table lock is never held during disk I/O. Argument block is now NUL-separated (`ulib::Args`), so quoted
+  arguments with spaces survive. `ulib::fs` (`File`, `Dir`, `stat`, `cwd`); new programs `cat`, `ls`, `cp`, `fstest`.
+  The kernel shell's built-in `ls`/`cat` are gone – `/bin/ls` and `/bin/cat` replace them. Shell tests capture program output.
+
 ## Open items / later
 - AHCI uses polling; switching to completion interrupts (MSI or the PCI interrupt line) would free the CPU during I/O.
 - Thread-level sleeping mutex (today all shared state uses spin locks with interrupts disabled).
@@ -113,13 +128,13 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 - Reclaim `BOOTLOADER_RECLAIMABLE` memory once we no longer use Limine's stack, page tables and responses.
 - Shell lines longer than one console row are not handled by the line editor (input is capped at 120 characters).
 - `gcc` is not installed yet → `make limine-tool` (bios-install for USB/HDD images) is not available.
-- User space: no FPU/SSE state saving (everything is soft-float), no SMAP/SMEP, no user heap, no file syscalls,
+- User space: no FPU/SSE state saving (everything is soft-float), no SMAP/SMEP, no user heap,
   no Ctrl+C for a running program (`process::kill` exists, but nothing in the shell triggers it), only a single CPU.
+- File syscalls: writes always append (no seek, no overwrite in the middle); `read` re-walks the cluster chain per call;
+  directory handles are snapshots; no rename syscall yet. Without `/bin` on the disk, the kernel shell has no `ls`/`cat`.
 
 ## Next step
-**Stage 2 is complete.** Stage 3 still has to be agreed with the user. Proposal (in this order):
-- **M17 – files for programs:** per-process file descriptor table, syscalls `open`/`read`/`write`/`close`/`readdir`
-  on the FAT32 root; port `cat` and `ls` to user programs.
-- **M18 – user heap:** `brk`-style syscall plus a heap allocator in `ulib` (enables `alloc` in programs).
-- **M19 – processes from processes:** `spawn`/`wait`/`kill` syscalls, Ctrl+C kills the foreground program, then move the
-  shell into user space (an `init` program started by the kernel).
+**M18 – user heap:** a `brk`-style syscall (grow/shrink a heap area above the ELF image, pages mapped zeroed on demand by
+the kernel, freed on exit), a small allocator in `ulib` as `#[global_allocator]` so programs can use `alloc` (`Vec`, `String`).
+Tests: syscall limits (cannot grow into the stack or kernel), memory released after exit, a program that builds big `Vec`s,
+e.g. a `sort` program reading a file. Then **M19** (spawn/wait/kill syscalls, Ctrl+C, shell as a user program).

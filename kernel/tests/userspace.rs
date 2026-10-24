@@ -15,12 +15,14 @@ use kernel::qemu::{ExitCode, exit};
 use kernel::serial_println;
 use spin::Mutex;
 
-/// Runs `/bin/<name>` and returns its exit status and captured output.
+/// Runs `/bin/<name>` with the space-separated `args` and returns its exit
+/// status and captured output.
 fn run(name: &str, args: &str) -> (ExitStatus, String) {
+    let args = args.replace(' ', "\0"); // the argument block is NUL-separated
     let path = alloc::format!("/bin/{}", name);
     let image = fs::with_root(|fs| fs.read_file(&path)).expect("program missing on the test disk (make user?)");
     let out = Arc::new(Mutex::new(Vec::new()));
-    let status = process::run(name, &image, args, Output::Capture(out.clone())).unwrap();
+    let status = process::run(name, &image, &args, Output::Capture(out.clone())).unwrap();
     let text = String::from_utf8(out.lock().clone()).unwrap();
     serial_println!("  {} {:?}: {} | {:?}", name, args, status, text);
     (status, text)
@@ -62,6 +64,32 @@ extern "C" fn kmain() -> ! {
         "{:?}",
         status
     );
+
+    // M17: programs working with files
+    let (status, out) = run("cat", "/docs/hello.txt /etc/motd");
+    assert_eq!(status, ExitStatus::Exited(0));
+    assert!(
+        out.starts_with("Hello from a file on a real (virtual) SATA disk."),
+        "{}",
+        out
+    );
+    let (status, out) = run("cat", "/missing");
+    assert_eq!(
+        (status, out.as_str()),
+        (ExitStatus::Exited(1), "cat: /missing: no such file or directory\n")
+    );
+    let (status, out) = run("ls", "/");
+    assert_eq!(status, ExitStatus::Exited(0));
+    assert!(
+        out.contains("README.txt") && out.contains("docs/") && out.contains("bin/"),
+        "{}",
+        out
+    );
+    assert_eq!(run("cp", "/docs/hello.txt /copied.txt").0, ExitStatus::Exited(0));
+    let original = fs::with_root(|fs| fs.read_file("/docs/hello.txt")).unwrap();
+    assert_eq!(fs::with_root(|fs| fs.read_file("/copied.txt")).unwrap(), original);
+    let (status, out) = run("fstest", "");
+    assert_eq!(status, ExitStatus::Exited(0), "{}", out);
 
     assert_eq!(process::count(), 0);
     serial_println!("[ok]");

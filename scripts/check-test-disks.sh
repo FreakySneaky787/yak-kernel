@@ -38,4 +38,11 @@ sys.exit(0 if data == expected else 1)'; then
 else
     echo "[disk-check] FAIL no library test disk found"; fail=1
 fi
+# The userspace integration test copies a file with the user program `cp`
+user_img=$(ls -t "$DIR"/userspace-*.img 2>/dev/null | head -1)
+if [[ -n "$user_img" ]] && cmp -s <(mtype -i "$user_img" ::/copied.txt) <(mtype -i "$user_img" ::/docs/hello.txt); then
+    echo "[disk-check] mtools sees the file copied by /bin/cp"
+else
+    echo "[disk-check] FAIL /copied.txt from the userspace test"; fail=1
+fi
 exit $fail

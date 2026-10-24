@@ -7,7 +7,7 @@ use ulib::{io, print, println};
 
 ulib::entry!(main);
 
-fn main(_args: &str) -> i32 {
+fn main(_args: ulib::Args) -> i32 {
     print!("Type a line: ");
     let mut buf = [0u8; 256];
     let line = io::read_line(&mut buf);

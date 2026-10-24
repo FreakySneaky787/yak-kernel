@@ -13,11 +13,16 @@
 //!   with nothing mapped below it (an overflow faults and kills the process)
 //! - the argument string sits at the top of the stack; `_start` receives a
 //!   pointer to it in RDI and its length in RSI (our own minimal ABI).
+//!
+//! Every process has a current directory (inherited from whoever spawned it;
+//! relative paths in system calls start there) and a table of file
+//! descriptors: 0 = stdin, 1 = stdout, 2 = stderr, then open files/directories.
 
 pub mod elf;
 pub mod syscall;
 
 use crate::arch::x86_64::{disable_interrupts, without_interrupts};
+use crate::fs::fat32::DirEntry;
 use crate::mem::address_space::AddressSpace;
 use crate::mem::paging::{self, Flags, MapError};
 use crate::mem::{PAGE_SIZE, VirtAddr, align_down};
@@ -96,8 +101,32 @@ pub enum Output {
     Capture(Arc<Mutex<Vec<u8>>>),
 }
 
+/// Maximum number of file descriptors per process.
+pub const MAX_FDS: usize = 32;
+
+/// What a file descriptor refers to.
+pub enum Handle {
+    /// Keyboard + serial input.
+    Stdin,
+    /// The process's `Output` (stdout and stderr).
+    Stdout,
+    /// A file; reads continue at `offset`, writes always append.
+    File {
+        path: String,
+        offset: u64,
+        readable: bool,
+        writable: bool,
+    },
+    /// A directory opened for `readdir`: a snapshot of its entries.
+    Dir { entries: Vec<DirEntry>, next: usize },
+}
+
 pub struct Process {
     pub name: String,
+    /// Absolute, normalized current directory.
+    pub cwd: String,
+    /// Index = file descriptor.
+    pub files: Vec<Option<Handle>>,
     /// `None` once the process has ended.
     space: Option<AddressSpace>,
     stdout: Output,
@@ -111,9 +140,14 @@ pub struct Process {
 /// interrupts disabled (exception handlers and the timer use it too).
 static PROCESSES: Mutex<BTreeMap<Pid, Process>> = Mutex::new(BTreeMap::new());
 
-/// Loads `elf` into a new address space and starts it. `name` is used for
-/// `ps` and messages, `args` is handed to the program.
+/// Loads `elf` into a new address space and starts it in the root
+/// directory. `name` is used for `ps` and messages, `args` is handed to the program.
 pub fn spawn(name: &str, elf: &[u8], args: &str, stdout: Output) -> Result<Pid, ExecError> {
+    spawn_in("/", name, elf, args, stdout)
+}
+
+/// Like `spawn`, with `cwd` (absolute, normalized) as the current directory.
+pub fn spawn_in(cwd: &str, name: &str, elf: &[u8], args: &str, stdout: Output) -> Result<Pid, ExecError> {
     if args.len() > MAX_ARGS_LEN {
         return Err(ExecError::ArgsTooLong);
     }
@@ -143,6 +177,8 @@ pub fn spawn(name: &str, elf: &[u8], args: &str, stdout: Output) -> Result<Pid, 
             pid,
             Process {
                 name: String::from(name),
+                cwd: String::from(cwd),
+                files: alloc::vec![Some(Handle::Stdin), Some(Handle::Stdout), Some(Handle::Stdout)],
                 space: Some(space),
                 stdout,
                 stdin_pending: Vec::new(),
@@ -167,7 +203,12 @@ pub fn wait(pid: Pid) -> Option<ExitStatus> {
 
 /// Spawns and waits in one go.
 pub fn run(name: &str, elf: &[u8], args: &str, stdout: Output) -> Result<ExitStatus, ExecError> {
-    let pid = spawn(name, elf, args, stdout)?;
+    run_in("/", name, elf, args, stdout)
+}
+
+/// `spawn_in` and `wait` in one go.
+pub fn run_in(cwd: &str, name: &str, elf: &[u8], args: &str, stdout: Output) -> Result<ExitStatus, ExecError> {
+    let pid = spawn_in(cwd, name, elf, args, stdout)?;
     Ok(wait(pid).expect("process vanished before wait"))
 }
 
@@ -185,6 +226,7 @@ pub fn exit_current(status: ExitStatus) -> ! {
         let mut procs = PROCESSES.lock();
         let p = procs.get_mut(&pid).expect("exit_current: not a user process");
         p.status = Some(status);
+        p.files.clear();
         p.space.take()
     };
     // Switch back to the kernel's page tables before freeing our own

@@ -7,9 +7,9 @@ use ulib::{println, sys};
 
 ulib::entry!(main);
 
-fn main(args: &str) -> i32 {
+fn main(args: ulib::Args) -> i32 {
     println!("Hello from user space! I am process {}.", sys::getpid());
-    for (i, word) in args.split_whitespace().enumerate() {
+    for (i, word) in args.enumerate() {
         println!("  arg {}: {}", i + 1, word);
     }
     let start = sys::uptime_ms();

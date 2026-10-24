@@ -806,6 +806,36 @@ impl<D: BlockDevice> FatFs<D> {
         Ok(data)
     }
 
+    /// Reads up to `buf.len()` bytes of a file starting at `offset`. Returns
+    /// the number of bytes read (0 at or past the end of the file).
+    pub fn read_at(&mut self, path: &str, offset: u64, buf: &mut [u8]) -> Result<usize> {
+        let entry = self.lookup(path)?;
+        if entry.is_dir() {
+            return Err(FsError::IsADirectory);
+        }
+        let size = entry.size as u64;
+        if offset >= size || buf.is_empty() {
+            return Ok(0);
+        }
+        let len = (size - offset).min(buf.len() as u64) as usize;
+        let cluster_size = self.bytes_per_cluster as u64;
+        let chain = self.chain(entry.cluster)?;
+        let mut cluster_buf = vec![0u8; self.bytes_per_cluster];
+        let mut done = 0;
+        while done < len {
+            let pos = offset + done as u64;
+            let cluster = *chain
+                .get((pos / cluster_size) as usize)
+                .ok_or(FsError::Corrupt("file shorter than its size"))?;
+            self.read_cluster(cluster, &mut cluster_buf)?;
+            let within = (pos % cluster_size) as usize;
+            let take = (self.bytes_per_cluster - within).min(len - done);
+            buf[done..done + take].copy_from_slice(&cluster_buf[within..within + take]);
+            done += take;
+        }
+        Ok(len)
+    }
+
     // ---- writing directory entries ----
 
     fn write_slot(&mut self, loc: SlotLoc, bytes: &[u8; ENTRY_SIZE]) -> Result<()> {
@@ -1147,6 +1177,25 @@ mod tests {
         let mut disk = RamDisk::new(8192);
         format(&mut disk, "TEST").unwrap();
         FatFs::mount(disk).unwrap()
+    }
+
+    #[test_case]
+    fn read_at_offsets() {
+        let mut fs = ram_fs();
+        let data: Vec<u8> = (0..3000u32).map(|i| (i % 251) as u8).collect();
+        fs.write_file("/r.bin", &data).unwrap();
+        let mut buf = [0u8; 700];
+        // inside one cluster, across clusters, at the end, past the end
+        for offset in [0u64, 100, 500, 2600, 2999, 3000, 5000] {
+            let n = fs.read_at("/r.bin", offset, &mut buf).unwrap();
+            let expected = data.len().saturating_sub(offset as usize).min(buf.len());
+            assert_eq!(n, expected, "offset {}", offset);
+            let start = (offset as usize).min(data.len());
+            assert_eq!(&buf[..n], &data[start..start + n]);
+        }
+        fs.create_dir("/d").unwrap();
+        assert_eq!(fs.read_at("/d", 0, &mut buf), Err(FsError::IsADirectory));
+        assert_eq!(fs.read_at("/none", 0, &mut buf), Err(FsError::NotFound));
     }
 
     #[test_case]

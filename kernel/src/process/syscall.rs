@@ -4,15 +4,21 @@
 //! Errors are returned as negative numbers (`-errno`), like Linux does.
 //! Every pointer from user space is checked against the process's page
 //! tables before the kernel touches it.
+//!
+//! File system calls work on the mounted FAT32 root. The process table lock
+//! is never held during disk I/O: handlers copy what they need out of the
+//! file descriptor, do the I/O, and update the descriptor afterwards.
 
-use super::{ExitStatus, Output, with_current};
+use super::{ExitStatus, Handle, MAX_FDS, Output, with_current};
 use crate::arch::x86_64::syscall::SyscallFrame;
 use crate::arch::x86_64::without_interrupts;
 use crate::drivers::scancode::{Key, KeyEvent};
+use crate::fs::{self, fat32::DirEntry, fat32::FsError};
 use crate::mem::address_space::USER_END;
 use crate::{input, task, time};
 use alloc::string::String;
 use alloc::vec::Vec;
+use core::mem::size_of;
 
 pub mod nr {
     /// exit(code) -> never returns
@@ -29,12 +35,111 @@ pub mod nr {
     pub const UPTIME_MS: u32 = 5;
     /// yield() -> 0
     pub const YIELD: u32 = 6;
+    /// open(path, path_len, flags) -> fd
+    pub const OPEN: u32 = 7;
+    /// close(fd) -> 0
+    pub const CLOSE: u32 = 8;
+    /// readdir(fd, *mut DirEntryInfo) -> 1 (entry written) or 0 (end of directory)
+    pub const READDIR: u32 = 9;
+    /// stat(path, path_len, *mut Stat) -> 0
+    pub const STAT: u32 = 10;
+    /// getcwd(buf, len) -> length of the path
+    pub const GETCWD: u32 = 11;
+    /// unlink(path, path_len) -> 0 (files and empty directories)
+    pub const UNLINK: u32 = 12;
+    /// mkdir(path, path_len) -> 0
+    pub const MKDIR: u32 = 13;
 }
 
 pub mod errno {
+    pub const ENOENT: i64 = 2;
+    pub const EIO: i64 = 5;
     pub const EBADF: i64 = 9;
     pub const EFAULT: i64 = 14;
+    pub const EEXIST: i64 = 17;
+    pub const ENOTDIR: i64 = 20;
+    pub const EISDIR: i64 = 21;
+    pub const EINVAL: i64 = 22;
+    pub const EMFILE: i64 = 24;
+    pub const EFBIG: i64 = 27;
+    pub const ENOSPC: i64 = 28;
+    pub const ERANGE: i64 = 34;
+    pub const ENAMETOOLONG: i64 = 36;
     pub const ENOSYS: i64 = 38;
+    pub const ENOTEMPTY: i64 = 39;
+}
+
+/// `open` flags. At least one of READ / WRITE is required.
+pub mod open_flags {
+    pub const READ: u64 = 1;
+    /// Writes always append to the end of the file.
+    pub const WRITE: u64 = 2;
+    /// Create the file if it does not exist (needs WRITE).
+    pub const CREATE: u64 = 4;
+    /// Empty the file first (needs WRITE).
+    pub const TRUNCATE: u64 = 8;
+}
+
+pub const KIND_FILE: u32 = 1;
+pub const KIND_DIR: u32 = 2;
+pub const MAX_PATH: u64 = 1024;
+/// Largest chunk one `read` of a file transfers.
+const MAX_READ: u64 = 64 * 1024;
+
+/// Result of `stat`; also part of `DirEntryInfo`. Layout shared with `ulib`.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Stat {
+    pub size: u64,
+    pub kind: u32,
+    pub _reserved: u32,
+    /// year, month, day, hour, minute, second
+    pub modified: [u16; 6],
+    pub _pad: u32,
+}
+
+/// One directory entry for `readdir`. Layout shared with `ulib`.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct DirEntryInfo {
+    pub stat: Stat,
+    pub name_len: u32,
+    pub _pad: u32,
+    /// UTF-8, not NUL-terminated (FAT32 long names have at most 255 UTF-16 units)
+    pub name: [u8; 256],
+}
+
+const _: () = assert!(size_of::<Stat>() == 32 && size_of::<DirEntryInfo>() == 296);
+
+fn fs_errno(e: FsError) -> i64 {
+    match e {
+        FsError::NotFound => errno::ENOENT,
+        FsError::NotADirectory => errno::ENOTDIR,
+        FsError::IsADirectory => errno::EISDIR,
+        FsError::AlreadyExists => errno::EEXIST,
+        FsError::DirectoryNotEmpty => errno::ENOTEMPTY,
+        FsError::InvalidName | FsError::InvalidPath => errno::EINVAL,
+        FsError::NoSpace => errno::ENOSPC,
+        FsError::FileTooLarge => errno::EFBIG,
+        FsError::NotFat32 | FsError::Corrupt(_) | FsError::Io(_) | FsError::NotMounted => errno::EIO,
+    }
+}
+
+fn stat_of(entry: &DirEntry) -> Stat {
+    let m = entry.modified;
+    Stat {
+        size: entry.size as u64,
+        kind: if entry.is_dir() { KIND_DIR } else { KIND_FILE },
+        modified: [
+            m.year,
+            m.month as u16,
+            m.day as u16,
+            m.hour as u16,
+            m.minute as u16,
+            m.second as u16,
+        ],
+        ..Stat::default()
+    }
 }
 
 type SysResult = Result<u64, i64>;
@@ -61,6 +166,13 @@ pub extern "C" fn dispatch(frame: &mut SyscallFrame) {
             task::yield_now();
             Ok(0)
         }
+        nr::OPEN => sys_open(a0, a1, a2),
+        nr::CLOSE => sys_close(a0),
+        nr::READDIR => sys_readdir(a0, a1),
+        nr::STAT => sys_stat(a0, a1, a2),
+        nr::GETCWD => sys_getcwd(a0, a1),
+        nr::UNLINK => sys_unlink(a0, a1),
+        nr::MKDIR => sys_mkdir(a0, a1),
         _ => Err(errno::ENOSYS),
     };
     frame.rax = match result {
@@ -75,20 +187,247 @@ fn accessible(addr: u64, len: u64, writable: bool) -> bool {
     with_current(|p| p.space.as_ref().is_some_and(|s| s.is_accessible(addr, len, writable))).unwrap_or(false)
 }
 
-fn sys_write(fd: u64, buf: u64, len: u64) -> SysResult {
-    if fd != 1 && fd != 2 {
-        return Err(errno::EBADF);
-    }
-    if !accessible(buf, len, false) {
+/// Copies a user buffer into the kernel (after checking it).
+fn copy_from_user(addr: u64, len: u64) -> Result<Vec<u8>, i64> {
+    if !accessible(addr, len, false) {
         return Err(errno::EFAULT);
     }
     // The process's page tables are active: the user buffer is directly readable
-    let data: Vec<u8> = unsafe { core::slice::from_raw_parts(buf as *const u8, len as usize) }.to_vec();
-    match with_current(|p| p.stdout.clone()) {
-        Some(Output::Capture(sink)) => without_interrupts(|| sink.lock().extend_from_slice(&data)),
-        _ => crate::print!("{}", String::from_utf8_lossy(&data)),
+    Ok(unsafe { core::slice::from_raw_parts(addr as *const u8, len as usize) }.to_vec())
+}
+
+/// Copies `data` to a user buffer (after checking it).
+fn copy_to_user(addr: u64, data: &[u8]) -> Result<(), i64> {
+    if !accessible(addr, data.len() as u64, true) {
+        return Err(errno::EFAULT);
+    }
+    unsafe { core::ptr::copy_nonoverlapping(data.as_ptr(), addr as *mut u8, data.len()) };
+    Ok(())
+}
+
+fn copy_struct_to_user<T: Copy>(addr: u64, value: &T) -> Result<(), i64> {
+    let bytes = unsafe { core::slice::from_raw_parts(value as *const T as *const u8, size_of::<T>()) };
+    copy_to_user(addr, bytes)
+}
+
+/// Reads a path argument and makes it absolute (relative to the process's cwd).
+fn user_path(addr: u64, len: u64) -> Result<String, i64> {
+    if len > MAX_PATH {
+        return Err(errno::ENAMETOOLONG);
+    }
+    let bytes = copy_from_user(addr, len)?;
+    let path = core::str::from_utf8(&bytes).map_err(|_| errno::EINVAL)?;
+    if path.is_empty() {
+        return Err(errno::ENOENT);
+    }
+    let cwd = with_current(|p| p.cwd.clone()).unwrap_or_else(|| String::from("/"));
+    Ok(fs::normalize(&cwd, path))
+}
+
+/// What `read`/`write` need to know about a descriptor (copied out of the table).
+enum Target {
+    Stdin,
+    Stdout(Output),
+    File {
+        path: String,
+        offset: u64,
+        readable: bool,
+        writable: bool,
+    },
+    Dir,
+}
+
+fn target(fd: u64) -> Result<Target, i64> {
+    with_current(|p| {
+        let handle = p.files.get(fd as usize).and_then(|h| h.as_ref()).ok_or(errno::EBADF)?;
+        Ok(match handle {
+            Handle::Stdin => Target::Stdin,
+            Handle::Stdout => Target::Stdout(p.stdout.clone()),
+            Handle::File {
+                path,
+                offset,
+                readable,
+                writable,
+            } => Target::File {
+                path: path.clone(),
+                offset: *offset,
+                readable: *readable,
+                writable: *writable,
+            },
+            Handle::Dir { .. } => Target::Dir,
+        })
+    })
+    .unwrap_or(Err(errno::EBADF))
+}
+
+fn sys_write(fd: u64, buf: u64, len: u64) -> SysResult {
+    let target = target(fd)?;
+    let data = copy_from_user(buf, len)?;
+    match target {
+        Target::Stdout(Output::Capture(sink)) => without_interrupts(|| sink.lock().extend_from_slice(&data)),
+        Target::Stdout(Output::Console) => crate::print!("{}", String::from_utf8_lossy(&data)),
+        Target::File {
+            path, writable: true, ..
+        } => {
+            fs::with_root(|fs| fs.append_file(&path, &data)).map_err(fs_errno)?;
+        }
+        Target::Dir => return Err(errno::EISDIR),
+        _ => return Err(errno::EBADF),
     }
     Ok(len)
+}
+
+fn sys_read(fd: u64, buf: u64, len: u64) -> SysResult {
+    match target(fd)? {
+        Target::Stdin => read_stdin(buf, len),
+        Target::File {
+            path,
+            offset,
+            readable: true,
+            ..
+        } => {
+            if !accessible(buf, len, true) {
+                return Err(errno::EFAULT);
+            }
+            let mut data = alloc::vec![0u8; len.min(MAX_READ) as usize];
+            let n = fs::with_root(|fs| fs.read_at(&path, offset, &mut data)).map_err(fs_errno)?;
+            copy_to_user(buf, &data[..n])?;
+            with_current(|p| {
+                if let Some(Some(Handle::File { offset, .. })) = p.files.get_mut(fd as usize) {
+                    *offset += n as u64;
+                }
+            });
+            Ok(n as u64)
+        }
+        Target::Dir => Err(errno::EISDIR),
+        _ => Err(errno::EBADF),
+    }
+}
+
+fn sys_open(path: u64, path_len: u64, flags: u64) -> SysResult {
+    use open_flags::*;
+    let path = user_path(path, path_len)?;
+    let (read, write) = (flags & READ != 0, flags & WRITE != 0);
+    if flags & !(READ | WRITE | CREATE | TRUNCATE) != 0 || !(read || write) {
+        return Err(errno::EINVAL);
+    }
+    if flags & (CREATE | TRUNCATE) != 0 && !write {
+        return Err(errno::EINVAL);
+    }
+    let handle = fs::with_root(|fs| match fs.lookup(&path) {
+        Ok(entry) if entry.is_dir() => {
+            if write {
+                return Err(FsError::IsADirectory);
+            }
+            Ok(Handle::Dir {
+                entries: fs.read_dir(&path)?,
+                next: 0,
+            })
+        }
+        Ok(_) | Err(FsError::NotFound) => {
+            let exists = fs.lookup(&path).is_ok();
+            if !exists && flags & CREATE == 0 {
+                return Err(FsError::NotFound);
+            }
+            if !exists || flags & TRUNCATE != 0 {
+                fs.write_file(&path, b"")?;
+            }
+            Ok(Handle::File {
+                path: path.clone(),
+                offset: 0,
+                readable: read,
+                writable: write,
+            })
+        }
+        Err(e) => Err(e),
+    })
+    .map_err(fs_errno)?;
+
+    with_current(|p| {
+        let fd = match p.files.iter().position(|h| h.is_none()) {
+            Some(free) => free,
+            None if p.files.len() < MAX_FDS => {
+                p.files.push(None);
+                p.files.len() - 1
+            }
+            None => return Err(errno::EMFILE),
+        };
+        p.files[fd] = Some(handle);
+        Ok(fd as u64)
+    })
+    .unwrap_or(Err(errno::EBADF))
+}
+
+fn sys_close(fd: u64) -> SysResult {
+    with_current(|p| match p.files.get_mut(fd as usize) {
+        Some(slot @ Some(_)) => {
+            *slot = None;
+            Ok(0)
+        }
+        _ => Err(errno::EBADF),
+    })
+    .unwrap_or(Err(errno::EBADF))
+}
+
+fn sys_readdir(fd: u64, info_addr: u64) -> SysResult {
+    let entry = with_current(|p| match p.files.get_mut(fd as usize) {
+        Some(Some(Handle::Dir { entries, next })) => {
+            let e = entries.get(*next).cloned();
+            if e.is_some() {
+                *next += 1;
+            }
+            Ok(e)
+        }
+        Some(Some(_)) => Err(errno::ENOTDIR),
+        _ => Err(errno::EBADF),
+    })
+    .unwrap_or(Err(errno::EBADF))?;
+    let Some(entry) = entry else {
+        return Ok(0);
+    };
+    let mut info = DirEntryInfo {
+        stat: stat_of(&entry),
+        name_len: 0,
+        _pad: 0,
+        name: [0; 256],
+    };
+    // A long name can be up to 255 UTF-16 units = more than 256 UTF-8 bytes: cut at a char boundary
+    let mut len = entry.name.len().min(info.name.len());
+    while !entry.name.is_char_boundary(len) {
+        len -= 1;
+    }
+    info.name[..len].copy_from_slice(&entry.name.as_bytes()[..len]);
+    info.name_len = len as u32;
+    copy_struct_to_user(info_addr, &info)?;
+    Ok(1)
+}
+
+fn sys_stat(path: u64, path_len: u64, stat_addr: u64) -> SysResult {
+    let path = user_path(path, path_len)?;
+    let entry = fs::with_root(|fs| fs.lookup(&path)).map_err(fs_errno)?;
+    copy_struct_to_user(stat_addr, &stat_of(&entry))?;
+    Ok(0)
+}
+
+fn sys_unlink(path: u64, path_len: u64) -> SysResult {
+    let path = user_path(path, path_len)?;
+    fs::with_root(|fs| fs.remove(&path)).map_err(fs_errno)?;
+    Ok(0)
+}
+
+fn sys_mkdir(path: u64, path_len: u64) -> SysResult {
+    let path = user_path(path, path_len)?;
+    fs::with_root(|fs| fs.create_dir(&path)).map_err(fs_errno)?;
+    Ok(0)
+}
+
+fn sys_getcwd(buf: u64, len: u64) -> SysResult {
+    let cwd = with_current(|p| p.cwd.clone()).unwrap_or_default();
+    if (cwd.len() as u64) > len {
+        return Err(errno::ERANGE);
+    }
+    copy_to_user(buf, cwd.as_bytes())?;
+    Ok(cwd.len() as u64)
 }
 
 /// The bytes a key press produces on stdin (like a terminal would send).
@@ -104,10 +443,7 @@ fn key_bytes(event: KeyEvent, out: &mut Vec<u8>) {
     }
 }
 
-fn sys_read(fd: u64, buf: u64, len: u64) -> SysResult {
-    if fd != 0 {
-        return Err(errno::EBADF);
-    }
+fn read_stdin(buf: u64, len: u64) -> SysResult {
     if !accessible(buf, len, true) {
         return Err(errno::EFAULT);
     }

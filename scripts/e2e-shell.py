@@ -55,6 +55,9 @@ STEPS = [
     ("write \"My Notes/today.txt\" written before the reboot\r", [], ["error"]),
     ("append \"My Notes/today.txt\" Grüße äöü\r", [], ["error"]),
     ("cat \"My Notes/today.txt\"\r", ["written before the reboot", "Grüße äöü"], []),
+    ("ls\r", ["hello.txt", "My Notes/"], ["error"]),  # /bin/ls in the shell's cwd
+    ("cp \"My Notes/today.txt\" \"/My copy.txt\"\r", [], ["error"]),  # NUL-separated args keep the spaces
+    ("cat \"/My copy.txt\"\r", ["written before the reboot", "Grüße äöü"], ["error"]),
     ("cd ..\r", [], ["error"]),
     ("df\r", ["KERNELTRY", "free"], []),
     ("date\r", ["20"], []),
@@ -63,7 +66,8 @@ STEPS = [
     ('echo "unterminated\r', ["unterminated"], []),
     ("echo Grüße äöü\r", ["Grüße äöü"], []),
     # user space: programs from /bin on the disk, running in ring 3
-    ("ls /bin\r", ["hello", "fault", "upper"], []),
+    ("ls /bin\r", ["hello", "fault", "upper", "cat", "cp", "ls", "fstest"], []),
+    ("fstest\r", ["fstest: all checks passed"], ["FAIL"]),
     ("hello e2e world\r", ["Hello from user space! I am process", "arg 1: e2e", "arg 2: world", "Bye!"], ["error"]),
     ("upp\t\rhello Welt äöü\r", ["Type a line: hello Welt äöü", "HELLO WELT ÄÖÜ"], ["error"]),  # completion + stdin
     ("fault null\r", ["fault was killed: page fault at 0x0"], []),
@@ -77,6 +81,8 @@ STEPS = [
 PERSIST_STEPS = [
     ("cat \"/docs/My Notes/today.txt\"\r", ["written before the reboot", "Grüße äöü"], ["error"]),
     ("ls /docs\r", ["My Notes/", "hello.txt"], []),
+    ("cat \"/My copy.txt\"\r", ["Grüße äöü"], ["error"]),
+    ("rm \"/My copy.txt\"\r", [], ["error"]),
     ("rm \"/docs/My Notes/today.txt\"\r", [], ["error"]),
     ("rm \"/docs/My Notes\"\r", [], ["error"]),
     ("write /persist.txt survived\r", [], ["error"]),
