@@ -129,12 +129,14 @@ pub enum Handle {
     Stdin,
     /// The process's `Output` (stdout and stderr).
     Stdout,
-    /// A file; reads continue at `offset`, writes always append.
+    /// A file; reads and writes happen at `offset` (writes with `append`
+    /// always go to the end).
     File {
         path: String,
         offset: u64,
         readable: bool,
         writable: bool,
+        append: bool,
     },
     /// A directory opened for `readdir`: a snapshot of its entries.
     Dir { entries: Vec<DirEntry>, next: usize },
@@ -431,6 +433,11 @@ pub fn wait_child(pid: Pid) -> Result<ExitStatus, WaitError> {
     without_interrupts(|| PROCESSES.lock().remove(&pid))
         .and_then(|p| p.status)
         .ok_or(WaitError::NotAChild)
+}
+
+/// Whether thread `tid` is a user process (still in the table).
+pub fn is_process(tid: Tid) -> bool {
+    without_interrupts(|| PROCESSES.lock().contains_key(&tid))
 }
 
 /// Parent of process `pid`, if it is a process with a parent.

@@ -39,7 +39,7 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 | # | Milestone | Status | Tests |
 |---|---|---|---|
 | 21 | Pipes and redirection (`a \| b`, `>`, `>>`, `<`) | ✅ | 4 pipe unit tests (EOF, EPIPE, full pipe with a writer thread, abort), `pipetest` (17 checks incl. 200 KB from a child), scripted `sh` pipeline session, 8 E2E steps |
-| 22 | System information as syscalls (replace `kshell`), `ps`/`mem`/... as programs, `rename` + seek | ⬜ | |
+| 22 | System information as syscalls (replace `kshell`), `ps`/`mem`/... as programs, `rename` + seek | ✅ | `write_at` unit test, `fstest` +17 checks (seek, gaps, APPEND, rename, ESPIPE), integration test for all 10 programs, 5 E2E steps |
 | 23 | Full-screen text editor as a user program | ⬜ | |
 
 ## Log
@@ -161,6 +161,12 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   errors to stderr, Ctrl+C in a pipeline kills the rest of it. `ulib::io::read_line` returns `None` at EOF / Ctrl+D and only
   echoes on the console; `read_all`, `read_stdin`, `read_input`. `cat`/`sort` read stdin, new `wc`, `grep`, `pipetest`.
 
+- **2026-10-24** – M22: syscalls 25–28 `sysinfo` (176-byte struct: uptime, memory, kernel heap, file system, CPU count/vendor/
+  brand, CMOS date), `proclist` (64-byte entries: tid, parent, state, user/kernel, CPU ticks, name), `rename`, `seek`.
+  File descriptors now have one position for reads *and* writes (`FatFs::write_at`: overwrite, extend, zero-filled gaps);
+  new `open` flag APPEND (used by `>>`). New programs `ps`, `mem`, `uptime`, `df`, `date`, `mkdir`, `rm`, `touch`, `stat`, `mv`;
+  these names are no longer offered through `kshell` (the kernel shell keeps its built-ins as fallback).
+
 ## Open items / later
 - AHCI uses polling; switching to completion interrupts (MSI or the PCI interrupt line) would free the CPU during I/O.
 - Thread-level sleeping mutex (today all shared state uses spin locks with interrupts disabled).
@@ -173,11 +179,12 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 - `kshell`/`kcommands` are a bridge: the information commands (mem, ps, cpu, acpi, lspci, ...) should become real syscalls
   and programs. `/bin/sh`: no scripts, no environment variables, no `2>`, operators must be separate words, built-in output
   in a pipeline must fit into one pipe (64 KiB) because it is written before the next stage starts.
-- File syscalls: writes always append (no seek, no overwrite in the middle); `read` re-walks the cluster chain per call;
-  directory handles are snapshots; no rename syscall yet. Without `/bin` on the disk, the kernel shell has no `ls`/`cat`.
+- File syscalls: `read`/`write_at` re-walk the cluster chain per call; directory handles are snapshots; no truncate-to-length.
+- Still behind `kshell`: cpu, acpi, lspci, disk, hexdump, memmap, layout, demo, colors, version, int3, panic, reboot, poweroff,
+  write, append, echo, sleep, clear, help. Without `/bin` on the disk, the kernel shell has no `ls`/`cat`.
 
 ## Next step
-**M22 – system information as syscalls:** a `sysinfo` syscall (memory, uptime, CPU vendor, disk) and a process/thread list
-syscall; `ps`, `mem`, `uptime`, `df` as programs in `user/`; file syscalls `rename` and `seek` (+ writing at an offset in
-FAT32). Shrink `kshell` to the commands that still need the kernel (poweroff, reboot, layout, demo, hexdump, acpi, lspci, …).
-Tests: syscall unit/user tests, E2E against the new programs. Then **M23** (text editor).
+**M23 – full-screen text editor (`/bin/edit`):** a user program that loads a file into a line buffer, draws it with cursor
+addressing (needs ANSI cursor positioning `ESC[row;colH` and a "screen size" query in the console/syscall), moves with the
+arrow keys, inserts/deletes text, saves with Ctrl+S (write + truncate) and quits with Ctrl+Q. Tests: buffer logic as pure
+functions inside the program's own test mode (`edit --selftest`), E2E: open, type, save, `cat` the result.

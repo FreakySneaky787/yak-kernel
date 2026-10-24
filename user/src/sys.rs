@@ -29,6 +29,10 @@ pub const PIPE: u64 = 21;
 pub const DUP: u64 = 22;
 pub const DUP2: u64 = 23;
 pub const ISATTY: u64 = 24;
+pub const SYSINFO: u64 = 25;
+pub const PROCLIST: u64 = 26;
+pub const RENAME: u64 = 27;
+pub const SEEK: u64 = 28;
 
 pub const STDIN: u64 = 0;
 pub const STDOUT: u64 = 1;
@@ -109,6 +113,8 @@ pub const O_READ: u64 = 1;
 pub const O_WRITE: u64 = 2;
 pub const O_CREATE: u64 = 4;
 pub const O_TRUNCATE: u64 = 8;
+/// Every write goes to the end of the file.
+pub const O_APPEND: u64 = 16;
 
 pub const KIND_FILE: u32 = 1;
 pub const KIND_DIR: u32 = 2;
@@ -245,4 +251,89 @@ pub fn dup2(fd: u64, new_fd: u64) -> i64 {
 /// Whether `fd` is the console (keyboard/screen) rather than a file or pipe.
 pub fn isatty(fd: u64) -> bool {
     unsafe { syscall3(ISATTY, fd, 0, 0) == 1 }
+}
+
+/// Same layout as the kernel's `process::syscall::SysInfo`.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct SysInfo {
+    pub uptime_ms: u64,
+    pub ticks: u64,
+    pub mem_usable: u64,
+    pub mem_free: u64,
+    pub heap_total: u64,
+    pub heap_used: u64,
+    pub fs_total: u64,
+    pub fs_free: u64,
+    pub fs_cluster_size: u32,
+    pub timer_hz: u32,
+    pub cpus: u32,
+    pub _pad: u32,
+    /// year, month, day, hour, minute, second
+    pub date: [u16; 6],
+    pub _pad2: u32,
+    pub fs_label: [u8; 16],
+    pub cpu_vendor: [u8; 16],
+    pub cpu_brand: [u8; 48],
+}
+
+/// Same layout as the kernel's `process::syscall::ProcInfo`.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct ProcInfo {
+    pub tid: u64,
+    pub cpu_ticks: u64,
+    pub parent: u64,
+    pub state: u32,
+    pub user: u32,
+    pub name: [u8; 32],
+}
+
+pub const PROC_RUNNING: u32 = 0;
+pub const PROC_READY: u32 = 1;
+pub const PROC_SLEEPING: u32 = 2;
+pub const PROC_WAIT_INPUT: u32 = 3;
+pub const PROC_JOIN: u32 = 4;
+pub const PROC_WAIT_PIPE: u32 = 5;
+pub const PROC_DEAD: u32 = 6;
+
+const _: () = assert!(core::mem::size_of::<SysInfo>() == 176 && core::mem::size_of::<ProcInfo>() == 64);
+
+/// A zero-terminated (or completely filled) byte field as text.
+pub fn field_str(bytes: &[u8]) -> &str {
+    let len = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+    core::str::from_utf8(&bytes[..len]).unwrap_or("?")
+}
+
+pub fn sysinfo() -> SysInfo {
+    let mut info: SysInfo = unsafe { core::mem::zeroed() };
+    unsafe { syscall3(SYSINFO, &mut info as *mut SysInfo as u64, 0, 0) };
+    info
+}
+
+/// Fills `out` with one entry per thread; returns how many were written.
+pub fn proclist(out: &mut [ProcInfo]) -> usize {
+    let n = unsafe { syscall3(PROCLIST, out.as_mut_ptr() as u64, out.len() as u64, 0) };
+    n.max(0) as usize
+}
+
+pub fn rename(from: &str, to: &str) -> i64 {
+    unsafe {
+        syscall4(
+            RENAME,
+            from.as_ptr() as u64,
+            from.len() as u64,
+            to.as_ptr() as u64,
+            to.len() as u64,
+        )
+    }
+}
+
+pub const SEEK_SET: u64 = 0;
+pub const SEEK_CUR: u64 = 1;
+pub const SEEK_END: u64 = 2;
+
+/// Moves the read/write position of a file; returns the new offset or -errno.
+pub fn seek(fd: u64, offset: i64, whence: u64) -> i64 {
+    unsafe { syscall3(SEEK, fd, offset as u64, whence) }
 }

@@ -283,10 +283,13 @@ pub fn complete_command(prefix: &str) -> Vec<String> {
 /// Where the shell looks for programs typed by name.
 pub const BIN_DIR: &str = "/bin";
 
-/// Built-ins that only make sense inside the kernel shell (they use its own
-/// state); `/bin/sh` has its own versions. All others are reachable from
-/// user space through the `kshell` system call.
-pub const KSHELL_EXCLUDED: &[&str] = &["cd", "pwd", "history", "run"];
+/// Built-ins not offered to user space through `kshell`: the ones that use
+/// the kernel shell's own state (`/bin/sh` has its own versions) and the ones
+/// that exist as programs in /bin since M22 (built on real system calls).
+pub const KSHELL_EXCLUDED: &[&str] = &[
+    "cd", "pwd", "history", "run", // shell state
+    "mem", "uptime", "ps", "df", "date", "mkdir", "rm", "touch", "stat", "mv", // /bin programs
+];
 
 /// Names of the built-ins available through `kshell`.
 pub fn kshell_commands() -> Vec<&'static str> {
@@ -1126,9 +1129,9 @@ mod tests {
         let mut out = String::new();
         assert_eq!(shell.execute_builtin("echo from kshell", &mut out), Some(true));
         assert_eq!(out, "from kshell\n");
-        assert_eq!(
-            shell.execute_builtin("stat hello.txt", &mut out),
-            Some(true),
+        assert_eq!(shell.execute_builtin("write kshell.tmp x", &mut out), Some(true));
+        assert!(
+            fs::with_root(|fs| fs.remove("/docs/kshell.tmp")).is_ok(),
             "relative to the cwd"
         );
         assert_eq!(shell.execute_builtin("sleep x", &mut out), Some(false));
@@ -1136,8 +1139,8 @@ mod tests {
             assert_eq!(shell.execute_builtin(excluded, &mut out), None, "{}", excluded);
         }
         let names = kshell_commands();
-        assert!(names.contains(&"mem") && names.contains(&"poweroff"));
-        assert!(!names.contains(&"cd") && !names.contains(&"run"));
+        assert!(names.contains(&"lspci") && names.contains(&"poweroff"));
+        assert!(!names.contains(&"cd") && !names.contains(&"run") && !names.contains(&"mem"));
     }
 
     #[test_case]

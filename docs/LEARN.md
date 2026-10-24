@@ -221,6 +221,13 @@ Short explanations of every subsystem: what it is and why we need it.
   refers to". Programs only ever write to fd 1.
 - Programs ask `isatty` whether they talk to a person (echo typed characters, Ctrl+D ends input) or to a file/pipe.
 
+## M22 – System information for programs
+- Commands like `ps` or `mem` need data only the kernel has. Instead of letting programs call kernel code directly, the
+  kernel offers **system calls that fill a struct** in the program's memory (`sysinfo`, `proclist`). The struct layout is
+  fixed (`repr(C)`) and checked for its size on both sides, so kernel and programs agree byte for byte.
+- An open file has one **position**: `read` and `write` continue there, `seek` moves it. Writing in the middle overwrites,
+  writing at the end grows the file, and writing after seeking past the end leaves a gap that reads as zeros.
+
 ## Tooling – GNU ld and binutils
 - rustc compiles our code into object files; a **linker** combines them into the final ELF according to `kernel/linker.ld`
   (load address, section order, segments). We use **GNU ld** (`ld.bfd`) for that.

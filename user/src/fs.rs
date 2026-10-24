@@ -35,6 +35,7 @@ impl fmt::Display for Error {
             EINVAL => "invalid argument",
             EMFILE => "too many open files",
             27 => "file too large",
+            29 => "not seekable",
             28 => "no space left on the disk",
             ERANGE => "buffer too small",
             36 => "path too long",
@@ -80,6 +81,11 @@ impl File {
 
     pub fn write(&mut self, data: &[u8]) -> Result<usize, Error> {
         check(sys::write(self.fd, data)).map(|n| n as usize)
+    }
+
+    /// Moves the position (`sys::SEEK_SET` / `SEEK_CUR` / `SEEK_END`); returns the new offset.
+    pub fn seek(&mut self, offset: i64, whence: u64) -> Result<u64, Error> {
+        check(sys::seek(self.fd, offset, whence))
     }
 }
 
@@ -145,6 +151,11 @@ impl Drop for Dir {
 pub fn stat(path: &str) -> Result<Stat, Error> {
     let mut st = Stat::default();
     check(sys::stat(path, &mut st)).map(|_| st)
+}
+
+/// Renames or moves a file or directory.
+pub fn rename(from: &str, to: &str) -> Result<(), Error> {
+    check(sys::rename(from, to)).map(|_| ())
 }
 
 /// Changes the current directory.

@@ -1079,6 +1079,55 @@ impl<D: BlockDevice> FatFs<D> {
         self.sync()
     }
 
+    /// Writes `data` into an existing file at `offset`: overwrites what is
+    /// there and extends the file if needed. A gap between the end of the
+    /// file and `offset` is filled with zeros.
+    pub fn write_at(&mut self, path: &str, offset: u64, data: &[u8]) -> Result<()> {
+        let entry = self.lookup(path)?;
+        if entry.is_dir() {
+            return Err(FsError::IsADirectory);
+        }
+        let size = entry.size as u64;
+        if offset
+            .checked_add(data.len() as u64)
+            .is_none_or(|end| end > u32::MAX as u64)
+        {
+            return Err(FsError::FileTooLarge);
+        }
+        let mut filled = size;
+        while filled < offset {
+            let zeros = vec![0u8; (offset - filled).min(64 * 1024) as usize];
+            self.append_file(path, &zeros)?;
+            filled += zeros.len() as u64;
+        }
+        let overlap_end = (offset + data.len() as u64).min(size);
+        if offset < overlap_end {
+            let chain = self.chain(entry.cluster)?;
+            let cluster_size = self.bytes_per_cluster as u64;
+            let mut buf = vec![0u8; self.bytes_per_cluster];
+            let mut pos = offset;
+            while pos < overlap_end {
+                let cluster = *chain
+                    .get((pos / cluster_size) as usize)
+                    .ok_or(FsError::Corrupt("file shorter than its size"))?;
+                self.read_cluster(cluster, &mut buf)?;
+                let within = (pos % cluster_size) as usize;
+                let take = (self.bytes_per_cluster - within).min((overlap_end - pos) as usize);
+                let src = (pos - offset) as usize;
+                buf[within..within + take].copy_from_slice(&data[src..src + take]);
+                self.write_cluster(cluster, &buf)?;
+                pos += take as u64;
+            }
+            self.update_entry(&entry, entry.cluster, entry.size)?; // new modification time
+        }
+        let rest = &data[(overlap_end.max(offset) - offset) as usize..];
+        if rest.is_empty() {
+            self.sync()
+        } else {
+            self.append_file(path, rest)
+        }
+    }
+
     pub fn create_dir(&mut self, path: &str) -> Result<()> {
         let (parent, name) = Self::split_parent(path)?;
         validate_name(name)?;
@@ -1177,6 +1226,26 @@ mod tests {
         let mut disk = RamDisk::new(8192);
         format(&mut disk, "TEST").unwrap();
         FatFs::mount(disk).unwrap()
+    }
+
+    #[test_case]
+    fn write_at_overwrites_and_extends() {
+        let mut fs = ram_fs();
+        let mut expected: Vec<u8> = (0..1500u32).map(|i| (i % 251) as u8).collect();
+        fs.write_file("/w.bin", &expected).unwrap();
+        // inside, across a cluster boundary (512 bytes), past the end, with a gap
+        for (offset, len) in [(10u64, 5usize), (500, 30), (1490, 40), (1600, 20)] {
+            let data: Vec<u8> = (0..len).map(|i| 200 - i as u8).collect();
+            fs.write_at("/w.bin", offset, &data).unwrap();
+            let end = offset as usize + len;
+            if expected.len() < end {
+                expected.resize(end, 0);
+            }
+            expected[offset as usize..end].copy_from_slice(&data);
+            assert_eq!(fs.read_file("/w.bin").unwrap(), expected, "after writing at {}", offset);
+        }
+        assert_eq!(fs.lookup("/w.bin").unwrap().size, 1620);
+        assert_eq!(fs.write_at("/missing", 0, b"x"), Err(FsError::NotFound));
     }
 
     #[test_case]

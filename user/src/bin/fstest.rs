@@ -123,6 +123,68 @@ fn main(_args: ulib::Args) -> i32 {
         Err(_) => check(false, "open dir"),
     }
 
+    // positioned writes, seek, append, rename
+    match File::open_with(FILE, sys::O_READ | sys::O_WRITE) {
+        Ok(mut f) => {
+            check(f.write(b"HEAD") == Ok(4), "overwrite the start");
+            check(f.seek(0, sys::SEEK_END) == Ok(3 * CHUNK as u64), "seek to the end");
+            check(f.write(b"TAIL") == Ok(4), "write at the end");
+            check(f.seek(-8, sys::SEEK_CUR) == Ok(3 * CHUNK as u64 - 4), "seek relative");
+            let mut buf = [0u8; 8];
+            check(f.read(&mut buf) == Ok(8), "read around the old end");
+            let mut expected = [0u8; 8];
+            for (i, b) in expected[..4].iter_mut().enumerate() {
+                *b = pattern(3 * CHUNK - 4 + i);
+            }
+            expected[4..].copy_from_slice(b"TAIL");
+            check(buf == expected, "old end + TAIL");
+            check(
+                f.seek(-1, sys::SEEK_SET).err() == Some(Error(EINVAL)),
+                "negative offset -> EINVAL",
+            );
+            check(f.seek(20_000, sys::SEEK_SET) == Ok(20_000), "seek past the end");
+            check(f.write(b"X") == Ok(1), "write after a gap");
+            check(f.seek(0, sys::SEEK_SET) == Ok(0), "back to the start");
+            let mut head = [0u8; 6];
+            check(
+                f.read(&mut head) == Ok(6) && &head[..4] == b"HEAD" && head[4] == pattern(4),
+                "HEAD overwrote 4 bytes only",
+            );
+            check(
+                f.seek(15_010, sys::SEEK_SET).is_ok() && f.read(&mut buf) == Ok(8) && buf == [0; 8],
+                "the gap reads as zeros",
+            );
+        }
+        Err(_) => check(false, "open read+write"),
+    }
+    check(fs::stat(FILE).map(|s| s.size) == Ok(20_001), "size after the gap write");
+    match File::open_with(FILE, sys::O_WRITE | sys::O_APPEND) {
+        Ok(mut f) => {
+            let _ = f.seek(0, sys::SEEK_SET);
+            check(f.write(b"Z") == Ok(1), "append");
+        }
+        Err(_) => check(false, "open for append"),
+    }
+    check(
+        fs::stat(FILE).map(|s| s.size) == Ok(20_002),
+        "APPEND ignores the position",
+    );
+    let moved = "fstest.tmp/moved.bin";
+    check(fs::rename(FILE, moved).is_ok(), "rename");
+    check(
+        fs::stat(FILE).err() == Some(Error(ENOENT)) && fs::stat(moved).is_ok(),
+        "renamed",
+    );
+    check(fs::rename(moved, FILE).is_ok(), "rename back");
+    let mut fds = [0u32; 2];
+    sys::pipe(&mut fds);
+    check(
+        sys::seek(fds[0] as u64, 0, sys::SEEK_SET) == -29,
+        "seek on a pipe -> ESPIPE",
+    );
+    sys::close(fds[0] as u64);
+    sys::close(fds[1] as u64);
+
     // descriptor table limit: 3 standard + 29 more
     let mut opened = 0;
     let err = loop {

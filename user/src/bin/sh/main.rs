@@ -295,9 +295,7 @@ impl Command {
         }
         if let Some((path, append)) = &self.output {
             let mut flags = sys::O_WRITE | sys::O_CREATE;
-            if !append {
-                flags |= sys::O_TRUNCATE;
-            }
+            flags |= if *append { sys::O_APPEND } else { sys::O_TRUNCATE };
             let fd = sys::open(path, flags);
             if fd < 0 {
                 return Err(alloc::format!("{}: {}", path, fs::Error(-fd)));

@@ -119,7 +119,7 @@
   | 4 | `getpid()` | |
   | 5 | `uptime_ms()` | |
   | 6 | `yield()` | |
-  | 7 | `open(path, len, flags)` | flags READ=1, WRITE=2 (appends), CREATE=4, TRUNCATE=8; a directory opens for `readdir` |
+  | 7 | `open(path, len, flags)` | flags READ=1, WRITE=2, CREATE=4, TRUNCATE=8, APPEND=16; a directory opens for `readdir` |
   | 8 | `close(fd)` | |
   | 9 | `readdir(fd, *DirEntryInfo)` | 1 = entry written, 0 = end; 296-byte `repr(C)` struct shared with `ulib` |
   | 10 | `stat(path, len, *Stat)` | 32-byte `repr(C)`: size, kind (1 file, 2 dir), modified time |
@@ -137,6 +137,10 @@
   | 22 | `dup(fd)` | lowest free fd for the same object |
   | 23 | `dup2(fd, new_fd)` | closes what was at `new_fd` |
   | 24 | `isatty(fd)` | 1 for the console (stdin, stdout to the console), else 0 |
+  | 25 | `sysinfo(*SysInfo)` | 176 bytes: uptime, ticks, memory, kernel heap, FS size/free/label, CPUs, CPU vendor/brand, date |
+  | 26 | `proclist(*[ProcInfo], max)` | one 64-byte entry per thread (tid, cpu ticks, parent, state, user?, name) |
+  | 27 | `rename(from, len, to, len)` | |
+  | 28 | `seek(fd, offset, whence)` | SET/CUR/END for files, `-ESPIPE` otherwise; past the end is allowed (gap = zeros on write) |
 - **Pipes** (`process::pipe`): bounded queue (64 KiB) + reader/writer counts. A descriptor holds a `PipeEnd`; `Clone`
   (dup, dup2, spawn) increments, `Drop` (close, process exit) decrements and notifies. Read blocks while empty with writers,
   returns 0 without; write blocks while full with readers, `EPIPE` without. Waiters sleep on `Wait::Pipe(id)`; the pipe lock is
@@ -162,7 +166,8 @@
   for arrows, Home/End, Delete, PageUp/Down, Insert); `keys::Decoder` turns them back into `KeyEvent`s. Order of lookup:
   sh built-ins, kernel built-ins (`kshell`), program path / `/bin/<name>`.
 - **Files**: each process has a cwd (inherited from the spawner, paths are normalized against it) and up to 32 file descriptors
-  (`process::Handle`): 0 stdin, 1/2 the process's `Output`, then files (path + read offset, writes append via `append_file`)
+  (`process::Handle`): 0 stdin, 1/2 the process's `Output`, then files (path + one offset for reads and writes; writes use
+  `FatFs::write_at`, or `append_file` with the APPEND flag)
   and directories (snapshot of the entries at `open`). Handlers copy what they need out of the table, do the disk I/O
   without holding `PROCESSES` (only `fs::ROOT`), then update the descriptor. `read` of a file uses `FatFs::read_at`, ≤ 64 KiB per call.
   FS errors map to Linux errno values (`ENOENT`, `EISDIR`, ...).

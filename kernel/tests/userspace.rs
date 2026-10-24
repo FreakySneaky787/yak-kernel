@@ -154,6 +154,30 @@ extern "C" fn kmain() -> ! {
         assert!(out.contains(expected), "missing {:?} in:\n{}", expected, out);
     }
 
+    // M22: system information and file operations as programs
+    let (_, out) = run("ps", "");
+    assert!(
+        out.contains("TID") && out.contains("main") && out.contains("idle"),
+        "{}",
+        out
+    );
+    assert!(
+        out.lines().any(|l| l.contains("user") && l.ends_with("ps")),
+        "ps does not list itself:\n{}",
+        out
+    );
+    assert!(run("mem", "").1.contains("MiB usable"));
+    assert!(run("uptime", "").1.contains("ticks at 100 Hz"));
+    assert!(run("df", "").1.contains("KERNELTRY"));
+    assert!(run("date", "").1.starts_with("20"));
+    assert_eq!(run("mkdir", "/m22").0, ExitStatus::Exited(0));
+    assert_eq!(run("touch", "/m22/a.txt").0, ExitStatus::Exited(0));
+    assert_eq!(run("mv", "/m22/a.txt /m22/b.txt").0, ExitStatus::Exited(0));
+    assert!(run("stat", "/m22/b.txt").1.contains("size:      0 bytes"));
+    assert_eq!(run("rm", "/m22").0, ExitStatus::Exited(1), "directory not empty");
+    assert_eq!(run("rm", "/m22/b.txt /m22").0, ExitStatus::Exited(0));
+    assert!(fs::with_root(|fs| fs.lookup("/m22")).is_err());
+
     assert_eq!(process::count(), 0);
     serial_println!("[ok]");
     exit(ExitCode::Success)

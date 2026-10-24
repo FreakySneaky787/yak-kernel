@@ -49,7 +49,7 @@ STEPS = [
     ("layout de\r", ["keyboard layout: De"], []),
     ("sleep 100\r", ["slept 100 ms"], []),
     ("int3\r", ["breakpoint handled"], []),
-    ("ps\r", ["TID", "main", "idle"], []),
+    ("ps\r", ["TID", "main", "idle", "user", "sh"], []),  # /bin/ps via proclist
     ("demo 3\r", ["worker 1", "worker 2", "worker 3", "found 3245 primes", "all workers done"], []),
     ("lspci\r", ["SATA controller", "host bridge"], []),
     ("disk\r", ["QEMU HARDDISK", "64 MiB", "Atapi"], []),
@@ -96,6 +96,12 @@ STEPS = [
     ("grep sh /ps.txt\r", ["sh"], ["error"]),
     ("fault spin | cat\r" + PAUSE + CTRL_C, ["fault was killed: interrupted"], []),
     ("pipetest\r", ["pipetest: all checks passed"], ["FAIL"]),
+    # file operations as programs (M22)
+    ("touch /t1.txt\r", [], ["error"]),
+    ("mv /t1.txt /docs\r", [], ["error"]),
+    ("stat /docs/t1.txt\r", ["type:      file", "size:      0 bytes"], ["error"]),
+    ("rm /docs/t1.txt\r", [], ["error"]),
+    ("ls /docs\r", ["hello.txt"], ["t1.txt"]),
     ("hello e2e world\r", ["Hello from user space! I am process", "arg 1: e2e", "arg 2: world", "Bye!"], ["error"]),
     ("upp\t\rhello Welt äöü\r", ["Type a line: hello Welt äöü", "HELLO WELT ÄÖÜ"], ["error"]),  # completion + stdin
     ("fault null\r", ["fault was killed: page fault at 0x0"], []),

@@ -74,6 +74,14 @@ pub mod nr {
     pub const DUP2: u32 = 23;
     /// isatty(fd) -> 1 if fd is the console, 0 otherwise
     pub const ISATTY: u32 = 24;
+    /// sysinfo(*mut SysInfo) -> 0
+    pub const SYSINFO: u32 = 25;
+    /// proclist(*mut [ProcInfo], max) -> number of entries written (all threads)
+    pub const PROCLIST: u32 = 26;
+    /// rename(from, from_len, to, to_len) -> 0
+    pub const RENAME: u32 = 27;
+    /// seek(fd, offset, whence: 0 = start, 1 = current, 2 = end) -> new offset
+    pub const SEEK: u32 = 28;
 }
 
 pub mod errno {
@@ -94,6 +102,7 @@ pub mod errno {
     pub const EMFILE: i64 = 24;
     pub const EFBIG: i64 = 27;
     pub const ENOSPC: i64 = 28;
+    pub const ESPIPE: i64 = 29;
     pub const ERANGE: i64 = 34;
     pub const ENAMETOOLONG: i64 = 36;
     pub const ENOSYS: i64 = 38;
@@ -110,6 +119,8 @@ pub mod open_flags {
     pub const CREATE: u64 = 4;
     /// Empty the file first (needs WRITE).
     pub const TRUNCATE: u64 = 8;
+    /// Every write goes to the end of the file (needs WRITE).
+    pub const APPEND: u64 = 16;
 }
 
 pub const KIND_FILE: u32 = 1;
@@ -234,6 +245,10 @@ pub extern "C" fn dispatch(frame: &mut SyscallFrame) {
         nr::DUP => sys_dup(a0),
         nr::DUP2 => sys_dup2(a0, a1),
         nr::ISATTY => sys_isatty(a0),
+        nr::SYSINFO => sys_sysinfo(a0),
+        nr::PROCLIST => sys_proclist(a0, a1),
+        nr::RENAME => sys_rename(a0, a1, a2, a3),
+        nr::SEEK => sys_seek(a0, a1 as i64, a2),
         _ => Err(errno::ENOSYS),
     };
     frame.rax = match result {
@@ -294,6 +309,7 @@ enum Target {
         offset: u64,
         readable: bool,
         writable: bool,
+        append: bool,
     },
     Dir,
     Pipe(PipeEnd),
@@ -310,11 +326,13 @@ fn target(fd: u64) -> Result<Target, i64> {
                 offset,
                 readable,
                 writable,
+                append,
             } => Target::File {
                 path: path.clone(),
                 offset: *offset,
                 readable: *readable,
                 writable: *writable,
+                append: *append,
             },
             Handle::Dir { .. } => Target::Dir,
             Handle::Pipe(end) => Target::Pipe(end.clone()),
@@ -326,7 +344,28 @@ fn target(fd: u64) -> Result<Target, i64> {
 fn sys_write(fd: u64, buf: u64, len: u64) -> SysResult {
     let target = target(fd)?;
     let data = copy_from_user(buf, len)?;
+    if let Target::File {
+        path,
+        offset,
+        writable: true,
+        append: false,
+        ..
+    } = &target
+    {
+        // positioned write; the descriptor's offset moves on
+        fs::with_root(|fs| fs.write_at(path, *offset, &data)).map_err(fs_errno)?;
+        set_offset(fd, offset + data.len() as u64);
+        return Ok(len);
+    }
     write_target(target, &data)
+}
+
+fn set_offset(fd: u64, new: u64) {
+    with_current(|p| {
+        if let Some(Some(Handle::File { offset, .. })) = p.files.get_mut(fd as usize) {
+            *offset = new;
+        }
+    });
 }
 
 /// Writes `data` to what a descriptor refers to.
@@ -373,11 +412,7 @@ fn sys_read(fd: u64, buf: u64, len: u64) -> SysResult {
             let mut data = alloc::vec![0u8; len.min(MAX_READ) as usize];
             let n = fs::with_root(|fs| fs.read_at(&path, offset, &mut data)).map_err(fs_errno)?;
             copy_to_user(buf, &data[..n])?;
-            with_current(|p| {
-                if let Some(Some(Handle::File { offset, .. })) = p.files.get_mut(fd as usize) {
-                    *offset += n as u64;
-                }
-            });
+            set_offset(fd, offset + n as u64);
             Ok(n as u64)
         }
         Target::Pipe(end) if !end.write => {
@@ -463,10 +498,10 @@ fn sys_open(path: u64, path_len: u64, flags: u64) -> SysResult {
     use open_flags::*;
     let path = user_path(path, path_len)?;
     let (read, write) = (flags & READ != 0, flags & WRITE != 0);
-    if flags & !(READ | WRITE | CREATE | TRUNCATE) != 0 || !(read || write) {
+    if flags & !(READ | WRITE | CREATE | TRUNCATE | APPEND) != 0 || !(read || write) {
         return Err(errno::EINVAL);
     }
-    if flags & (CREATE | TRUNCATE) != 0 && !write {
+    if flags & (CREATE | TRUNCATE | APPEND) != 0 && !write {
         return Err(errno::EINVAL);
     }
     let handle = fs::with_root(|fs| match fs.lookup(&path) {
@@ -492,6 +527,7 @@ fn sys_open(path: u64, path_len: u64, flags: u64) -> SysResult {
                 offset: 0,
                 readable: read,
                 writable: write,
+                append: flags & APPEND != 0,
             })
         }
         Err(e) => Err(e),
@@ -712,6 +748,162 @@ fn sys_kcommands(buf: u64, len: u64) -> SysResult {
     }
     copy_to_user(buf, names.as_bytes())?;
     Ok(names.len() as u64)
+}
+
+/// System overview for `mem`, `uptime`, `df`, `date`. Layout shared with `ulib`.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct SysInfo {
+    pub uptime_ms: u64,
+    pub ticks: u64,
+    pub mem_usable: u64,
+    pub mem_free: u64,
+    pub heap_total: u64,
+    pub heap_used: u64,
+    pub fs_total: u64,
+    pub fs_free: u64,
+    pub fs_cluster_size: u32,
+    pub timer_hz: u32,
+    pub cpus: u32,
+    pub _pad: u32,
+    /// year, month, day, hour, minute, second (CMOS clock)
+    pub date: [u16; 6],
+    pub _pad2: u32,
+    pub fs_label: [u8; 16],
+    pub cpu_vendor: [u8; 16],
+    pub cpu_brand: [u8; 48],
+}
+
+/// One thread for `proclist`. Layout shared with `ulib`.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct ProcInfo {
+    pub tid: u64,
+    pub cpu_ticks: u64,
+    /// 0 for kernel threads and processes started by the kernel
+    pub parent: u64,
+    /// `PROC_*` state
+    pub state: u32,
+    /// 1 if the thread is a user process
+    pub user: u32,
+    pub name: [u8; 32],
+}
+
+pub const PROC_RUNNING: u32 = 0;
+pub const PROC_READY: u32 = 1;
+pub const PROC_SLEEPING: u32 = 2;
+pub const PROC_WAIT_INPUT: u32 = 3;
+pub const PROC_JOIN: u32 = 4;
+pub const PROC_WAIT_PIPE: u32 = 5;
+pub const PROC_DEAD: u32 = 6;
+
+const _: () = assert!(size_of::<SysInfo>() == 176 && size_of::<ProcInfo>() == 64);
+
+fn copy_str(dst: &mut [u8], src: &str) {
+    let mut len = src.len().min(dst.len());
+    while !src.is_char_boundary(len) {
+        len -= 1;
+    }
+    dst[..len].copy_from_slice(&src.as_bytes()[..len]);
+}
+
+fn sys_sysinfo(addr: u64) -> SysResult {
+    use crate::arch::x86_64::cpu;
+    use crate::mem::{heap, pmm};
+    let p = pmm::stats();
+    let h = heap::stats();
+    let d = crate::drivers::rtc::now();
+    let mut info = SysInfo {
+        uptime_ms: time::uptime_ms(),
+        ticks: time::ticks(),
+        mem_usable: p.usable_bytes(),
+        mem_free: p.free_bytes(),
+        heap_total: h.total as u64,
+        heap_used: h.used as u64,
+        fs_total: 0,
+        fs_free: 0,
+        fs_cluster_size: 0,
+        timer_hz: time::TIMER_HZ as u32,
+        cpus: crate::acpi::info().map_or(1, |a| a.madt.local_apics.len() as u32),
+        _pad: 0,
+        date: [
+            d.year,
+            d.month as u16,
+            d.day as u16,
+            d.hour as u16,
+            d.minute as u16,
+            d.second as u16,
+        ],
+        _pad2: 0,
+        fs_label: [0; 16],
+        cpu_vendor: [0; 16],
+        cpu_brand: [0; 48],
+    };
+    if let Ok((label, s)) = fs::with_root(|fs| Ok((String::from(fs.label()), fs.stats()))) {
+        info.fs_total = s.total_clusters as u64 * s.cluster_size as u64;
+        info.fs_free = s.free_clusters as u64 * s.cluster_size as u64;
+        info.fs_cluster_size = s.cluster_size as u32;
+        copy_str(&mut info.fs_label, &label);
+    }
+    copy_str(&mut info.cpu_vendor, &cpu::vendor());
+    copy_str(&mut info.cpu_brand, cpu::brand().as_deref().unwrap_or(""));
+    copy_struct_to_user(addr, &info)?;
+    Ok(0)
+}
+
+fn sys_proclist(addr: u64, max: u64) -> SysResult {
+    use crate::task::{State, Wait};
+    let threads = task::list();
+    let n = threads.len().min(max as usize);
+    if !accessible(addr, (n * size_of::<ProcInfo>()) as u64, true) {
+        return Err(errno::EFAULT);
+    }
+    for (i, t) in threads.iter().take(n).enumerate() {
+        let mut info = ProcInfo {
+            tid: t.id,
+            cpu_ticks: t.cpu_ticks,
+            parent: super::parent_of(t.id).unwrap_or(0),
+            state: match t.state {
+                State::Running => PROC_RUNNING,
+                State::Ready => PROC_READY,
+                State::Blocked(Wait::Until(_)) => PROC_SLEEPING,
+                State::Blocked(Wait::Input) => PROC_WAIT_INPUT,
+                State::Blocked(Wait::Join(_)) => PROC_JOIN,
+                State::Blocked(Wait::Pipe(_)) => PROC_WAIT_PIPE,
+                State::Dead => PROC_DEAD,
+            },
+            user: super::is_process(t.id) as u32,
+            name: [0; 32],
+        };
+        copy_str(&mut info.name, &t.name);
+        copy_struct_to_user(addr + (i * size_of::<ProcInfo>()) as u64, &info)?;
+    }
+    Ok(n as u64)
+}
+
+fn sys_rename(from: u64, from_len: u64, to: u64, to_len: u64) -> SysResult {
+    let from = user_path(from, from_len)?;
+    let to = user_path(to, to_len)?;
+    fs::with_root(|fs| fs.rename(&from, &to)).map_err(fs_errno)?;
+    Ok(0)
+}
+
+fn sys_seek(fd: u64, offset: i64, whence: u64) -> SysResult {
+    let Target::File {
+        path, offset: current, ..
+    } = target(fd)?
+    else {
+        return Err(errno::ESPIPE);
+    };
+    let base = match whence {
+        0 => 0,
+        1 => current as i64,
+        2 => fs::with_root(|fs| fs.lookup(&path)).map_err(fs_errno)?.size as i64,
+        _ => return Err(errno::EINVAL),
+    };
+    let new = base.checked_add(offset).filter(|&o| o >= 0).ok_or(errno::EINVAL)?;
+    set_offset(fd, new as u64);
+    Ok(new as u64)
 }
 
 fn sys_getcwd(buf: u64, len: u64) -> SysResult {
