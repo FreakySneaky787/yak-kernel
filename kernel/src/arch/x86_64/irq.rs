@@ -72,13 +72,14 @@ extern "x86-interrupt" fn timer(frame: InterruptStackFrame) {
 }
 
 extern "x86-interrupt" fn keyboard(_frame: InterruptStackFrame) {
-    crate::drivers::keyboard::handle_interrupt();
+    crate::drivers::keyboard::handle_interrupt(crate::process::interrupt_foreground);
     crate::task::wake_input_waiters();
     lapic::eoi();
 }
 
 extern "x86-interrupt" fn com1(_frame: InterruptStackFrame) {
-    crate::serial::handle_interrupt();
+    // 0x03 = Ctrl+C on a terminal
+    crate::serial::handle_interrupt(|byte| byte == 0x03 && crate::process::interrupt_foreground());
     crate::task::wake_input_waiters();
     lapic::eoi();
 }

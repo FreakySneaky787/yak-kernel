@@ -194,6 +194,15 @@ Short explanations of every subsystem: what it is and why we need it.
 - With a `#[global_allocator]` in place, the standard `alloc` crate works: `Vec`, `String`, `BTreeMap`, `format!` – the
   `sort` program reads a whole file into memory and sorts its lines without knowing anything about pages.
 
+## M19 – Processes starting processes
+- `spawn` loads a program from the disk and starts it as a **child** of the caller; `wait` blocks until the child ends and
+  returns how it ended (exit code, or the reason the kernel killed it). Only the parent may wait for or kill its children.
+- A child whose parent ends first is an **orphan**; since nobody will ever ask for its exit status, the kernel throws the
+  status away as soon as the orphan ends.
+- **Ctrl+C** must work even if the program never reads the keyboard (an endless loop). So the interrupt handler itself
+  watches for it and marks the **foreground process** – the one the console currently belongs to – as killed. A process that
+  is blocked (sleeping, waiting for input) is woken up so it notices immediately.
+
 ## Tooling – GNU ld and binutils
 - rustc compiles our code into object files; a **linker** combines them into the final ELF according to `kernel/linker.ld`
   (load address, section order, segments). We use **GNU ld** (`ld.bfd`) for that.

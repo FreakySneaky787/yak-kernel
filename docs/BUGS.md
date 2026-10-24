@@ -42,5 +42,7 @@ Format: number · date · title, then symptom → cause → fix → test.
 - **LLVM may delete an unused allocation and assume it succeeded.** `alloc(huge).is_null()` was optimized to `false` in
   `heaptest`, so the "allocation must fail" check failed although the kernel refused the memory. Pass the pointer through
   `core::hint::black_box` when testing allocation failure.
+- **Empty slices from Rust come with dangling pointers** (e.g. `0x1` for an empty `Vec<u8>`). The syscall pointer check
+  rejected `spawn(path, [])` with `EFAULT` because page 0 is unmapped; zero-length ranges are now always accepted.
 - **The serial console sends `\r\n` for every `\n`.** E2E expectations spanning several lines must contain `\r\n`.
 - **Limine's stack has no guard page** – a stack overflow silently corrupts memory instead of faulting (until M9 gives us our own stack).

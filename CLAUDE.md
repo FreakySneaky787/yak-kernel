@@ -72,7 +72,8 @@ Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.s
   `scripts/install-user.sh` – copies `build/user/bin/*` into `/bin` of a disk image
 - `user/` – user programs: `src/lib.rs` (`ulib`: `_start`, `Args`), `sys.rs` (syscalls), `io.rs` (`print!`, `read_line`),
   `fs.rs` (`File`, `Dir`, `stat`), `heap.rs` (allocator on `brk`),
-  `src/bin/*.rs` (one program each: hello, upper, fault, cat, ls, cp, sort, fstest, heaptest), `linker.ld`
+  `process.rs` (`spawn`/`wait`/`kill`), `src/bin/*.rs` (one program each: hello, upper, fault, cat, ls, cp, sort,
+  fstest, heaptest, spawntest), `linker.ld`
 - `kernel/src/time.rs` – ticks, `uptime_ms`, `sleep_ms`
 - `kernel/src/drivers/keyboard.rs` – PS/2 driver, ring buffer, `read_key()`; `drivers/scancode.rs` – decoder + layouts (DE/US)
 - `kernel/src/arch/x86_64/` – CPU specifics: `port.rs` (in/out), `gdt.rs` (GDT+TSS), `idt.rs` (IDT structure),

@@ -370,6 +370,38 @@ pub fn exit() -> ! {
     unreachable!("a dead thread was scheduled again");
 }
 
+/// Makes thread `id` ready if it is blocked (whatever it waits for). Its
+/// blocking loop re-checks its condition; used to interrupt waits on `kill`.
+pub fn wake(id: Tid) {
+    without_interrupts(|| {
+        if let Some(s) = SCHEDULER.lock().as_mut() {
+            if s.threads.get(&id).is_some_and(|t| matches!(t.state, State::Blocked(_))) {
+                s.make_ready(id);
+            }
+        }
+    });
+}
+
+/// Like `join`, but gives up when `abort()` becomes true (checked after
+/// every wake-up). Returns true if the thread has exited.
+pub fn join_or_abort(id: Tid, abort: impl Fn() -> bool) -> bool {
+    without_interrupts(|| {
+        loop {
+            let alive = SCHEDULER
+                .lock()
+                .as_mut()
+                .is_some_and(|s| s.threads.get(&id).is_some_and(|t| t.state != State::Dead));
+            if !alive {
+                return true;
+            }
+            if abort() {
+                return false;
+            }
+            block_current(Wait::Join(id));
+        }
+    })
+}
+
 /// Waits until thread `id` has exited.
 pub fn join(id: Tid) {
     without_interrupts(|| {

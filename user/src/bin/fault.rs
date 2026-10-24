@@ -1,5 +1,5 @@
 //! Misbehaves on purpose, to show that the kernel only kills the process.
-//! Usage: fault null | kernel | cli | stack | panic | exit <code>
+//! Usage: fault null | kernel | cli | stack | panic | spin | sleep | exit <code>
 
 #![no_std]
 #![no_main]
@@ -37,8 +37,20 @@ fn main(mut words: ulib::Args) -> i32 {
             black_box(recurse(0));
         }
         Some("panic") => panic!("fault was asked to panic"),
+        Some("spin") => {
+            println!("spinning forever (Ctrl+C stops me) ...");
+            loop {
+                core::hint::spin_loop();
+            }
+        }
+        Some("sleep") => {
+            println!("sleeping forever (Ctrl+C stops me) ...");
+            loop {
+                ulib::sys::sleep_ms(1000);
+            }
+        }
         Some("exit") => return words.next().and_then(|c| c.parse().ok()).unwrap_or(1),
-        _ => eprintln!("usage: fault null | kernel | cli | stack | panic | exit <code>"),
+        _ => eprintln!("usage: fault null | kernel | cli | stack | panic | spin | sleep | exit <code>"),
     }
     1
 }

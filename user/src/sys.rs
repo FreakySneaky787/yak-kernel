@@ -19,10 +19,33 @@ pub const GETCWD: u64 = 11;
 pub const UNLINK: u64 = 12;
 pub const MKDIR: u64 = 13;
 pub const BRK: u64 = 14;
+pub const SPAWN: u64 = 15;
+pub const WAIT: u64 = 16;
+pub const KILL: u64 = 17;
 
 pub const STDIN: u64 = 0;
 pub const STDOUT: u64 = 1;
 pub const STDERR: u64 = 2;
+
+/// # Safety
+/// The arguments must be valid for system call `nr`.
+pub unsafe fn syscall4(nr: u64, a0: u64, a1: u64, a2: u64, a3: u64) -> i64 {
+    let ret: i64;
+    unsafe {
+        asm!(
+            "syscall",
+            inlateout("rax") nr as i64 => ret,
+            in("rdi") a0,
+            in("rsi") a1,
+            in("rdx") a2,
+            in("r10") a3,
+            lateout("rcx") _,
+            lateout("r11") _,
+            options(nostack),
+        )
+    };
+    ret
+}
 
 /// # Safety
 /// The arguments must be valid for system call `nr`.
@@ -143,4 +166,41 @@ pub fn mkdir(path: &str) -> i64 {
 /// now in effect, or -ENOMEM.
 pub fn brk(new_end: u64) -> i64 {
     unsafe { syscall3(BRK, new_end, 0, 0) }
+}
+
+pub const WAIT_EXITED: u32 = 1;
+pub const WAIT_KILLED: u32 = 2;
+
+/// Same layout as the kernel's `process::syscall::WaitStatus`.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct WaitStatus {
+    pub kind: u32,
+    pub reason_len: u32,
+    pub code: i64,
+    pub reason: [u8; 112],
+}
+
+const _: () = assert!(core::mem::size_of::<WaitStatus>() == 128);
+
+/// Starts `path` with the NUL-separated argument block `args`; returns the pid or -errno.
+pub fn spawn(path: &str, args: &[u8]) -> i64 {
+    unsafe {
+        syscall4(
+            SPAWN,
+            path.as_ptr() as u64,
+            path.len() as u64,
+            args.as_ptr() as u64,
+            args.len() as u64,
+        )
+    }
+}
+
+/// Waits for child `pid`; returns `pid` or -errno.
+pub fn wait(pid: u64, status: &mut WaitStatus) -> i64 {
+    unsafe { syscall3(WAIT, pid, status as *mut WaitStatus as u64, 0) }
+}
+
+pub fn kill(pid: u64) -> i64 {
+    unsafe { syscall3(KILL, pid, 0, 0) }
 }

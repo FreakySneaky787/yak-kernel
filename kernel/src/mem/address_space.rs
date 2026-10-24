@@ -94,8 +94,12 @@ impl AddressSpace {
     }
 
     /// Whether `[addr, addr + len)` lies in user space and every page of it is
-    /// mapped for user access (and writable, if `writable`).
+    /// mapped for user access (and writable, if `writable`). An empty range is
+    /// always fine (Rust passes dangling pointers like 0x1 for empty slices).
     pub fn is_accessible(&self, addr: u64, len: u64, writable: bool) -> bool {
+        if len == 0 {
+            return true;
+        }
         let Some(end) = addr.checked_add(len) else {
             return false;
         };
@@ -161,6 +165,7 @@ mod tests {
             assert!(!a.is_accessible(virt.0, 3 * PAGE_SIZE + 1, false));
             assert!(!a.is_accessible(u64::MAX - 4, 10, false));
             assert!(!b.is_accessible(virt.0, 1, false));
+            assert!(b.is_accessible(1, 0, true), "empty slices have dangling pointers");
             assert_eq!(a.map_fresh(virt, 1, Flags::WRITABLE), Err(MapError::AlreadyMapped));
             // a failing map_fresh rolls back: pages before the conflict are released
             let frames = pmm::stats().free_frames;

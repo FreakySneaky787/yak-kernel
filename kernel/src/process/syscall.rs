@@ -51,11 +51,22 @@ pub mod nr {
     pub const MKDIR: u32 = 13;
     /// brk(new_end) -> the heap end now in effect; 0 only queries it
     pub const BRK: u32 = 14;
+    /// spawn(path, path_len, args, args_len) -> pid of the new child
+    pub const SPAWN: u32 = 15;
+    /// wait(pid, *mut WaitStatus or 0) -> pid (children only)
+    pub const WAIT: u32 = 16;
+    /// kill(pid) -> 0 (children only)
+    pub const KILL: u32 = 17;
 }
 
 pub mod errno {
     pub const ENOENT: i64 = 2;
+    pub const ESRCH: i64 = 3;
+    pub const EINTR: i64 = 4;
     pub const EIO: i64 = 5;
+    pub const E2BIG: i64 = 7;
+    pub const ENOEXEC: i64 = 8;
+    pub const ECHILD: i64 = 10;
     pub const ENOMEM: i64 = 12;
     pub const EBADF: i64 = 9;
     pub const EFAULT: i64 = 14;
@@ -114,6 +125,24 @@ pub struct DirEntryInfo {
 
 const _: () = assert!(size_of::<Stat>() == 32 && size_of::<DirEntryInfo>() == 296);
 
+pub const WAIT_EXITED: u32 = 1;
+pub const WAIT_KILLED: u32 = 2;
+
+/// Result of `wait`. Layout shared with `ulib`.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct WaitStatus {
+    /// `WAIT_EXITED` or `WAIT_KILLED`
+    pub kind: u32,
+    pub reason_len: u32,
+    /// Exit code (for `WAIT_EXITED`)
+    pub code: i64,
+    /// Why the kernel killed the process (UTF-8, cut to fit)
+    pub reason: [u8; 112],
+}
+
+const _: () = assert!(size_of::<WaitStatus>() == 128);
+
 fn fs_errno(e: FsError) -> i64 {
     match e {
         FsError::NotFound => errno::ENOENT,
@@ -153,7 +182,7 @@ pub extern "C" fn dispatch(frame: &mut SyscallFrame) {
     if frame.rip >= USER_END {
         super::kill_current(String::from("syscall from a non-canonical address"));
     }
-    let (a0, a1, a2) = (frame.rdi, frame.rsi, frame.rdx);
+    let (a0, a1, a2, a3) = (frame.rdi, frame.rsi, frame.rdx, frame.r10);
     let result = match frame.rax as u32 {
         _ if frame.rax > u32::MAX as u64 => Err(errno::ENOSYS),
         nr::EXIT => super::exit_current(ExitStatus::Exited(a0 as i64)),
@@ -177,6 +206,9 @@ pub extern "C" fn dispatch(frame: &mut SyscallFrame) {
         nr::UNLINK => sys_unlink(a0, a1),
         nr::MKDIR => sys_mkdir(a0, a1),
         nr::BRK => sys_brk(a0),
+        nr::SPAWN => sys_spawn(a0, a1, a2, a3),
+        nr::WAIT => sys_wait(a0, a1),
+        nr::KILL => sys_kill(a0),
         _ => Err(errno::ENOSYS),
     };
     frame.rax = match result {
@@ -459,6 +491,72 @@ fn sys_brk(new_end: u64) -> SysResult {
     result.map(|_| new_end)
 }
 
+fn sys_spawn(path: u64, path_len: u64, args: u64, args_len: u64) -> SysResult {
+    use super::{ExecError, Options};
+    let path = user_path(path, path_len)?;
+    if args_len > super::MAX_ARGS_LEN as u64 {
+        return Err(errno::E2BIG);
+    }
+    let args = copy_from_user(args, args_len)?;
+    let args = core::str::from_utf8(&args).map_err(|_| errno::EINVAL)?;
+    let image = fs::with_root(|fs| fs.read_file(&path)).map_err(fs_errno)?;
+    let me = task::current_id();
+    let (cwd, stdout) = with_current(|p| (p.cwd.clone(), p.stdout.clone())).ok_or(errno::ESRCH)?;
+    let name = path.rsplit('/').next().unwrap_or(&path);
+    let opts = Options {
+        cwd: &cwd,
+        stdout,
+        parent: Some(me),
+        foreground: super::foreground() == me,
+        ignore_interrupt: false,
+    };
+    super::spawn_with(name, &image, args, opts).map_err(|e| match e {
+        ExecError::Elf(_) => errno::ENOEXEC,
+        ExecError::OutOfMemory => errno::ENOMEM,
+        ExecError::ArgsTooLong => errno::E2BIG,
+    })
+}
+
+fn sys_wait(pid: u64, status_addr: u64) -> SysResult {
+    use super::WaitError;
+    if status_addr != 0 && !accessible(status_addr, size_of::<WaitStatus>() as u64, true) {
+        return Err(errno::EFAULT);
+    }
+    let status = super::wait_child(pid).map_err(|e| match e {
+        WaitError::NotAChild => errno::ECHILD,
+        WaitError::Interrupted => errno::EINTR,
+    })?;
+    if status_addr != 0 {
+        let mut out = WaitStatus {
+            kind: WAIT_EXITED,
+            reason_len: 0,
+            code: 0,
+            reason: [0; 112],
+        };
+        match status {
+            ExitStatus::Exited(code) => out.code = code,
+            ExitStatus::Killed(reason) => {
+                out.kind = WAIT_KILLED;
+                let mut len = reason.len().min(out.reason.len());
+                while !reason.is_char_boundary(len) {
+                    len -= 1;
+                }
+                out.reason[..len].copy_from_slice(&reason.as_bytes()[..len]);
+                out.reason_len = len as u32;
+            }
+        }
+        copy_struct_to_user(status_addr, &out)?;
+    }
+    Ok(pid)
+}
+
+fn sys_kill(pid: u64) -> SysResult {
+    if super::parent_of(pid) != Some(task::current_id()) || !super::kill(pid) {
+        return Err(errno::ESRCH);
+    }
+    Ok(0)
+}
+
 fn sys_getcwd(buf: u64, len: u64) -> SysResult {
     let cwd = with_current(|p| p.cwd.clone()).unwrap_or_default();
     if (cwd.len() as u64) > len {
@@ -490,7 +588,11 @@ fn read_stdin(buf: u64, len: u64) -> SysResult {
     }
     let mut bytes = with_current(|p| core::mem::take(&mut p.stdin_pending)).unwrap_or_default();
     while bytes.is_empty() {
-        key_bytes(input::read_key(), &mut bytes); // blocks until a key arrives
+        // blocks until a key arrives; a kill (e.g. Ctrl+C) aborts the wait
+        match input::read_key_or_abort(super::kill_pending) {
+            Some(event) => key_bytes(event, &mut bytes),
+            None => return Err(errno::EINTR),
+        }
     }
     let n = bytes.len().min(len as usize);
     unsafe { core::ptr::copy_nonoverlapping(bytes.as_ptr(), buf as *mut u8, n) };

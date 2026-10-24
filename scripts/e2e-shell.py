@@ -5,7 +5,9 @@ Usage: scripts/e2e-shell.py <kernel-elf> [extra QEMU arguments...]
 
 Each step types a line (exactly like a user on a serial terminal, including
 escape sequences for arrow keys and Tab), waits for the next prompt, and checks
-the output between the two prompts. Each session ends with `poweroff`.
+the output between the two prompts. A PAUSE inside the keys waits a moment
+before typing the rest (e.g. Ctrl+C once a program runs). Each session ends
+with `poweroff`.
 
 Two sessions run on the same scratch disk: the second one boots again and
 checks that files written in the first one survived. Finally `fsck.fat`
@@ -23,6 +25,8 @@ PROMPT = re.compile(r"kernel:(/[^>\n]*)> ")
 LEFT = "\x1b[D"
 RIGHT = "\x1b[C"
 UP = "\x1b[A"
+CTRL_C = "\x03"
+PAUSE = "\0"  # never typed: splits the keys of a step
 
 # (keys to type, substrings that must appear in the output, substrings that must not)
 STEPS = [
@@ -69,6 +73,11 @@ STEPS = [
     ("ls /bin\r", ["hello", "fault", "upper", "cat", "cp", "ls", "fstest"], []),
     ("fstest\r", ["fstest: all checks passed"], ["FAIL"]),
     ("heaptest\r", ["heaptest: all checks passed"], ["FAIL"]),
+    ("spawntest\r", ["spawntest: all checks passed"], ["FAIL"]),
+    ("sleep 300\r", ["slept 300 ms"], []),  # the orphan started by spawntest prints in the meantime
+    ("fault spin\r" + PAUSE + CTRL_C, ["spinning forever", "fault was killed: interrupted"], []),
+    ("fault sleep\r" + PAUSE + CTRL_C, ["sleeping forever", "fault was killed: interrupted"], []),
+    ("upper\r" + PAUSE + CTRL_C, ["Type a line", "upper was killed: interrupted"], []),  # blocked in read
     ("write /fruits.txt cherry\r", [], ["error"]),
     ("append /fruits.txt apple\r", [], ["error"]),
     ("append /fruits.txt banana\r", [], ["error"]),
@@ -143,13 +152,17 @@ def run_session(root, elf, extra_args, disk, steps, title):
     try:
         pos = reader.wait_for_prompt(0, 30)[1]
         for keys, expected, forbidden in steps:
-            proc.stdin.write(keys.encode())
-            proc.stdin.flush()
+            for i, part in enumerate(keys.split(PAUSE)):
+                if i > 0:
+                    time.sleep(0.7)
+                proc.stdin.write(part.encode())
+                proc.stdin.flush()
             nxt_start, nxt_end = reader.wait_for_prompt(pos, 20)
             output = reader.text(pos, nxt_start)
             missing = [e for e in expected if e not in output]
             present = [f for f in forbidden if f in output]
-            label = keys.replace("\r", "").replace("\x1b", "^[").replace("\t", "<Tab>")
+            label = (keys.replace("\r", "").replace("\x1b", "^[").replace("\t", "<Tab>")
+                     .replace(PAUSE, "<pause>").replace(CTRL_C, "^C"))
             if missing or present:
                 failures += 1
                 print(f"FAIL  {label!r}: missing {missing}, unexpected {present}\n----\n{output}\n----")

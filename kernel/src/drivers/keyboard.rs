@@ -2,12 +2,15 @@
 //! a ring buffer. The rest of the kernel pulls key presses from there.
 //!
 //! The interrupt handler deliberately does as little as possible (just store the
-//! byte); translation happens outside of it in the `Decoder`.
+//! byte); translation happens outside of it in the `Decoder`. The one
+//! exception is Ctrl+C, which must be noticed even if nobody reads the
+//! keyboard: the handler tracks the Ctrl keys itself (see `handle_interrupt`).
 
 use super::scancode::{Decoder, KeyEvent, Layout};
 use crate::arch::x86_64::port::inb;
 use crate::arch::x86_64::without_interrupts;
 use crate::ringbuf::RingBuffer;
+use core::sync::atomic::{AtomicBool, Ordering};
 use spin::Mutex;
 
 const DATA_PORT: u16 = 0x60;
@@ -16,6 +19,15 @@ const STATUS_OUTPUT_FULL: u8 = 0x01;
 
 static SCANCODES: Mutex<RingBuffer<128>> = Mutex::new(RingBuffer::new());
 static DECODER: Mutex<Decoder> = Mutex::new(Decoder::new(Layout::De));
+
+/// Ctrl state as seen by the interrupt handler (independent of the decoder).
+static IRQ_CTRL_DOWN: AtomicBool = AtomicBool::new(false);
+static IRQ_LAST_WAS_E0: AtomicBool = AtomicBool::new(false);
+
+const SC_CTRL: u8 = 0x1D;
+const SC_CTRL_RELEASE: u8 = 0x9D;
+/// Set-1 make code of the key labelled C (same position on QWERTY and QWERTZ).
+const SC_C: u8 = 0x2E;
 
 /// Drain the PS/2 controller output buffer (leftovers from firmware/bootloader).
 pub fn init() {
@@ -27,10 +39,28 @@ pub fn init() {
     }
 }
 
-/// Called from the IRQ1 handler (interrupts are disabled there).
-pub fn handle_interrupt() {
+/// Called from the IRQ1 handler (interrupts are disabled there). On Ctrl+C
+/// `on_ctrl_c` is asked whether it consumed the key; if so, the C press is
+/// not stored.
+pub fn handle_interrupt(on_ctrl_c: impl FnOnce() -> bool) {
     let byte = unsafe { inb(DATA_PORT) };
+    if track_ctrl_c(byte) && on_ctrl_c() {
+        return;
+    }
     SCANCODES.lock().push(byte);
+}
+
+/// Follows the Ctrl keys in the raw scancode stream; true if `byte` is the
+/// C press of a Ctrl+C.
+fn track_ctrl_c(byte: u8) -> bool {
+    let after_e0 = IRQ_LAST_WAS_E0.swap(byte == 0xE0, Ordering::Relaxed);
+    match byte {
+        SC_CTRL => IRQ_CTRL_DOWN.store(true, Ordering::Relaxed), // left Ctrl, or right Ctrl after E0
+        SC_CTRL_RELEASE => IRQ_CTRL_DOWN.store(false, Ordering::Relaxed),
+        SC_C => return !after_e0 && IRQ_CTRL_DOWN.load(Ordering::Relaxed),
+        _ => {}
+    }
+    false
 }
 
 /// Inject a byte from outside (for tests and future input sources).
@@ -85,6 +115,19 @@ pub fn set_layout(layout: Layout) {
 mod tests {
     use super::super::scancode::Key;
     use super::*;
+
+    #[test_case]
+    fn ctrl_c_is_recognised_in_the_raw_stream() {
+        let feed = |bytes: &[u8]| bytes.iter().map(|&b| track_ctrl_c(b)).collect::<alloc::vec::Vec<_>>();
+        assert_eq!(feed(&[0x2E, 0xAE]), [false, false]); // plain c
+        assert_eq!(feed(&[0x1D, 0x2E, 0xAE, 0x9D]), [false, true, false, false]); // left Ctrl+C
+        assert_eq!(
+            feed(&[0xE0, 0x1D, 0x2E, 0xE0, 0x9D]),
+            [false, false, true, false, false]
+        ); // right Ctrl
+        assert_eq!(feed(&[0x1D, 0xE0, 0x2E, 0x9D]), [false, false, false, false]); // E0 2E = volume down
+        assert_eq!(feed(&[0x2E]), [false]); // Ctrl released again
+    }
 
     #[test_case]
     fn injected_scancodes_become_keys() {

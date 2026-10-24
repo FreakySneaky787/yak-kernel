@@ -32,7 +32,8 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 |---|---|---|---|
 | 17 | Files for programs: fd table, `open`/`close`/`readdir`/`stat`/`getcwd`/`unlink`/`mkdir`, `cat`/`ls`/`cp` as programs | ✅ | `read_at` unit test, `fstest` (25 syscall checks incl. errors), integration test, mtools check of a `cp` copy, 6 E2E steps |
 | 18 | User heap: `brk`-style syscall + allocator in `ulib` (`alloc` in programs) | ✅ | 4 unit tests (grow/shrink, limits, release, rollback), `heaptest` (11 checks), `sort` in integration test, 6 E2E steps |
-| 19 | Processes from processes: `spawn`/`wait`/`kill` syscalls, Ctrl+C, shell as a user program (`init`) | ⬜ | |
+| 19 | Processes from processes: `spawn`/`wait`/`kill` syscalls, Ctrl+C | ✅ | Ctrl+C unit tests (foreground, ignore, raw scancode tracker), `spawntest` (17 checks incl. orphans), 6 E2E steps (Ctrl+C over serial), PS/2 Ctrl+C checked via `sendkey` |
+| 20 | Shell as a user program (`/bin/sh` started as `init`, kernel shell as fallback) | ⬜ | |
 
 ## Log
 - **2026-10-24** – Setup: Rust nightly 1.101 (rustup), target `x86_64-unknown-none`, Limine v11.x-binary.
@@ -127,6 +128,16 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   address-ordered free list and coalescing as `#[global_allocator]` – programs can use `Vec`, `String`, `BTreeMap`, `format!`.
   New programs `sort` (files or typed lines, `-r`) and `heaptest`.
 
+- **2026-10-24** – M19 was split: M19 = process syscalls + Ctrl+C, M20 = the shell in user space.
+- **2026-10-24** – M19: syscalls 15–17 `spawn(path, args)` (child inherits cwd + output), `wait(pid, *WaitStatus)` (children only,
+  128-byte status with kill reason), `kill(pid)` (children only). Parents, orphans (removed from the table when they end) and a
+  foreground process (inherited by children of the foreground process, given back to the parent at exit). Ctrl+C is detected in
+  the interrupt handlers – serial byte 0x03, PS/2 via a tiny Ctrl tracker on the raw scancodes – and kills the foreground process
+  unless it ignores interrupts (then the key is delivered as 0x03). `task::wake` + interruptible `read`/`wait`
+  (`input::read_key_or_abort`, `task::join_or_abort`) so a blocked process dies at once. `process::Options` / `spawn_with`.
+  `ulib::process` (`spawn`, `wait`, `kill`, `run`), new program `spawntest`, `fault spin|sleep`.
+  Found: empty user buffers come with dangling pointers (0x1) – zero-length ranges are now always accessible.
+
 ## Open items / later
 - AHCI uses polling; switching to completion interrupts (MSI or the PCI interrupt line) would free the CPU during I/O.
 - Thread-level sleeping mutex (today all shared state uses spin locks with interrupts disabled).
@@ -135,13 +146,14 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 - Shell lines longer than one console row are not handled by the line editor (input is capped at 120 characters).
 - `gcc` is not installed yet → `make limine-tool` (bios-install for USB/HDD images) is not available.
 - User space: no FPU/SSE state saving (everything is soft-float), no SMAP/SMEP, heap is mapped eagerly (no demand paging),
-  no Ctrl+C for a running program (`process::kill` exists, but nothing in the shell triggers it), only a single CPU.
+  only a single CPU, no signals beyond "kill", no pipes (a child always writes to its parent's output).
 - File syscalls: writes always append (no seek, no overwrite in the middle); `read` re-walks the cluster chain per call;
   directory handles are snapshots; no rename syscall yet. Without `/bin` on the disk, the kernel shell has no `ls`/`cat`.
 
 ## Next step
-**M19 – processes from processes:** syscalls `spawn(path, args)` → pid, `wait(pid)` → exit status, `kill(pid)`; the child
-inherits cwd and stdout. Ctrl+C (keyboard or serial) kills the foreground program – also one blocked in `read` (wake it).
-Then the shell becomes a user program (`/bin/sh`, needs `chdir` + the remaining file syscalls such as `rename`), started by
-the kernel as the first process (`init`); the kernel shell stays as a fallback when `/bin/sh` is missing.
-Tests: spawn/wait chains, exit statuses of killed children, Ctrl+C in the E2E test, the existing E2E steps against `/bin/sh`.
+**M20 – the shell as a user program:** `/bin/sh` in `user/` with its own line editor (needs arrow keys etc. from `read` as
+ANSI sequences), history, tab completion of `/bin`, built-ins `cd` (new syscall `chdir`), `pwd`, `exit`, `help`, `history`;
+programs run via `spawn`/`wait` in the foreground. The kernel starts `/bin/sh` as the first process (`init`, ignores Ctrl+C)
+and falls back to the kernel shell when it is missing or exits. Kernel-only commands (mem, cpu, acpi, lspci, ps, demo, write,
+mkdir, rm, mv, df, date, poweroff, ...) stay reachable from `/bin/sh` through a transitional system call that runs a kernel
+built-in in the caller's cwd. Tests: the whole E2E suite must pass against `/bin/sh`.

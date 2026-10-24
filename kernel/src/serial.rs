@@ -60,11 +60,15 @@ pub static SERIAL: Mutex<SerialPort> = Mutex::new(SerialPort::new(COM1));
 static RX: Mutex<RingBuffer<256>> = Mutex::new(RingBuffer::new());
 
 /// Called from the IRQ4 handler: drain the UART receive FIFO into `RX`.
-pub fn handle_interrupt() {
+/// Bytes for which `consume` returns true are dropped (used for Ctrl+C).
+pub fn handle_interrupt(mut consume: impl FnMut(u8) -> bool) {
     let mut rx = RX.lock();
     // Line status register bit 0 = data ready
     while unsafe { inb(COM1 + 5) } & 0x01 != 0 {
-        rx.push(unsafe { inb(COM1) });
+        let byte = unsafe { inb(COM1) };
+        if !consume(byte) {
+            rx.push(byte);
+        }
     }
 }
 

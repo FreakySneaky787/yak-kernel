@@ -106,6 +106,12 @@ extern "C" fn kmain() -> ! {
     );
     assert_eq!(run("sort", "-r /sortme.txt").1, "pear\nfig\nbanana\napple\n");
 
+    // M19: processes starting processes
+    let (status, out) = run("spawntest", "");
+    assert_eq!(status, ExitStatus::Exited(0), "{}", out);
+    kernel::time::sleep_ms(300); // the orphan (hello sleeps 100 ms) ends and is cleaned up
+    assert_eq!(process::count(), 0, "orphan left in the process table");
+
     assert_eq!(process::count(), 0);
     serial_println!("[ok]");
     exit(ExitCode::Success)

@@ -18,6 +18,16 @@
 //! Every process has a current directory (inherited from whoever spawned it;
 //! relative paths in system calls start there) and a table of file
 //! descriptors: 0 = stdin, 1 = stdout, 2 = stderr, then open files/directories.
+//!
+//! Processes can spawn children (`parent`), which only their parent may wait
+//! for or kill. Children of a process that ends become orphans and are
+//! removed from the table as soon as they end themselves.
+//!
+//! Ctrl+C: one process is in the *foreground* (the one the console belongs
+//! to). The keyboard/serial interrupt handlers call `interrupt_foreground`,
+//! which kills it - unless it ignores interrupts (the shell), in which case
+//! the key is delivered as a normal byte (0x03). A child spawned by the
+//! foreground process takes over the foreground until it ends.
 
 pub mod elf;
 pub mod syscall;
@@ -33,6 +43,7 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt;
+use core::sync::atomic::{AtomicU64, Ordering};
 use elf::ElfError;
 use spin::Mutex;
 
@@ -139,7 +150,44 @@ pub struct Process {
     /// Bytes of a key that did not fit into the last `read` buffer.
     stdin_pending: Vec<u8>,
     status: Option<ExitStatus>,
-    kill_requested: bool,
+    /// Reason of a pending `kill` (honoured on the way back to user mode).
+    kill_requested: Option<&'static str>,
+    /// `None` for processes started by the kernel.
+    pub parent: Option<Pid>,
+    /// The parent ended: nobody will wait, remove the entry at exit.
+    orphan: bool,
+    /// Ctrl+C is delivered as a byte instead of killing the process.
+    ignore_interrupt: bool,
+}
+
+/// How to start a process (see `spawn_with`).
+pub struct Options<'a> {
+    /// Absolute, normalized current directory of the new process.
+    pub cwd: &'a str,
+    pub stdout: Output,
+    pub parent: Option<Pid>,
+    /// Make the new process the foreground process (Ctrl+C goes to it).
+    pub foreground: bool,
+    pub ignore_interrupt: bool,
+}
+
+impl<'a> Options<'a> {
+    pub fn new(stdout: Output) -> Options<'a> {
+        Options {
+            cwd: "/",
+            stdout,
+            parent: None,
+            foreground: false,
+            ignore_interrupt: false,
+        }
+    }
+}
+
+/// Pid of the foreground process (0 = none).
+static FOREGROUND: AtomicU64 = AtomicU64::new(0);
+
+pub fn foreground() -> Pid {
+    FOREGROUND.load(Ordering::Relaxed)
 }
 
 /// All processes that have not been waited for yet. Only touched with
@@ -154,6 +202,19 @@ pub fn spawn(name: &str, elf: &[u8], args: &str, stdout: Output) -> Result<Pid, 
 
 /// Like `spawn`, with `cwd` (absolute, normalized) as the current directory.
 pub fn spawn_in(cwd: &str, name: &str, elf: &[u8], args: &str, stdout: Output) -> Result<Pid, ExecError> {
+    spawn_with(
+        name,
+        elf,
+        args,
+        Options {
+            cwd,
+            ..Options::new(stdout)
+        },
+    )
+}
+
+/// Loads `elf` into a new address space and starts it as configured in `opts`.
+pub fn spawn_with(name: &str, elf: &[u8], args: &str, opts: Options) -> Result<Pid, ExecError> {
     if args.len() > MAX_ARGS_LEN {
         return Err(ExecError::ArgsTooLong);
     }
@@ -190,17 +251,23 @@ pub fn spawn_in(cwd: &str, name: &str, elf: &[u8], args: &str, stdout: Output) -
             pid,
             Process {
                 name: String::from(name),
-                cwd: String::from(cwd),
+                cwd: String::from(opts.cwd),
                 files: alloc::vec![Some(Handle::Stdin), Some(Handle::Stdout), Some(Handle::Stdout)],
                 space: Some(space),
                 heap_start,
                 heap_end: heap_start,
-                stdout,
+                stdout: opts.stdout,
                 stdin_pending: Vec::new(),
                 status: None,
-                kill_requested: false,
+                kill_requested: None,
+                parent: opts.parent,
+                orphan: false,
+                ignore_interrupt: opts.ignore_interrupt,
             },
         );
+        if opts.foreground {
+            FOREGROUND.store(pid, Ordering::Relaxed);
+        }
         pid
     });
     Ok(pid)
@@ -242,7 +309,22 @@ pub fn exit_current(status: ExitStatus) -> ! {
         let p = procs.get_mut(&pid).expect("exit_current: not a user process");
         p.status = Some(status);
         p.files.clear();
-        p.space.take()
+        let space = p.space.take();
+        let (parent, orphan) = (p.parent, p.orphan);
+        // The console goes back to the parent (if it is still alive)
+        if FOREGROUND.load(Ordering::Relaxed) == pid {
+            let next = parent.filter(|pp| procs.get(pp).is_some_and(|q| q.status.is_none()));
+            FOREGROUND.store(next.unwrap_or(0), Ordering::Relaxed);
+        }
+        // Our children: finished ones are dropped, running ones become orphans
+        procs.retain(|_, c| c.parent != Some(pid) || c.status.is_none());
+        for c in procs.values_mut().filter(|c| c.parent == Some(pid)) {
+            c.orphan = true;
+        }
+        if orphan {
+            procs.remove(&pid); // nobody will wait for us
+        }
+        space
     };
     // Switch back to the kernel's page tables before freeing our own
     task::set_current_cr3(paging::kernel_root());
@@ -258,22 +340,78 @@ pub fn kill_current(reason: String) -> ! {
 }
 
 /// Asks process `pid` to end. It dies the next time it is interrupted in
-/// user mode or returns from a system call. Returns false for unknown pids.
+/// user mode or returns from a system call; a blocked process is woken up.
+/// Returns false for unknown or already ended pids.
 pub fn kill(pid: Pid) -> bool {
+    kill_with_reason(pid, "killed")
+}
+
+fn kill_with_reason(pid: Pid, reason: &'static str) -> bool {
     without_interrupts(|| {
-        PROCESSES
+        let found = PROCESSES
             .lock()
             .get_mut(&pid)
-            .map(|p| p.kill_requested = true)
-            .is_some()
+            .filter(|p| p.status.is_none())
+            .map(|p| p.kill_requested = Some(reason))
+            .is_some();
+        if found {
+            task::wake(pid);
+        }
+        found
     })
+}
+
+/// Ctrl+C, called by the keyboard/serial interrupt handlers. Returns true if
+/// the key was consumed (the foreground process will die), false if it should
+/// be delivered as input.
+pub fn interrupt_foreground() -> bool {
+    let pid = FOREGROUND.load(Ordering::Relaxed);
+    if pid == 0 {
+        return false;
+    }
+    let ignores = without_interrupts(|| PROCESSES.lock().get(&pid).is_none_or(|p| p.ignore_interrupt));
+    !ignores && kill_with_reason(pid, "interrupted")
+}
+
+/// Whether the current process has a pending kill (for blocking syscalls).
+pub fn kill_pending() -> bool {
+    with_current(|p| p.kill_requested.is_some()).unwrap_or(false)
 }
 
 /// Called on the way back to user mode: honours a pending `kill`.
 pub fn check_killed() {
-    if with_current(|p| p.kill_requested) == Some(true) {
-        kill_current(String::from("killed"));
+    if let Some(Some(reason)) = with_current(|p| p.kill_requested) {
+        kill_current(String::from(reason));
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WaitError {
+    /// No such process, or not a child of the caller.
+    NotAChild,
+    /// The waiting process itself was killed.
+    Interrupted,
+}
+
+/// `wait` for the system call: only for children of the current process,
+/// and aborted when the caller gets killed.
+pub fn wait_child(pid: Pid) -> Result<ExitStatus, WaitError> {
+    let me = task::current_id();
+    let is_child = without_interrupts(|| PROCESSES.lock().get(&pid).is_some_and(|p| p.parent == Some(me)));
+    if !is_child {
+        return Err(WaitError::NotAChild);
+    }
+    if !task::join_or_abort(pid, kill_pending) {
+        return Err(WaitError::Interrupted);
+    }
+    without_interrupts(|| PROCESSES.lock().remove(&pid))
+        .and_then(|p| p.status)
+        .ok_or(WaitError::NotAChild)
+}
+
+/// Parent of process `pid`, if it is a process with a parent.
+pub fn parent_of(pid: Pid) -> Option<Pid> {
+    without_interrupts(|| PROCESSES.lock().get(&pid).and_then(|p| p.parent))
 }
 
 /// Number of processes in the table (running or not yet waited for).
@@ -561,6 +699,33 @@ mod tests {
         task::yield_now();
         let after = crate::mem::pmm::stats().free_frames;
         assert!(before.saturating_sub(after) <= 4, "leaked {} frames", before - after);
+    }
+
+    #[test_case]
+    fn ctrl_c_kills_the_foreground_process() {
+        let elf = elf::build_test_elf(&[0xEB, 0xFE], 0); // jmp $
+        let opts = Options {
+            foreground: true,
+            ..Options::new(Output::Console)
+        };
+        let pid = spawn_with("spinner", &elf, "", opts).unwrap();
+        assert_eq!(foreground(), pid);
+        time::sleep_ms(20);
+        assert!(interrupt_foreground(), "Ctrl+C not consumed");
+        assert_eq!(wait(pid), Some(ExitStatus::Killed(String::from("interrupted"))));
+        assert_eq!(foreground(), 0, "the console was not given back");
+        assert!(!interrupt_foreground(), "no foreground process: the key is input");
+
+        // a process that ignores interrupts gets the key as a byte instead
+        let opts = Options {
+            foreground: true,
+            ignore_interrupt: true,
+            ..Options::new(Output::Console)
+        };
+        let pid = spawn_with("shell-like", &elf, "", opts).unwrap();
+        assert!(!interrupt_foreground());
+        assert!(kill(pid));
+        assert_eq!(wait(pid), Some(ExitStatus::Killed(String::from("killed"))));
     }
 
     #[test_case]

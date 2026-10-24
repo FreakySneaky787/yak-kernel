@@ -154,13 +154,23 @@ pub fn try_read_key() -> Option<KeyEvent> {
 
 /// Waits for the next key event from keyboard or serial port.
 pub fn read_key() -> KeyEvent {
+    read_key_or_abort(|| false).expect("read_key aborted")
+}
+
+/// Like `read_key`, but returns `None` as soon as `abort()` is true (it is
+/// checked again whenever the thread is woken, e.g. by `task::wake`).
+pub fn read_key_or_abort(abort: impl Fn() -> bool) -> Option<KeyEvent> {
     loop {
         if let Some(event) = try_read_key() {
-            return event;
+            return Some(event);
         }
         // Check and block atomically: with interrupts off, no input can
         // arrive between the check and putting the thread on the wait list.
         disable_interrupts();
+        if abort() {
+            enable_interrupts();
+            return None;
+        }
         if keyboard::has_pending() || serial::has_pending() {
             enable_interrupts();
         } else if crate::task::is_running() {

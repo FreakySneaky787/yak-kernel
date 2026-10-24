@@ -744,8 +744,14 @@ impl Shell {
         } else {
             process::Output::Console
         };
-        let status = process::run_in(&self.cwd, name, &image, &args.join("\0"), output)
-            .map_err(|e| format!("{}: {}", path, e))?;
+        // In the foreground: Ctrl+C kills the program
+        let opts = process::Options {
+            cwd: &self.cwd,
+            foreground: true,
+            ..process::Options::new(output)
+        };
+        let pid = process::spawn_with(name, &image, &args.join("\0"), opts).map_err(|e| format!("{}: {}", path, e))?;
+        let status = process::wait(pid).ok_or("process vanished")?;
         out.write_str(&String::from_utf8_lossy(&sink.lock())).ok();
         exit_status_result(name, status)
     }
