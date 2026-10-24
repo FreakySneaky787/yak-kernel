@@ -133,6 +133,16 @@
   | 18 | `chdir(path, len)` | `-ENOTDIR` for files |
   | 19 | `kshell(line, len)` | transitional: runs a kernel shell built-in (not cd/pwd/history/run) in the caller's cwd and output |
   | 20 | `kcommands(buf, len)` | NUL-separated names usable with `kshell` |
+  | 21 | `pipe(*[u32; 2])` | read end, write end |
+  | 22 | `dup(fd)` | lowest free fd for the same object |
+  | 23 | `dup2(fd, new_fd)` | closes what was at `new_fd` |
+  | 24 | `isatty(fd)` | 1 for the console (stdin, stdout to the console), else 0 |
+- **Pipes** (`process::pipe`): bounded queue (64 KiB) + reader/writer counts. A descriptor holds a `PipeEnd`; `Clone`
+  (dup, dup2, spawn) increments, `Drop` (close, process exit) decrements and notifies. Read blocks while empty with writers,
+  returns 0 without; write blocks while full with readers, `EPIPE` without. Waiters sleep on `Wait::Pipe(id)`; the pipe lock is
+  only taken with interrupts disabled (descriptors are dropped under the process table lock). Kills abort the wait (`EINTR`).
+- **Descriptor inheritance**: `spawn` clones the parent's fds 0–2 into the child (other fds are not inherited). A shell
+  redirects by `dup2`-ing a pipe end or file over 0/1 before `spawn` and restoring its saved copies afterwards.
 - **Process tree**: `parent` (None = started by the kernel; only the kernel waits for those). When a process ends, finished
   children are dropped and running ones become orphans, removed from the table at their own exit (nobody waits for them).
 - **Kill / Ctrl+C**: `kill` stores a reason and `task::wake`s the target; blocking syscalls use abortable waits
@@ -146,7 +156,9 @@
 - **init**: `kernel_main` runs `process::run_init("/bin/sh")` (foreground, `ignore_interrupt`) and waits; when it is missing or
   exits, the kernel shell runs on thread 0 as before.
 - **`/bin/sh`** (`user/src/bin/sh/`): compiles the kernel's `shell/line_editor.rs` and `shell/parser.rs` with `#[path]`; both
-  sides provide a `keys` module (`Key`, `KeyEvent`) next to them. `read(0)` delivers keys as terminal bytes (VT100 sequences
+  sides provide a `keys` module (`Key`, `KeyEvent`) next to them. Pipelines: for each stage, stdin = previous pipe (or `<`
+  file), stdout = new pipe (or `>`/`>>` file), then the stage runs (built-in inline, program spawned); all children are waited
+  for in order, only the last exit code is reported, kills always; an "interrupted" stage kills the rest. `read(0)` delivers keys as terminal bytes (VT100 sequences
   for arrows, Home/End, Delete, PageUp/Down, Insert); `keys::Decoder` turns them back into `KeyEvent`s. Order of lookup:
   sh built-ins, kernel built-ins (`kshell`), program path / `/bin/<name>`.
 - **Files**: each process has a cwd (inherited from the spawner, paths are normalized against it) and up to 32 file descriptors

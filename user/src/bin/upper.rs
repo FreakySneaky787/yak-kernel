@@ -10,7 +10,7 @@ ulib::entry!(main);
 fn main(_args: ulib::Args) -> i32 {
     print!("Type a line: ");
     let mut buf = [0u8; 256];
-    let line = io::read_line(&mut buf);
+    let line = io::read_line(&mut buf).unwrap_or("");
     for c in line.chars().flat_map(char::to_uppercase) {
         print!("{}", c);
     }

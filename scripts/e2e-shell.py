@@ -86,7 +86,16 @@ STEPS = [
     ("append /fruits.txt apple\r", [], ["error"]),
     ("append /fruits.txt banana\r", [], ["error"]),
     ("sort /fruits.txt\r", ["apple\r\nbanana\r\ncherry"], ["error"]),
-    ("sort\rzebra\rant\r\r", ["ant\r\nzebra"], ["error"]),  # typed lines, ended by an empty one (serial: \r\n)
+    ("sort\rzebra\rant\r\x04", ["ant\r\nzebra"], ["error"]),  # typed lines, ended by Ctrl+D (serial: \r\n)
+    # pipes and redirection
+    ("ls /bin | grep test | sort -r\r", ["spawntest", "pipetest", "heaptest", "fstest"], ["error"]),
+    ("echo first > /pipe.txt\r", [], ["error"]),
+    ("echo second >> /pipe.txt\r", [], ["error"]),
+    ("cat < /pipe.txt | sort -r | wc\r", ["      2       2      13"], ["error"]),
+    ("ps > /ps.txt\r", [], ["error"]),
+    ("grep sh /ps.txt\r", ["sh"], ["error"]),
+    ("fault spin | cat\r" + PAUSE + CTRL_C, ["fault was killed: interrupted"], []),
+    ("pipetest\r", ["pipetest: all checks passed"], ["FAIL"]),
     ("hello e2e world\r", ["Hello from user space! I am process", "arg 1: e2e", "arg 2: world", "Bye!"], ["error"]),
     ("upp\t\rhello Welt äöü\r", ["Type a line: hello Welt äöü", "HELLO WELT ÄÖÜ"], ["error"]),  # completion + stdin
     ("fault null\r", ["fault was killed: page fault at 0x0"], []),

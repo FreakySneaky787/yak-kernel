@@ -35,6 +35,13 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 | 19 | Processes from processes: `spawn`/`wait`/`kill` syscalls, Ctrl+C | ✅ | Ctrl+C unit tests (foreground, ignore, raw scancode tracker), `spawntest` (17 checks incl. orphans), 6 E2E steps (Ctrl+C over serial), PS/2 Ctrl+C checked via `sendkey` |
 | 20 | Shell as a user program (`/bin/sh` started as `init`, kernel shell as fallback) | ✅ | `builtins_for_user_space`, scripted `/bin/sh` session in the integration test (injected serial input), whole E2E suite (72 steps) now against `/bin/sh` + `exit` fallback |
 
+## Stage 4: a usable system (agreed with the user on 2026-10-24)
+| # | Milestone | Status | Tests |
+|---|---|---|---|
+| 21 | Pipes and redirection (`a \| b`, `>`, `>>`, `<`) | ✅ | 4 pipe unit tests (EOF, EPIPE, full pipe with a writer thread, abort), `pipetest` (17 checks incl. 200 KB from a child), scripted `sh` pipeline session, 8 E2E steps |
+| 22 | System information as syscalls (replace `kshell`), `ps`/`mem`/... as programs, `rename` + seek | ⬜ | |
+| 23 | Full-screen text editor as a user program | ⬜ | |
+
 ## Log
 - **2026-10-24** – Setup: Rust nightly 1.101 (rustup), target `x86_64-unknown-none`, Limine v11.x-binary.
   M1: kernel boots via BIOS and UEFI, prints "Hello from KernelTry!" on serial, colour bars on the framebuffer (1280×800×32).
@@ -147,6 +154,13 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   E2E test and fixed: the console is lent to a child only while its parent waits for it.
   **Stage 3 complete: 163 in-kernel tests + 6 test kernels + 72 E2E steps green (BIOS and UEFI), init is /bin/sh.**
 
+- **2026-10-24** – User agreed to stage 4 (M21–M23) as proposed.
+- **2026-10-24** – M21: pipes (`process/pipe.rs`: 64 KiB queue, reader/writer counts kept by cloning/dropping `PipeEnd`s,
+  blocking with `Wait::Pipe(id)` + `task::notify`, EOF and EPIPE). Syscalls 21–24 `pipe`, `dup`, `dup2`, `isatty`; children
+  inherit fds 0–2 at `spawn`; `kshell` output follows fd 1. `/bin/sh`: `a | b | c`, `>`, `>>`, `<` via `dup2` around each stage,
+  errors to stderr, Ctrl+C in a pipeline kills the rest of it. `ulib::io::read_line` returns `None` at EOF / Ctrl+D and only
+  echoes on the console; `read_all`, `read_stdin`, `read_input`. `cat`/`sort` read stdin, new `wc`, `grep`, `pipetest`.
+
 ## Open items / later
 - AHCI uses polling; switching to completion interrupts (MSI or the PCI interrupt line) would free the CPU during I/O.
 - Thread-level sleeping mutex (today all shared state uses spin locks with interrupts disabled).
@@ -157,15 +171,13 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 - User space: no FPU/SSE state saving (everything is soft-float), no SMAP/SMEP, heap is mapped eagerly (no demand paging),
   only a single CPU, no signals beyond "kill", no pipes (a child always writes to its parent's output).
 - `kshell`/`kcommands` are a bridge: the information commands (mem, ps, cpu, acpi, lspci, ...) should become real syscalls
-  and programs. No pipes or redirection in `/bin/sh` yet, no scripts, no environment variables.
+  and programs. `/bin/sh`: no scripts, no environment variables, no `2>`, operators must be separate words, built-in output
+  in a pipeline must fit into one pipe (64 KiB) because it is written before the next stage starts.
 - File syscalls: writes always append (no seek, no overwrite in the middle); `read` re-walks the cluster chain per call;
   directory handles are snapshots; no rename syscall yet. Without `/bin` on the disk, the kernel shell has no `ls`/`cat`.
 
 ## Next step
-**Stage 3 is complete.** Stage 4 still has to be agreed with the user. Proposal:
-- **M21 – pipes and redirection:** pipe file descriptors in the kernel, `spawn` with stdin/stdout from fds, `/bin/sh` gets
-  `a | b`, `> file`, `>> file`, `< file` (e.g. `ls /bin | sort -r > list.txt`).
-- **M22 – system information as syscalls:** replace `kshell` step by step (`sysinfo`, process list, disk/PCI info),
-  turn `ps`, `mem`, ... into programs; file operations (`rename`, seek/overwrite) as syscalls.
-- **M23 – a full-screen text editor** as a user program (cursor addressing on the console, load/save files).
-- Later candidates: SMP (more CPU cores), a network card driver (virtio-net/e1000) with a tiny IP stack, FPU/SSE state saving.
+**M22 – system information as syscalls:** a `sysinfo` syscall (memory, uptime, CPU vendor, disk) and a process/thread list
+syscall; `ps`, `mem`, `uptime`, `df` as programs in `user/`; file syscalls `rename` and `seek` (+ writing at an offset in
+FAT32). Shrink `kshell` to the commands that still need the kernel (poweroff, reboot, layout, demo, hexdump, acpi, lspci, …).
+Tests: syscall unit/user tests, E2E against the new programs. Then **M23** (text editor).

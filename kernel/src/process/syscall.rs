@@ -9,6 +9,7 @@
 //! is never held during disk I/O: handlers copy what they need out of the
 //! file descriptor, do the I/O, and update the descriptor afterwards.
 
+use super::pipe::{self, PipeEnd, PipeError};
 use super::{ExitStatus, Handle, MAX_FDS, Output, with_current};
 use crate::arch::x86_64::syscall::SyscallFrame;
 use crate::arch::x86_64::without_interrupts;
@@ -65,6 +66,14 @@ pub mod nr {
     pub const KSHELL: u32 = 19;
     /// kcommands(buf, len) -> length: NUL-separated names usable with `kshell`
     pub const KCOMMANDS: u32 = 20;
+    /// pipe(*mut [u32; 2]) -> 0; fds[0] = read end, fds[1] = write end
+    pub const PIPE: u32 = 21;
+    /// dup(fd) -> new fd for the same object (the lowest free one)
+    pub const DUP: u32 = 22;
+    /// dup2(fd, new_fd) -> new_fd (whatever was at new_fd is closed)
+    pub const DUP2: u32 = 23;
+    /// isatty(fd) -> 1 if fd is the console, 0 otherwise
+    pub const ISATTY: u32 = 24;
 }
 
 pub mod errno {
@@ -88,6 +97,7 @@ pub mod errno {
     pub const ERANGE: i64 = 34;
     pub const ENAMETOOLONG: i64 = 36;
     pub const ENOSYS: i64 = 38;
+    pub const EPIPE: i64 = 32;
     pub const ENOTEMPTY: i64 = 39;
 }
 
@@ -220,6 +230,10 @@ pub extern "C" fn dispatch(frame: &mut SyscallFrame) {
         nr::CHDIR => sys_chdir(a0, a1),
         nr::KSHELL => sys_kshell(a0, a1),
         nr::KCOMMANDS => sys_kcommands(a0, a1),
+        nr::PIPE => sys_pipe(a0),
+        nr::DUP => sys_dup(a0),
+        nr::DUP2 => sys_dup2(a0, a1),
+        nr::ISATTY => sys_isatty(a0),
         _ => Err(errno::ENOSYS),
     };
     frame.rax = match result {
@@ -282,6 +296,7 @@ enum Target {
         writable: bool,
     },
     Dir,
+    Pipe(PipeEnd),
 }
 
 fn target(fd: u64) -> Result<Target, i64> {
@@ -302,6 +317,7 @@ fn target(fd: u64) -> Result<Target, i64> {
                 writable: *writable,
             },
             Handle::Dir { .. } => Target::Dir,
+            Handle::Pipe(end) => Target::Pipe(end.clone()),
         })
     })
     .unwrap_or(Err(errno::EBADF))
@@ -310,18 +326,36 @@ fn target(fd: u64) -> Result<Target, i64> {
 fn sys_write(fd: u64, buf: u64, len: u64) -> SysResult {
     let target = target(fd)?;
     let data = copy_from_user(buf, len)?;
+    write_target(target, &data)
+}
+
+/// Writes `data` to what a descriptor refers to.
+fn write_target(target: Target, data: &[u8]) -> SysResult {
     match target {
-        Target::Stdout(Output::Capture(sink)) => without_interrupts(|| sink.lock().extend_from_slice(&data)),
-        Target::Stdout(Output::Console) => crate::print!("{}", String::from_utf8_lossy(&data)),
+        Target::Stdout(Output::Capture(sink)) => without_interrupts(|| sink.lock().extend_from_slice(data)),
+        Target::Stdout(Output::Console) => crate::print!("{}", String::from_utf8_lossy(data)),
         Target::File {
             path, writable: true, ..
         } => {
-            fs::with_root(|fs| fs.append_file(&path, &data)).map_err(fs_errno)?;
+            fs::with_root(|fs| fs.append_file(&path, data)).map_err(fs_errno)?;
+        }
+        Target::Pipe(end) if end.write => {
+            return end
+                .write(data, super::kill_pending)
+                .map(|n| n as u64)
+                .map_err(pipe_errno);
         }
         Target::Dir => return Err(errno::EISDIR),
         _ => return Err(errno::EBADF),
     }
-    Ok(len)
+    Ok(data.len() as u64)
+}
+
+fn pipe_errno(e: PipeError) -> i64 {
+    match e {
+        PipeError::Broken => errno::EPIPE,
+        PipeError::Interrupted => errno::EINTR,
+    }
 }
 
 fn sys_read(fd: u64, buf: u64, len: u64) -> SysResult {
@@ -346,8 +380,82 @@ fn sys_read(fd: u64, buf: u64, len: u64) -> SysResult {
             });
             Ok(n as u64)
         }
+        Target::Pipe(end) if !end.write => {
+            if !accessible(buf, len, true) {
+                return Err(errno::EFAULT);
+            }
+            let data = end
+                .read(len.min(MAX_READ) as usize, super::kill_pending)
+                .map_err(pipe_errno)?;
+            copy_to_user(buf, &data)?;
+            Ok(data.len() as u64)
+        }
         Target::Dir => Err(errno::EISDIR),
         _ => Err(errno::EBADF),
+    }
+}
+
+/// Puts `handle` into the lowest free descriptor slot.
+fn install(p: &mut super::Process, handle: Handle) -> Result<u64, i64> {
+    let fd = match p.files.iter().position(|h| h.is_none()) {
+        Some(free) => free,
+        None if p.files.len() < MAX_FDS => {
+            p.files.push(None);
+            p.files.len() - 1
+        }
+        None => return Err(errno::EMFILE),
+    };
+    p.files[fd] = Some(handle);
+    Ok(fd as u64)
+}
+
+fn sys_pipe(fds_addr: u64) -> SysResult {
+    if !accessible(fds_addr, 8, true) {
+        return Err(errno::EFAULT);
+    }
+    let (r, w) = pipe::pipe();
+    let fds = with_current(|p| {
+        let rfd = install(p, Handle::Pipe(r))?;
+        match install(p, Handle::Pipe(w)) {
+            Ok(wfd) => Ok([rfd as u32, wfd as u32]),
+            Err(e) => {
+                p.files[rfd as usize] = None;
+                Err(e)
+            }
+        }
+    })
+    .unwrap_or(Err(errno::EBADF))?;
+    copy_struct_to_user(fds_addr, &fds)?;
+    Ok(0)
+}
+
+fn sys_dup(fd: u64) -> SysResult {
+    with_current(|p| {
+        let handle = p.files.get(fd as usize).cloned().flatten().ok_or(errno::EBADF)?;
+        install(p, handle)
+    })
+    .unwrap_or(Err(errno::EBADF))
+}
+
+fn sys_dup2(fd: u64, new_fd: u64) -> SysResult {
+    if new_fd as usize >= MAX_FDS {
+        return Err(errno::EBADF);
+    }
+    with_current(|p| {
+        let handle = p.files.get(fd as usize).cloned().flatten().ok_or(errno::EBADF)?;
+        if p.files.len() <= new_fd as usize {
+            p.files.resize_with(new_fd as usize + 1, || None);
+        }
+        p.files[new_fd as usize] = Some(handle); // drops (closes) the old one
+        Ok(new_fd)
+    })
+    .unwrap_or(Err(errno::EBADF))
+}
+
+fn sys_isatty(fd: u64) -> SysResult {
+    match target(fd)? {
+        Target::Stdin | Target::Stdout(Output::Console) => Ok(1),
+        _ => Ok(0),
     }
 }
 
@@ -390,19 +498,7 @@ fn sys_open(path: u64, path_len: u64, flags: u64) -> SysResult {
     })
     .map_err(fs_errno)?;
 
-    with_current(|p| {
-        let fd = match p.files.iter().position(|h| h.is_none()) {
-            Some(free) => free,
-            None if p.files.len() < MAX_FDS => {
-                p.files.push(None);
-                p.files.len() - 1
-            }
-            None => return Err(errno::EMFILE),
-        };
-        p.files[fd] = Some(handle);
-        Ok(fd as u64)
-    })
-    .unwrap_or(Err(errno::EBADF))
+    with_current(|p| install(p, handle)).unwrap_or(Err(errno::EBADF))
 }
 
 fn sys_close(fd: u64) -> SysResult {
@@ -512,7 +608,11 @@ fn sys_spawn(path: u64, path_len: u64, args: u64, args_len: u64) -> SysResult {
     let args = core::str::from_utf8(&args).map_err(|_| errno::EINVAL)?;
     let image = fs::with_root(|fs| fs.read_file(&path)).map_err(fs_errno)?;
     let me = task::current_id();
-    let (cwd, stdout) = with_current(|p| (p.cwd.clone(), p.stdout.clone())).ok_or(errno::ESRCH)?;
+    let (cwd, stdout, std_files) = with_current(|p| {
+        let fd = |i: usize| p.files.get(i).cloned().flatten();
+        (p.cwd.clone(), p.stdout.clone(), [fd(0), fd(1), fd(2)])
+    })
+    .ok_or(errno::ESRCH)?;
     let name = path.rsplit('/').next().unwrap_or(&path);
     let opts = Options {
         cwd: &cwd,
@@ -520,6 +620,7 @@ fn sys_spawn(path: u64, path_len: u64, args: u64, args_len: u64) -> SysResult {
         parent: Some(me),
         foreground: false, // the console is lent to a child only while we wait for it
         ignore_interrupt: false,
+        std_files: Some(std_files), // the child inherits stdin/stdout/stderr (pipes, redirections)
     };
     super::spawn_with(name, &image, args, opts).map_err(|e| match e {
         ExecError::Elf(_) => errno::ENOEXEC,
@@ -584,15 +685,16 @@ fn sys_kshell(line: u64, line_len: u64) -> SysResult {
     }
     let bytes = copy_from_user(line, line_len)?;
     let line = core::str::from_utf8(&bytes).map_err(|_| errno::EINVAL)?;
-    let (cwd, stdout) = with_current(|p| (p.cwd.clone(), p.stdout.clone())).ok_or(errno::ESRCH)?;
+    let cwd = with_current(|p| p.cwd.clone()).ok_or(errno::ESRCH)?;
     let mut shell = crate::shell::Shell::new();
     shell.set_cwd(&cwd);
-    let ok = match stdout {
-        Output::Console => shell.execute_builtin(line, &mut crate::shell::Stdout),
-        Output::Capture(sink) => {
+    // Output goes to the caller's fd 1 (console directly, anything else buffered)
+    let ok = match target(1)? {
+        Target::Stdout(Output::Console) => shell.execute_builtin(line, &mut crate::shell::Stdout),
+        other => {
             let mut text = String::new();
             let ok = shell.execute_builtin(line, &mut text);
-            without_interrupts(|| sink.lock().extend_from_slice(text.as_bytes()));
+            write_target(other, text.as_bytes())?;
             ok
         }
     };

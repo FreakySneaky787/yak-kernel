@@ -131,6 +131,29 @@ extern "C" fn kmain() -> ! {
         assert!(out.contains(expected), "missing {:?} in:\n{}", expected, out);
     }
 
+    // M21: pipes and redirection
+    let (status, out) = run("pipetest", "");
+    assert_eq!(status, ExitStatus::Exited(0), "{}", out);
+    kernel::serial::inject_rx(
+        b"ls /bin | sort -r | grep e\recho hello > /r.txt\recho more >> /r.txt\rcat < /r.txt | wc\r\
+          mem > /mem.txt\rcat /mem.txt | grep Physical | wc\rgrep nothing /r.txt | wc\recho > \rexit\r",
+    );
+    let (status, out) = run("sh", "");
+    assert_eq!(status, ExitStatus::Exited(0), "{}", out);
+    let r = fs::with_root(|fs| fs.read_file("/r.txt")).unwrap();
+    assert_eq!(r, b"hello\nmore\n");
+    // ls | sort -r | grep e: only names containing an "e", nothing else
+    assert!(out.contains("  spawntest\n") && out.contains("  hello\n"), "{}", out);
+    assert!(!out.contains("  cat\n") && !out.contains("  sh\n"), "{}", out);
+    for expected in [
+        "      2       2      11\n", // cat < /r.txt | wc
+        "      1      16 ",          // one "Physical:" line from the kernel built-in written to a file
+        "      0       0       0\n", // grep without a match, wc still runs (and only the last exit code counts)
+        "missing file name after '>'",
+    ] {
+        assert!(out.contains(expected), "missing {:?} in:\n{}", expected, out);
+    }
+
     assert_eq!(process::count(), 0);
     serial_println!("[ok]");
     exit(ExitCode::Success)

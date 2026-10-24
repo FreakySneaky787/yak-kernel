@@ -212,6 +212,15 @@ Short explanations of every subsystem: what it is and why we need it.
   compiled into the kernel *and* into `/bin/sh`.
 - If `/bin/sh` is missing or you type `exit`, the kernel shell takes over – a safety net while the user space grows.
 
+## M21 – Pipes and redirection
+- A **pipe** is a small buffer inside the kernel with two ends: one process writes into it, another reads from it.
+  If it is empty the reader waits, if it is full the writer waits – so `cat big.txt | wc` works with a fixed 64 KiB buffer.
+- When the last writer closes its end, the reader gets "end of file"; when the last reader is gone, writing fails.
+- **Redirection** is just descriptor juggling: the shell makes fd 1 point to a file (`> file`) or to a pipe, starts the
+  program (which inherits fds 0–2 and has no idea), then puts its own fd 1 back. `dup2(a, b)` = "let b refer to what a
+  refers to". Programs only ever write to fd 1.
+- Programs ask `isatty` whether they talk to a person (echo typed characters, Ctrl+D ends input) or to a file/pipe.
+
 ## Tooling – GNU ld and binutils
 - rustc compiles our code into object files; a **linker** combines them into the final ELF according to `kernel/linker.ld`
   (load address, section order, segments). We use **GNU ld** (`ld.bfd`) for that.

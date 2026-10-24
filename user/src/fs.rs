@@ -38,6 +38,7 @@ impl fmt::Display for Error {
             28 => "no space left on the disk",
             ERANGE => "buffer too small",
             36 => "path too long",
+            32 => "broken pipe",
             39 => "directory not empty",
             _ => return write!(f, "error {}", self.0),
         };

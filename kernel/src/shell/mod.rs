@@ -676,6 +676,7 @@ fn cmd_ps(_: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), String
             task::State::Blocked(task::Wait::Until(_)) => String::from("sleeping"),
             task::State::Blocked(task::Wait::Input) => String::from("wait input"),
             task::State::Blocked(task::Wait::Join(id)) => format!("join {}", id),
+            task::State::Blocked(task::Wait::Pipe(_)) => String::from("wait pipe"),
             task::State::Dead => String::from("dead"),
         };
         writeln!(

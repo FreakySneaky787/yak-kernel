@@ -1,5 +1,5 @@
-//! Prints the lines of files (or of the typed input, ended by an empty
-//! line) in sorted order. Usage: sort [-r] [file...]
+//! Prints the lines of files (or of stdin) in sorted order.
+//! Usage: sort [-r] [file...]   (on the console, end the input with Ctrl+D)
 
 #![no_std]
 #![no_main]
@@ -8,49 +8,30 @@ extern crate alloc;
 
 use alloc::string::String;
 use alloc::vec::Vec;
-use ulib::fs::File;
 use ulib::{eprintln, io, println};
 
 ulib::entry!(main);
 
-fn read_all(path: &str) -> Result<Vec<u8>, ulib::fs::Error> {
-    let mut file = File::open(path)?;
-    let mut data = Vec::new();
-    let mut buf = [0u8; 4096];
-    loop {
-        match file.read(&mut buf)? {
-            0 => return Ok(data),
-            n => data.extend_from_slice(&buf[..n]),
-        }
-    }
-}
-
 fn main(args: ulib::Args) -> i32 {
     let mut reverse = false;
-    let mut lines: Vec<String> = Vec::new();
-    let mut files = 0;
+    let mut files = Vec::new();
     for arg in args {
-        if arg == "-r" {
-            reverse = true;
-            continue;
-        }
-        files += 1;
-        match read_all(arg) {
-            Ok(data) => lines.extend(String::from_utf8_lossy(&data).lines().map(String::from)),
-            Err(e) => {
-                eprintln!("sort: {}: {}", arg, e);
-                return 1;
-            }
+        match arg {
+            "-r" => reverse = true,
+            _ => files.push(arg),
         }
     }
-    if files == 0 {
-        let mut buf = [0u8; 256];
-        loop {
-            let line = io::read_line(&mut buf);
-            if line.is_empty() {
-                break;
+    if files.is_empty() {
+        files.push("-");
+    }
+    let mut lines: Vec<String> = Vec::new();
+    for path in files {
+        match io::read_input(Some(path)) {
+            Ok(data) => lines.extend(String::from_utf8_lossy(&data).lines().map(String::from)),
+            Err(e) => {
+                eprintln!("sort: {}: {}", path, e);
+                return 1;
             }
-            lines.push(String::from(line));
         }
     }
     lines.sort();

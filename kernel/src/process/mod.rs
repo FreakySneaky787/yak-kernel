@@ -32,6 +32,7 @@
 //! (background, orphans) never get it.
 
 pub mod elf;
+pub mod pipe;
 pub mod syscall;
 
 use crate::arch::x86_64::{disable_interrupts, without_interrupts};
@@ -120,7 +121,9 @@ pub enum Output {
 /// Maximum number of file descriptors per process.
 pub const MAX_FDS: usize = 32;
 
-/// What a file descriptor refers to.
+/// What a file descriptor refers to. Cloning a handle (dup, spawn) gives an
+/// independent descriptor for the same object.
+#[derive(Clone)]
 pub enum Handle {
     /// Keyboard + serial input.
     Stdin,
@@ -135,6 +138,13 @@ pub enum Handle {
     },
     /// A directory opened for `readdir`: a snapshot of its entries.
     Dir { entries: Vec<DirEntry>, next: usize },
+    /// One end of a pipe.
+    Pipe(pipe::PipeEnd),
+}
+
+/// The descriptor table of a process started without a parent.
+fn standard_files() -> Vec<Option<Handle>> {
+    alloc::vec![Some(Handle::Stdin), Some(Handle::Stdout), Some(Handle::Stdout)]
 }
 
 pub struct Process {
@@ -171,6 +181,8 @@ pub struct Options<'a> {
     /// Make the new process the foreground process (Ctrl+C goes to it).
     pub foreground: bool,
     pub ignore_interrupt: bool,
+    /// Descriptors 0..2 for the new process (default: console in/out).
+    pub std_files: Option<[Option<Handle>; 3]>,
 }
 
 impl<'a> Options<'a> {
@@ -181,6 +193,7 @@ impl<'a> Options<'a> {
             parent: None,
             foreground: false,
             ignore_interrupt: false,
+            std_files: None,
         }
     }
 }
@@ -254,7 +267,7 @@ pub fn spawn_with(name: &str, elf: &[u8], args: &str, opts: Options) -> Result<P
             Process {
                 name: String::from(name),
                 cwd: String::from(opts.cwd),
-                files: alloc::vec![Some(Handle::Stdin), Some(Handle::Stdout), Some(Handle::Stdout)],
+                files: opts.std_files.map_or_else(standard_files, |f| f.into_iter().collect()),
                 space: Some(space),
                 heap_start,
                 heap_end: heap_start,

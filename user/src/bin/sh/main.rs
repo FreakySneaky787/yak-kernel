@@ -7,6 +7,12 @@
 //! - Other words: a kernel built-in (mem, ps, write, ...) runs through the
 //!   `kshell` system call; otherwise a program path or a name in /bin is
 //!   started as a child and waited for.
+//! - Pipelines and redirections: `a | b | c`, `> file`, `>> file`, `< file`.
+//!   The operators must be separate words (`ls > x`, not `ls>x`). Before each
+//!   stage starts, stdin/stdout are pointed at the pipe or file with `dup2`
+//!   (children inherit fds 0-2); afterwards the shell's own are restored.
+//!   Built-ins in a pipeline run inside the shell, so their output must fit
+//!   into the pipe (64 KiB) - it is written before the next stage starts.
 
 #![no_std]
 #![no_main]
@@ -26,7 +32,7 @@ use line_editor::{EditResult, LineEditor};
 use ulib::fs::{self, Dir};
 use ulib::io::Stdout;
 use ulib::process::{self, ExitStatus};
-use ulib::{print, println, sys};
+use ulib::{eprintln, print, println, sys};
 
 ulib::entry!(main);
 
@@ -53,8 +59,9 @@ struct Shell {
     kernel_commands: Vec<String>,
 }
 
+/// Errors go to stderr: they must not end up in a pipe or file.
 fn error(text: &str) {
-    println!("\x1b[91merror:\x1b[0m {}", text);
+    eprintln!("\x1b[91merror:\x1b[0m {}", text);
 }
 
 fn cwd() -> String {
@@ -137,13 +144,76 @@ impl Shell {
                 return None;
             }
         };
-        let Some(name) = words.first() else { return None };
+        if words.is_empty() {
+            return None;
+        }
+        let stages = match parse_pipeline(&words) {
+            Ok(s) => s,
+            Err(e) => {
+                error(&e);
+                return None;
+            }
+        };
+        let saved = (sys::dup(sys::STDIN) as u64, sys::dup(sys::STDOUT) as u64);
+        let mut prev_read: Option<u64> = None;
+        let mut children: Vec<(String, u64)> = Vec::new();
+        let mut exit = None;
+        for (i, stage) in stages.iter().enumerate() {
+            // stdin: the previous pipe, a file, or the shell's own
+            match prev_read.take() {
+                Some(r) => {
+                    sys::dup2(r, sys::STDIN);
+                    sys::close(r);
+                }
+                None => {
+                    sys::dup2(saved.0, sys::STDIN);
+                }
+            }
+            // stdout: a new pipe to the next stage, or the shell's own
+            if i + 1 < stages.len() {
+                let mut fds = [0u32; 2];
+                if sys::pipe(&mut fds) < 0 {
+                    restore(saved);
+                    error("cannot create a pipe");
+                    break;
+                }
+                sys::dup2(fds[1] as u64, sys::STDOUT);
+                sys::close(fds[1] as u64);
+                prev_read = Some(fds[0] as u64);
+            } else {
+                sys::dup2(saved.1, sys::STDOUT);
+            }
+            if let Err(e) = stage.redirect() {
+                restore(saved);
+                error(&e);
+                break;
+            }
+            match self.run_stage(&stage.words) {
+                Stage::Done => {}
+                Stage::Exit(code) => exit = Some(code),
+                Stage::Spawned(name, pid) => children.push((name, pid)),
+                Stage::Failed(e) => error(&e), // stderr: still the console
+            }
+        }
+        restore(saved);
+        if let Some(r) = prev_read {
+            sys::close(r);
+        }
+        sys::close(saved.0);
+        sys::close(saved.1);
+        wait_all(&children);
+        exit
+    }
+
+    /// Runs one stage with the already redirected stdin/stdout.
+    fn run_stage(&mut self, words: &[String]) -> Stage {
+        let name = words[0].as_str();
         let args = &words[1..];
-        match name.as_str() {
+        match name {
             "cd" => {
                 let dir = args.first().map_or("/", |s| s.as_str());
                 if let Err(e) = fs::chdir(dir) {
-                    error(&alloc::format!("{}: {}", dir, e));
+                    return Stage::Failed(alloc::format!("{}: {}", dir, e));
                 }
             }
             "pwd" => println!("{}", cwd()),
@@ -154,20 +224,22 @@ impl Shell {
                 }
             }
             "help" => self.help(),
-            "exit" => return Some(args.first().and_then(|c| c.parse().ok()).unwrap_or(0)),
+            "exit" => return Stage::Exit(args.first().and_then(|c| c.parse().ok()).unwrap_or(0)),
             "run" => match args.first() {
-                Some(path) => run_program(path, &args[1..]),
-                None => error("usage: run <program> [args...]"),
+                Some(path) => return spawn_program(path, &args[1..]),
+                None => return Stage::Failed(String::from("usage: run <program> [args...]")),
             },
             _ if self.kernel_commands.iter().any(|c| c == name) => {
-                sys::kshell(line); // the kernel prints its own errors
+                sys::kshell(&quote_line(words)); // the kernel prints its own errors
             }
-            _ => match find_program(name) {
-                Some(path) => run_program(&path, args),
-                None => error(&alloc::format!("unknown command '{}' (try 'help')", name)),
-            },
+            _ => {
+                return match find_program(name) {
+                    Some(path) => spawn_program(&path, args),
+                    None => Stage::Failed(alloc::format!("unknown command '{}' (try 'help')", name)),
+                };
+            }
         }
-        None
+        Stage::Done
     }
 
     fn help(&self) {
@@ -195,13 +267,136 @@ fn find_program(name: &str) -> Option<String> {
     fs::stat(&path).ok().filter(|s| s.kind == sys::KIND_FILE).map(|_| path)
 }
 
-fn run_program(path: &str, args: &[String]) {
-    let name = path.rsplit('/').next().unwrap_or(path);
-    match process::run(path, args.iter().map(String::as_str)) {
-        Ok(ExitStatus::Exited(0)) => {}
-        Ok(ExitStatus::Exited(code)) => error(&alloc::format!("{} exited with code {}", name, code)),
-        Ok(ExitStatus::Killed(reason)) => error(&alloc::format!("{} was killed: {}", name, reason)),
-        Err(e) => error(&alloc::format!("{}: {}", path, e)),
+enum Stage {
+    Done,
+    Exit(i32),
+    Spawned(String, u64),
+    Failed(String),
+}
+
+/// One command of a pipeline with its redirections.
+struct Command {
+    words: Vec<String>,
+    input: Option<String>,
+    /// file, append?
+    output: Option<(String, bool)>,
+}
+
+impl Command {
+    /// Points stdin/stdout at the redirection files (after the pipes are set up).
+    fn redirect(&self) -> Result<(), String> {
+        if let Some(path) = &self.input {
+            let fd = sys::open(path, sys::O_READ);
+            if fd < 0 {
+                return Err(alloc::format!("{}: {}", path, fs::Error(-fd)));
+            }
+            sys::dup2(fd as u64, sys::STDIN);
+            sys::close(fd as u64);
+        }
+        if let Some((path, append)) = &self.output {
+            let mut flags = sys::O_WRITE | sys::O_CREATE;
+            if !append {
+                flags |= sys::O_TRUNCATE;
+            }
+            let fd = sys::open(path, flags);
+            if fd < 0 {
+                return Err(alloc::format!("{}: {}", path, fs::Error(-fd)));
+            }
+            sys::dup2(fd as u64, sys::STDOUT);
+            sys::close(fd as u64);
+        }
+        Ok(())
+    }
+}
+
+/// Splits words at `|` and pulls out `<`, `>`, `>>` with their file names.
+fn parse_pipeline(words: &[String]) -> Result<Vec<Command>, String> {
+    let mut commands = Vec::new();
+    for part in words.split(|w| w == "|") {
+        let mut cmd = Command {
+            words: Vec::new(),
+            input: None,
+            output: None,
+        };
+        let mut it = part.iter();
+        while let Some(w) = it.next() {
+            match w.as_str() {
+                "<" | ">" | ">>" => {
+                    let file = it
+                        .next()
+                        .ok_or_else(|| alloc::format!("missing file name after '{}'", w))?;
+                    if w == "<" {
+                        cmd.input = Some(file.clone());
+                    } else {
+                        cmd.output = Some((file.clone(), w == ">>"));
+                    }
+                }
+                _ => cmd.words.push(w.clone()),
+            }
+        }
+        if cmd.words.is_empty() {
+            return Err(String::from("missing command in pipeline"));
+        }
+        commands.push(cmd);
+    }
+    Ok(commands)
+}
+
+/// Puts the shell's own stdin/stdout back.
+fn restore(saved: (u64, u64)) {
+    sys::dup2(saved.0, sys::STDIN);
+    sys::dup2(saved.1, sys::STDOUT);
+}
+
+/// Rebuilds a command line for the kernel's parser (every word quoted).
+fn quote_line(words: &[String]) -> String {
+    let mut line = String::new();
+    for w in words {
+        if !line.is_empty() {
+            line.push(' ');
+        }
+        line.push('"');
+        for c in w.chars() {
+            if c == '"' || c == '\\' {
+                line.push('\\');
+            }
+            line.push(c);
+        }
+        line.push('"');
+    }
+    line
+}
+
+fn spawn_program(path: &str, args: &[String]) -> Stage {
+    let name = String::from(path.rsplit('/').next().unwrap_or(path));
+    match process::spawn(path, args.iter().map(String::as_str)) {
+        Ok(pid) => Stage::Spawned(name, pid),
+        Err(e) => Stage::Failed(alloc::format!("{}: {}", path, e)),
+    }
+}
+
+/// Waits for all children of a pipeline (first to last). The last one's exit
+/// code and every kill are reported; after a Ctrl+C the rest is killed too.
+fn wait_all(children: &[(String, u64)]) {
+    let mut interrupted = false;
+    for (i, (name, pid)) in children.iter().enumerate() {
+        if interrupted {
+            let _ = process::kill(*pid);
+        }
+        match process::wait(*pid) {
+            Ok(ExitStatus::Exited(0)) => {}
+            Ok(ExitStatus::Exited(code)) if i + 1 == children.len() => {
+                error(&alloc::format!("{} exited with code {}", name, code))
+            }
+            Ok(ExitStatus::Exited(_)) => {}
+            Ok(ExitStatus::Killed(reason)) => {
+                if reason == "interrupted" {
+                    interrupted = true;
+                }
+                error(&alloc::format!("{} was killed: {}", name, reason))
+            }
+            Err(e) => error(&alloc::format!("wait for {}: {}", name, e)),
+        }
     }
 }
 

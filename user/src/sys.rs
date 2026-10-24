@@ -25,6 +25,10 @@ pub const KILL: u64 = 17;
 pub const CHDIR: u64 = 18;
 pub const KSHELL: u64 = 19;
 pub const KCOMMANDS: u64 = 20;
+pub const PIPE: u64 = 21;
+pub const DUP: u64 = 22;
+pub const DUP2: u64 = 23;
+pub const ISATTY: u64 = 24;
 
 pub const STDIN: u64 = 0;
 pub const STDOUT: u64 = 1;
@@ -221,4 +225,24 @@ pub fn kshell(line: &str) -> i64 {
 /// NUL-separated names of the kernel built-ins usable with `kshell`.
 pub fn kcommands(buf: &mut [u8]) -> i64 {
     unsafe { syscall3(KCOMMANDS, buf.as_mut_ptr() as u64, buf.len() as u64, 0) }
+}
+
+/// Creates a pipe: `fds[0]` reads, `fds[1]` writes.
+pub fn pipe(fds: &mut [u32; 2]) -> i64 {
+    unsafe { syscall3(PIPE, fds.as_mut_ptr() as u64, 0, 0) }
+}
+
+/// A new descriptor for the same object as `fd`.
+pub fn dup(fd: u64) -> i64 {
+    unsafe { syscall3(DUP, fd, 0, 0) }
+}
+
+/// Makes `new_fd` refer to the same object as `fd` (closing what was there).
+pub fn dup2(fd: u64, new_fd: u64) -> i64 {
+    unsafe { syscall3(DUP2, fd, new_fd, 0) }
+}
+
+/// Whether `fd` is the console (keyboard/screen) rather than a file or pipe.
+pub fn isatty(fd: u64) -> bool {
+    unsafe { syscall3(ISATTY, fd, 0, 0) == 1 }
 }

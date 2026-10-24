@@ -42,6 +42,8 @@ pub enum Wait {
     Input,
     /// Waiting for thread `Tid` to exit.
     Join(Tid),
+    /// Waiting for data in / room in the pipe with this id.
+    Pipe(u64),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -309,6 +311,15 @@ pub fn on_tick() {
         s.wake(|w| matches!(w, Wait::Until(t) if t <= now));
     }
     schedule();
+}
+
+/// Wakes every thread blocked with exactly `reason`.
+pub fn notify(reason: Wait) {
+    without_interrupts(|| {
+        if let Some(s) = SCHEDULER.lock().as_mut() {
+            s.wake(|w| w == reason);
+        }
+    });
 }
 
 /// Called from keyboard/serial interrupt handlers.
