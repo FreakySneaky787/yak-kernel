@@ -15,12 +15,14 @@ pub mod font;
 pub mod qemu;
 pub mod serial;
 pub mod testing;
+pub mod time;
 
 /// Gemeinsame Initialisierung für Kernel und alle Test-Binaries.
 pub fn init() {
     serial::init();
     arch::x86_64::gdt::init();
     arch::x86_64::interrupts::init();
+    arch::x86_64::irq::init();
     console::init();
     if !boot::BASE_REVISION.is_supported() {
         serial_println!(
@@ -29,6 +31,7 @@ pub fn init() {
         );
         arch::x86_64::halt_loop();
     }
+    arch::x86_64::enable_interrupts();
 }
 
 /// Einsprungpunkt für `cargo test --lib`.

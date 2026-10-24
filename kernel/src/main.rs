@@ -15,7 +15,9 @@ extern "C" fn kmain() -> ! {
         kernel::serial_println!("Konsole: {}x{} Zeichen", cols, rows);
     }
     println!("Hello from KernelTry! Grüße aus dem Kernel. äöüß");
-    arch::x86_64::halt_loop()
+    kernel::time::sleep_ms(1000);
+    println!("Timer laeuft: {} ms seit Boot", kernel::time::uptime_ms());
+    arch::x86_64::idle_loop()
 }
 
 #[panic_handler]

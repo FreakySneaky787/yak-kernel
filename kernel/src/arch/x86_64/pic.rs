@@ -1,0 +1,99 @@
+//! Zwei kaskadierte 8259-PICs (Programmable Interrupt Controller).
+//!
+//! Sie sammeln die 16 Hardware-IRQs (Timer, Tastatur, …) und melden sie der
+//! CPU als Interrupt-Vektor. Standardmäßig liegen IRQ 0–7 auf den Vektoren
+//! 8–15 – genau dort, wo auch CPU-Exceptions liegen (8 = Double Fault!).
+//! Darum legen wir sie auf 32–47 um.
+
+use super::port::{inb, outb};
+
+pub const PIC1_OFFSET: u8 = 32;
+pub const PIC2_OFFSET: u8 = PIC1_OFFSET + 8;
+
+const PIC1_CMD: u16 = 0x20;
+const PIC1_DATA: u16 = 0x21;
+const PIC2_CMD: u16 = 0xA0;
+const PIC2_DATA: u16 = 0xA1;
+
+const ICW1_INIT: u8 = 0x10;
+const ICW1_ICW4: u8 = 0x01;
+const ICW4_8086: u8 = 0x01;
+const CMD_EOI: u8 = 0x20;
+const CMD_READ_ISR: u8 = 0x0B;
+
+/// Kurze Pause: ein Schreibzugriff auf den unbenutzten Port 0x80 dauert ~1 µs.
+fn io_wait() {
+    unsafe { outb(0x80, 0) };
+}
+
+/// PICs initialisieren (Remap) und alle IRQs maskieren.
+pub fn init() {
+    unsafe {
+        // ICW1: Initialisierung starten, ICW4 folgt
+        outb(PIC1_CMD, ICW1_INIT | ICW1_ICW4);
+        io_wait();
+        outb(PIC2_CMD, ICW1_INIT | ICW1_ICW4);
+        io_wait();
+        // ICW2: Vektor-Offsets
+        outb(PIC1_DATA, PIC1_OFFSET);
+        io_wait();
+        outb(PIC2_DATA, PIC2_OFFSET);
+        io_wait();
+        // ICW3: Slave hängt an IRQ2 des Masters
+        outb(PIC1_DATA, 1 << 2);
+        io_wait();
+        outb(PIC2_DATA, 2);
+        io_wait();
+        // ICW4: 8086-Modus
+        outb(PIC1_DATA, ICW4_8086);
+        io_wait();
+        outb(PIC2_DATA, ICW4_8086);
+        io_wait();
+        // Alles maskieren; einzelne IRQs werden mit `unmask` freigeschaltet
+        outb(PIC1_DATA, 0xFF);
+        outb(PIC2_DATA, 0xFF);
+    }
+}
+
+fn data_port(irq: u8) -> (u16, u8) {
+    if irq < 8 { (PIC1_DATA, irq) } else { (PIC2_DATA, irq - 8) }
+}
+
+pub fn unmask(irq: u8) {
+    let (port, bit) = data_port(irq);
+    unsafe { outb(port, inb(port) & !(1 << bit)) };
+    if irq >= 8 {
+        unmask(2); // Kaskade zum Slave muss offen sein
+    }
+}
+
+pub fn mask(irq: u8) {
+    let (port, bit) = data_port(irq);
+    unsafe { outb(port, inb(port) | (1 << bit)) };
+}
+
+/// Aktuelle Masken (Master, Slave) – Bit gesetzt = IRQ gesperrt.
+pub fn masks() -> (u8, u8) {
+    unsafe { (inb(PIC1_DATA), inb(PIC2_DATA)) }
+}
+
+/// „End of Interrupt“: Dem PIC sagen, dass der IRQ fertig behandelt ist.
+/// Ohne EOI schickt er keine weiteren Interrupts dieser oder niedrigerer Priorität.
+pub fn end_of_interrupt(irq: u8) {
+    unsafe {
+        if irq >= 8 {
+            outb(PIC2_CMD, CMD_EOI);
+        }
+        outb(PIC1_CMD, CMD_EOI);
+    }
+}
+
+/// In-Service-Register: welche IRQs gerade behandelt werden. Für die Erkennung
+/// von „spurious“ IRQ 7/15 (Störsignale ohne echten Interrupt).
+pub fn in_service() -> u16 {
+    unsafe {
+        outb(PIC1_CMD, CMD_READ_ISR);
+        outb(PIC2_CMD, CMD_READ_ISR);
+        (inb(PIC2_CMD) as u16) << 8 | inb(PIC1_CMD) as u16
+    }
+}

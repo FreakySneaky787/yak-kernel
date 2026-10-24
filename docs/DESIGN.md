@@ -45,8 +45,13 @@ IST1 (`gdt::DOUBLE_FAULT_IST`) = 20 KiB statischer Stack für Double Faults. Use
 | Vektor | Was |
 |---|---|
 | 0–31 | CPU-Exceptions (`arch/x86_64/interrupts.rs`), Double Fault (8) auf IST1 |
-| 32–47 | IRQs vom PIC (ab M6) |
+| 32 | IRQ0 – PIT-Timer, 100 Hz |
+| 33 | IRQ1 – PS/2-Tastatur (ab M7) |
+| 39 / 47 | IRQ7 / IRQ15 – Spurious-Behandlung |
+| 34–47 (Rest) | weitere PIC-IRQs, maskiert |
 
+- Interrupt-Controller: 8259-PIC (Legacy). Der **Local APIC ist per MSR abgeschaltet** (siehe BUGS #2), bis wir auf APIC umsteigen.
+- `kernel::init()` schaltet Interrupts am Ende mit `sti` ein. Alles, was einen Lock hält, den ein Handler auch nimmt, muss `without_interrupts` benutzen.
 - Handler nutzen `extern "x86-interrupt"` (nightly `abi_x86_interrupt`). Der Compiler sichert dabei die Register und erzeugt `iretq`. Die IDT-Struktur und alle Gates schreiben wir selbst.
 - `interrupts::install_exception_handlers(&mut Idt)` ist getrennt von `init()`. Tests bauen sich eigene IDTs (siehe `tests/page_fault.rs`).
 - Die Adresse `0x0000_4000_0000_0000` (untere Hälfte) ist unter Limine ungemappt und dient in Tests als „garantiert faultende“ Adresse.

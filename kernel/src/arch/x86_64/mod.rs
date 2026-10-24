@@ -1,7 +1,11 @@
 pub mod gdt;
 pub mod idt;
 pub mod interrupts;
+pub mod lapic;
+pub mod msr;
 pub mod irq;
+pub mod pic;
+pub mod pit;
 pub mod port;
 
 use core::arch::asm;

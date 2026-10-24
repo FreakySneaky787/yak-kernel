@@ -40,3 +40,11 @@ Kurze Erklärungen zu jedem Subsystem: was es ist und warum wir es brauchen.
 - Handler enden mit `iretq` statt `ret`, damit die CPU den Frame wieder abräumt. Das erledigt `extern "x86-interrupt"` für uns.
 - **Page Fault**: In CR2 steht die Adresse, die den Fehler ausgelöst hat. Der Fehlercode sagt, ob die Seite fehlte oder geschützt war, ob gelesen oder geschrieben wurde und ob Kernel oder User zugegriffen hat.
 - **Double Fault**: Tritt auf, wenn beim Behandeln einer Exception eine weitere passiert. Klappt auch der nicht, kommt der **Triple Fault**, und die CPU startet neu. Mit `-no-reboot` bleibt QEMU dann einfach stehen.
+
+## M6 – Hardware-Interrupts, PIC und Timer
+- Geräte melden sich per **IRQ** (Interrupt Request). Der **8259-PIC** sammelt 16 IRQ-Leitungen (zwei Chips à 8, kaskadiert) und reicht sie als Interrupt-Vektor an die CPU weiter.
+- **Remap**: Ab Werk würde IRQ0 als Vektor 8 ankommen, und das ist auch der Double Fault. Deshalb legen wir die IRQs auf 32–47.
+- **EOI** (End of Interrupt): Jeder Handler muss dem PIC melden, dass er fertig ist, sonst kommt kein weiterer Interrupt.
+- Der **PIT** ist ein Zähler mit 1,19 MHz. Teiler 11932 ergibt ~100 Interrupts pro Sekunde, also einen „Tick“ alle 10 ms. Daraus bauen wir Uptime und `sleep`.
+- `hlt` legt die CPU schlafen, bis der nächste Interrupt kommt. So wartet der Kernel, ohne 100 % CPU zu verbrauchen.
+- **APIC**: Moderne CPUs haben pro Kern einen Local APIC. Er sitzt zwischen PIC und CPU. Limine hat seinen PIC-Eingang gesperrt, darum schalten wir ihn vorerst ganz ab (Bug #2).
