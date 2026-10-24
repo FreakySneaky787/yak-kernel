@@ -11,6 +11,14 @@ use kernel::{arch, print, println};
 #[unsafe(no_mangle)]
 extern "C" fn kmain() -> ! {
     kernel::init();
+    // Leave Limine's stack (no guard page) for our own guarded kernel stack
+    let stack = kernel::mem::stack::alloc_stack(kernel::mem::stack::DEFAULT_STACK_PAGES)
+        .expect("cannot allocate the kernel stack");
+    unsafe { arch::x86_64::switch_stack(stack.top.as_u64(), kernel_main) }
+}
+
+/// Runs on the guarded kernel stack.
+extern "C" fn kernel_main() -> ! {
     println!("KernelTry booting...");
     if let Some(console) = kernel::console::CONSOLE.lock().as_ref() {
         let (cols, rows) = console.size();
@@ -23,7 +31,7 @@ extern "C" fn kmain() -> ! {
         mem.usable_bytes() / (1024 * 1024),
         mem.free_bytes() / (1024 * 1024)
     );
-    println!("Uptime: {} ms, Tastatur-Layout: {:?}", kernel::time::uptime_ms(), keyboard::layout());
+    println!("Uptime: {} ms, keyboard layout: {:?}", kernel::time::uptime_ms(), keyboard::layout());
     println!("Type something (echo mode, the shell arrives in M11):");
     print!("> ");
 

@@ -82,6 +82,17 @@ Short explanations of every subsystem: what it is and why we need it.
 - Physical addresses cannot be dereferenced directly because paging is on. Limine maps all of physical memory at a fixed
   offset (**HHDM**, higher-half direct map), so physical `p` is accessible at virtual `p + offset`.
 
+## M9 – Paging
+- Every memory access uses a **virtual** address; the CPU translates it to a physical address through **page tables**.
+  On x86_64 there are 4 levels: PML4 → PDPT → PD → PT, each a 4 KiB table with 512 entries. The address bits 47–39, 38–30, 29–21 and 20–12
+  pick the entry on each level, bits 11–0 are the offset inside the 4 KiB page.
+- Each entry holds a physical address plus flags: present, writable, user-accessible, no-execute, ... A PD/PDPT entry can also map a
+  2 MiB / 1 GiB **huge page** directly.
+- **CR3** holds the physical address of the PML4. After changing an entry, the old translation may still sit in the **TLB** (a cache),
+  so we flush it with `invlpg`.
+- **Guard page**: we leave the page below each kernel stack unmapped. If the stack overflows, the CPU touches that page and faults
+  immediately, instead of silently corrupting the memory below.
+
 ## Tooling – GNU ld and binutils
 - rustc compiles our code into object files; a **linker** combines them into the final ELF according to `kernel/linker.ld`
   (load address, section order, segments). We use **GNU ld** (`ld.bfd`) for that.

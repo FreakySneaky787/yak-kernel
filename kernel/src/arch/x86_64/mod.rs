@@ -40,6 +40,25 @@ pub fn disable_interrupts() {
     unsafe { asm!("cli", options(nomem, nostack)) };
 }
 
+/// Switches to the stack whose top is `top` and calls `entry` on it.
+/// The old stack is abandoned; `entry` must never return.
+///
+/// # Safety
+/// `top` must be the 16-byte aligned top of a mapped, otherwise unused stack.
+pub unsafe fn switch_stack(top: u64, entry: extern "C" fn() -> !) -> ! {
+    unsafe {
+        asm!(
+            "mov rsp, {top}",
+            "xor ebp, ebp", // end of the frame pointer chain (for backtraces)
+            "call {entry}",
+            "ud2",
+            top = in(reg) top,
+            entry = in(reg) entry,
+            options(noreturn),
+        )
+    }
+}
+
 /// Runs `f` with interrupts disabled and restores the previous state
 /// afterwards. Needed whenever code holds a lock that an
 /// interrupt handler might also take (otherwise: deadlock).

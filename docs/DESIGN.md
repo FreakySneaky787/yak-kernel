@@ -26,6 +26,19 @@
 - All access to physical memory goes through the HHDM (`PhysAddr::to_virt`). Allocator calls run with interrupts disabled.
 - `free_frame` panics on double free / invalid addresses – that is always a kernel bug.
 
+## Virtual address space
+| Range | PML4 slot | Use |
+|---|---|---|
+| `0x0000_0000_0000_0000` – `0x0000_7FFF_FFFF_FFFF` | 0–255 | lower half, unused (reserved for user space later) |
+| `0xFFFF_8000_0000_0000` + phys | 256 | HHDM (Limine): all RAM + framebuffer, **no MMIO** |
+| `0xFFFF_FE80_0000_0000` | 509 | scratch area for paging unit tests |
+| `0xFFFF_FF00_0000_0000` | 510 | kernel stacks: `[guard page][stack pages]` per stack, never reused |
+| `0xFFFF_FFFF_8000_0000` | 511 | kernel image (linker script) |
+
+- Page tables: we modify Limine's tables (CR3) through the HHDM; intermediate tables come from the frame allocator and are not freed.
+- Limine enables EFER.NXE (so `NO_EXECUTE` is usable) and CR0.WP (the kernel cannot write read-only pages either).
+- `kmain` switches from Limine's stack to a 64 KiB guarded stack (`mem::stack`) immediately after `kernel::init()`.
+
 ## GDT / TSS
 | Selector | Entry |
 |---|---|

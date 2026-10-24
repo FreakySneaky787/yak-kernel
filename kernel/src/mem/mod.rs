@@ -1,7 +1,9 @@
 //! Memory management: address types, the higher-half direct map (HHDM),
 //! and the physical frame allocator.
 
+pub mod paging;
 pub mod pmm;
+pub mod stack;
 
 use core::fmt;
 use core::sync::atomic::{AtomicU64, Ordering};
