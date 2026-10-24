@@ -489,16 +489,16 @@ mod tests {
         let virt = VirtAddr(TEST_AREA + 0x10_0000);
         map_fresh(virt, 8, Flags::KERNEL_DATA).unwrap(); // may allocate page tables once
         unmap_and_free(virt, 8);
-        let before = crate::mem::pmm::stats().free_frames;
-        map_fresh(virt, 8, Flags::KERNEL_DATA).unwrap();
-        for i in 0..8u64 {
-            let p = VirtAddr(virt.0 + i * PAGE_SIZE).as_mut_ptr::<u64>();
-            unsafe { assert_eq!(p.read_volatile(), 0) }; // zeroed
-            unsafe { p.write_volatile(i) };
-        }
-        assert_eq!(crate::mem::pmm::stats().free_frames, before - 8);
-        unmap_and_free(virt, 8);
-        assert_eq!(crate::mem::pmm::stats().free_frames, before);
+        let lost = crate::mem::pmm::frames_lost(|| {
+            map_fresh(virt, 8, Flags::KERNEL_DATA).unwrap();
+            for i in 0..8u64 {
+                let p = VirtAddr(virt.0 + i * PAGE_SIZE).as_mut_ptr::<u64>();
+                unsafe { assert_eq!(p.read_volatile(), 0) }; // zeroed
+                unsafe { p.write_volatile(i) };
+            }
+            unmap_and_free(virt, 8);
+        });
+        assert_eq!(lost, 0, "unmap_and_free did not give the frames back");
     }
 
     #[test_case]

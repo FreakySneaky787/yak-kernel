@@ -381,12 +381,18 @@ mod tests {
 
     #[test_case]
     fn many_small_allocations_are_reused() {
-        let used_before = stats().used;
+        // Other threads (net thread, other CPUs) allocate meanwhile, so the
+        // byte count of the whole heap is not stable; but if freed blocks were
+        // not reused, 10000 x 32 bytes would make the heap grow by 320 KiB.
+        let total_before = stats().total;
         for i in 0..10_000u64 {
             let b = Box::new([i; 4]);
             core::hint::black_box(&b);
         }
-        assert_eq!(stats().used, used_before);
+        assert!(
+            stats().total <= total_before + 64 * 1024,
+            "the heap grew: freed blocks are not reused"
+        );
     }
 
     #[test_case]

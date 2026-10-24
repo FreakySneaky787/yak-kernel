@@ -271,10 +271,10 @@ pub fn is_running() -> bool {
     RUNNING.load(Ordering::Acquire)
 }
 
+/// The boot CPU's idle thread: the same loop as on the other CPUs (it also
+/// runs jobs sent to this CPU with `smp::run_on`).
 fn idle_loop() {
-    loop {
-        unsafe { core::arch::asm!("sti; hlt", options(nomem, nostack)) };
-    }
+    smp::idle_loop(0)
 }
 
 fn spawn_internal(name: &str, entry: Entry) -> Tid {

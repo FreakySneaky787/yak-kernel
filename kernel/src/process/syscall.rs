@@ -16,7 +16,7 @@ use crate::arch::x86_64::without_interrupts;
 use crate::drivers::scancode::{Key, KeyEvent};
 use crate::fs::{self, fat32::DirEntry, fat32::FsError};
 use crate::mem::address_space::USER_END;
-use crate::net::{self, NetError};
+use crate::net::{self, NetError, tcp};
 use crate::{input, task, time};
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -99,6 +99,14 @@ pub mod nr {
     pub const RECVFROM: u32 = 35;
     /// clock_us() -> microseconds since boot
     pub const CLOCK_US: u32 = 36;
+    /// tcp_connect(ipv4 as u32, port, timeout_ms) -> fd of the connection
+    pub const TCP_CONNECT: u32 = 37;
+    /// tcp_listen(port) -> fd of the listener
+    pub const TCP_LISTEN: u32 = 38;
+    /// tcp_accept(listener fd, *mut SockAddr or 0) -> fd of the next connection (blocks)
+    pub const TCP_ACCEPT: u32 = 39;
+    /// shutdown(fd) -> 0: no more writing (sends FIN), reading goes on
+    pub const SHUTDOWN: u32 = 40;
 }
 
 pub mod errno {
@@ -130,6 +138,8 @@ pub mod errno {
     pub const EADDRINUSE: i64 = 98;
     pub const EHOSTUNREACH: i64 = 113;
     pub const ETIMEDOUT: i64 = 110;
+    pub const ECONNRESET: i64 = 104;
+    pub const ECONNREFUSED: i64 = 111;
 }
 
 /// `open` flags. At least one of READ / WRITE is required.
@@ -277,6 +287,10 @@ pub extern "C" fn dispatch(frame: &mut SyscallFrame) {
         }
         nr::NET_INFO => sys_net_info(a0),
         nr::CLOCK_US => Ok(time::uptime_us()),
+        nr::TCP_CONNECT => sys_tcp_connect(a0, a1, a2),
+        nr::TCP_LISTEN => sys_tcp_listen(a0),
+        nr::TCP_ACCEPT => sys_tcp_accept(a0, a1),
+        nr::SHUTDOWN => sys_shutdown(a0),
         nr::PING => net::ping((a0 as u32).to_be_bytes(), a1 as u16, a2.min(10_000)).map_err(net_errno),
         nr::UDP_SOCKET => sys_udp_socket(a0),
         nr::SENDTO => sys_sendto(a0, a1, a2, a3, a4),
@@ -351,6 +365,7 @@ enum Target {
     Pipe(PipeEnd),
     /// A UDP socket: only `sendto`/`recvfrom` (read/write give EBADF)
     Socket,
+    Tcp(tcp::ConnId),
 }
 
 fn target(fd: u64) -> Result<Target, i64> {
@@ -374,7 +389,8 @@ fn target(fd: u64) -> Result<Target, i64> {
             },
             Handle::Dir { .. } => Target::Dir,
             Handle::Pipe(end) => Target::Pipe(end.clone()),
-            Handle::Udp(_) => Target::Socket,
+            Handle::Udp(_) | Handle::TcpListener(_) => Target::Socket,
+            Handle::Tcp(c) => Target::Tcp(c.0),
         })
     })
     .unwrap_or(Err(errno::EBADF))
@@ -423,6 +439,11 @@ fn write_target(target: Target, data: &[u8]) -> SysResult {
                 .map(|n| n as u64)
                 .map_err(pipe_errno);
         }
+        Target::Tcp(id) => {
+            return tcp::send(id, data, super::kill_pending)
+                .map(|n| n as u64)
+                .map_err(tcp_errno);
+        }
         Target::Dir => return Err(errno::EISDIR),
         _ => return Err(errno::EBADF),
     }
@@ -453,6 +474,14 @@ fn sys_read(fd: u64, buf: u64, len: u64) -> SysResult {
             copy_to_user(buf, &data[..n])?;
             set_offset(fd, offset + n as u64);
             Ok(n as u64)
+        }
+        Target::Tcp(id) => {
+            if !accessible(buf, len, true) {
+                return Err(errno::EFAULT);
+            }
+            let data = tcp::recv(id, len.min(MAX_READ) as usize, super::kill_pending).map_err(tcp_errno)?;
+            copy_to_user(buf, &data)?;
+            Ok(data.len() as u64)
         }
         Target::Pipe(end) if !end.write => {
             if !accessible(buf, len, true) {
@@ -981,6 +1010,76 @@ fn net_errno(e: NetError) -> i64 {
         NetError::AddressInUse => errno::EADDRINUSE,
         NetError::TooLong => errno::EMSGSIZE,
         NetError::Interrupted => errno::EINTR,
+    }
+}
+
+fn tcp_errno(e: tcp::TcpError) -> i64 {
+    match e {
+        tcp::TcpError::Refused => errno::ECONNREFUSED,
+        tcp::TcpError::Reset => errno::ECONNRESET,
+        tcp::TcpError::TimedOut => errno::ETIMEDOUT,
+        tcp::TcpError::AddressInUse => errno::EADDRINUSE,
+        tcp::TcpError::NotConnected => errno::EPIPE,
+        tcp::TcpError::Interrupted => errno::EINTR,
+        tcp::TcpError::Net(e) => net_errno(e),
+    }
+}
+
+fn install_handle(handle: Handle) -> SysResult {
+    with_current(|p| install(p, handle)).unwrap_or(Err(errno::EBADF))
+}
+
+fn sys_tcp_connect(ip: u64, port: u64, timeout_ms: u64) -> SysResult {
+    let port = u16::try_from(port).map_err(|_| errno::EINVAL)?;
+    let id = tcp::connect(
+        (ip as u32).to_be_bytes(),
+        port,
+        timeout_ms.clamp(100, 60_000),
+        super::kill_pending,
+    )
+    .map_err(tcp_errno)?;
+    let conn = alloc::sync::Arc::new(super::TcpConnection(id));
+    install_handle(Handle::Tcp(conn))
+}
+
+fn sys_tcp_listen(port: u64) -> SysResult {
+    let port = u16::try_from(port).ok().filter(|&p| p != 0).ok_or(errno::EINVAL)?;
+    tcp::listen(port).map_err(tcp_errno)?;
+    install_handle(Handle::TcpListener(alloc::sync::Arc::new(super::TcpListener(port))))
+}
+
+fn sys_tcp_accept(fd: u64, from: u64) -> SysResult {
+    let port = with_current(|p| match p.files.get(fd as usize) {
+        Some(Some(Handle::TcpListener(l))) => Ok(l.0),
+        Some(Some(_)) => Err(errno::EINVAL),
+        _ => Err(errno::EBADF),
+    })
+    .unwrap_or(Err(errno::EBADF))?;
+    if from != 0 && !accessible(from, size_of::<SockAddr>() as u64, true) {
+        return Err(errno::EFAULT);
+    }
+    let (id, ip, peer_port) = tcp::accept(port, super::kill_pending).map_err(tcp_errno)?;
+    let conn = alloc::sync::Arc::new(super::TcpConnection(id));
+    if from != 0 {
+        copy_struct_to_user(
+            from,
+            &SockAddr {
+                ip,
+                port: peer_port,
+                _pad: 0,
+            },
+        )?;
+    }
+    install_handle(Handle::Tcp(conn))
+}
+
+fn sys_shutdown(fd: u64) -> SysResult {
+    match target(fd)? {
+        Target::Tcp(id) => {
+            tcp::shutdown(id);
+            Ok(0)
+        }
+        _ => Err(errno::EINVAL),
     }
 }
 

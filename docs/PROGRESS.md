@@ -54,7 +54,7 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 | # | Milestone | Status | Tests |
 |---|---|---|---|
 | 28 | Microsecond clock from the TSC, `time` program, ping in µs | ✅ | 2 TSC unit tests (calibration, agreement with the tick clock), `time hello` in integration test + E2E |
-| 29 | TCP: connect/listen/accept, retransmission, flow control; client and server programs | ⬜ | |
+| 29 | TCP: connect/listen/accept, retransmission, flow control; client and server programs | ✅ | TCP packet test, refused + 100 KB loopback echo in the kernel, `nc`/`echod` between processes, E2E: host echo, 100 KB from the host, host → guest 50 KB via hostfwd |
 | 30 | DHCP and a DNS client; HTTP client (`wget`) and server (`httpd`) | ⬜ | |
 | 31 | Shell: scripts, environment variables, `2>`, background jobs (`&`, `jobs`, `wait`) | ⬜ | |
 | 32 | Storage speed: sector cache for FAT32, AHCI completion interrupts (MSI) | ⬜ | |
@@ -228,6 +228,12 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   calibration); `time::uptime_us`. Syscall 36 `clock_us`. Ping replies are time-stamped in µs (`ping` prints ms with three
   decimals – the receive time is still when the net thread polls, i.e. up to 10 ms late). New program `time <program>`.
 
+- **2026-10-25** – M29: `net/tcp.rs` (state machine, go-back-N retransmission with RTT-based RTO, windows, loopback for our own
+  address), syscalls 37–40 `tcp_connect`/`tcp_listen`/`tcp_accept`/`shutdown`, `read`/`write`/`close` on connections, programs
+  `nc` and `echod`, kernel command `netstat`. Bug #6 fixed: the boot CPU's idle thread did not run `smp::run_on` jobs (hang
+  when a thread on another CPU sent a job to CPU 0); one idle loop for all CPUs now, regression test added. IPIs are sent with
+  interrupts off; SMP-robust leak tests (`pmm::frames_lost`).
+
 ## Open items / later
 - AHCI uses polling; switching to completion interrupts (MSI or the PCI interrupt line) would free the CPU during I/O.
 - Thread-level sleeping mutex (today all shared state uses spin locks with interrupts disabled).
@@ -247,8 +253,6 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   write, append, echo, sleep, clear, help. Without `/bin` on the disk, the kernel shell has no `ls`/`cat`.
 
 ## Next step
-**M29 – TCP:** connection state machine (SYN/SYN-ACK/ACK, FIN handshakes, RST), sequence numbers, a send buffer with
-retransmission (timeout from the measured RTT, µs clock from M28), receive buffer and advertised window, MSS 1460.
-Syscalls `tcp_connect(ip, port)`, `tcp_listen(port)`, `tcp_accept(fd)`; `read`/`write`/`close` on the connection fds.
-Programs: `nc` (netcat-like client), `echod` (echo server). Tests: connect to a Python TCP echo server on the host via
-10.0.2.2, an E2E transfer of 100 KB, `hostfwd=tcp::<port>-:7` so the host connects to `echod` in the guest.
+Continue stage 6 with **M30 – DHCP + DNS client + `wget`/`httpd`** (TCP from M29 is ready), then M31 (shell scripts, env vars,
+`2>`, `&`), M32 (FAT32 sector cache, AHCI MSI), M33 (reclaim bootloader memory, demand paging).
+Note: after M29 the full `make check` was green; `KERNEL_SMP=1 make test` was started but its result was not checked – run it first.

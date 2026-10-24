@@ -207,11 +207,12 @@ extern "C" fn ap_main(cpu: u64) -> ! {
     crate::task::init_cpu(cpu, &alloc::format!("idle{}", cpu));
     lapic::start_timer_calibrated(super::irq::TIMER_VECTOR);
     ONLINE[cpu].store(true, Ordering::Release);
-    ap_idle(cpu)
+    idle_loop(cpu)
 }
 
-/// Runs jobs, sleeps in between.
-fn ap_idle(cpu: usize) -> ! {
+/// The idle thread of CPU `cpu` (every CPU has one, the boot CPU's too):
+/// runs jobs sent with `run_on`, sleeps in between.
+pub fn idle_loop(cpu: usize) -> ! {
     loop {
         super::disable_interrupts();
         let job = JOBS[cpu].lock().take();
@@ -232,8 +233,19 @@ pub fn run_on<R: Send + 'static>(cpu: usize, f: impl FnOnce() -> R + Send + 'sta
     if cpu >= MAX_CPUS || !ONLINE[cpu].load(Ordering::Acquire) {
         return None;
     }
+    // Our own CPU: run it right here, with interrupts off so that we cannot
+    // move to another CPU between the check and the call (jobs never block).
+    let was_enabled = super::interrupts_enabled();
+    super::disable_interrupts();
     if cpu == cpu_index() {
-        return Some(f());
+        let r = f();
+        if was_enabled {
+            super::enable_interrupts();
+        }
+        return Some(r);
+    }
+    if was_enabled {
+        super::enable_interrupts();
     }
     let result: Arc<Mutex<Option<R>>> = Arc::new(Mutex::new(None));
     let slot = result.clone();
@@ -414,6 +426,26 @@ mod tests {
         seen.dedup();
         assert_eq!(seen.len(), online_count(), "two CPUs share an APIC ID");
         assert!(run_on(MAX_CPUS - 1, || ()).is_none() || online_count() == MAX_CPUS);
+    }
+
+    /// Regression test for bug #6: jobs for CPU 0 sent from threads running
+    /// on other CPUs (the boot CPU's idle thread did not look for jobs).
+    #[test_case]
+    fn jobs_for_every_cpu_from_every_cpu() {
+        let ids: Vec<_> = (0..4)
+            .map(|_| {
+                crate::task::spawn("run-on-test", || {
+                    for _ in 0..5 {
+                        for cpu in 0..online_count() {
+                            assert_eq!(run_on(cpu, cpu_index), Some(cpu));
+                        }
+                    }
+                })
+            })
+            .collect();
+        for id in ids {
+            crate::task::join(id);
+        }
     }
 
     #[test_case]

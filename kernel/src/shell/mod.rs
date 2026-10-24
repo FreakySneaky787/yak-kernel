@@ -156,6 +156,12 @@ pub static COMMANDS: &[Command] = &[
         run: cmd_run,
     },
     Command {
+        name: "netstat",
+        usage: "netstat",
+        help: "TCP connections and listening ports",
+        run: cmd_netstat,
+    },
+    Command {
         name: "colors",
         usage: "colors",
         help: "show the console colour palette",
@@ -747,6 +753,33 @@ fn cmd_demo(_: &mut Shell, args: &[String], out: &mut dyn Write) -> Result<(), S
         (time::ticks() - start) * time::MS_PER_TICK
     )
     .ok();
+    Ok(())
+}
+
+fn cmd_netstat(_: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), String> {
+    use crate::net::tcp;
+    let ip = |a: [u8; 4]| format!("{}.{}.{}.{}", a[0], a[1], a[2], a[3]);
+    let me = crate::net::config().ok_or("no network card")?.ip;
+    writeln!(out, "  PROTO  LOCAL                  REMOTE                 STATE").ok();
+    for port in tcp::listening_ports() {
+        writeln!(
+            out,
+            "  tcp    {:<22} {:<22} Listen",
+            format!("{}:{}", ip(me), port),
+            "*"
+        )
+        .ok();
+    }
+    for (state, local, remote, rport) in tcp::connections() {
+        writeln!(
+            out,
+            "  tcp    {:<22} {:<22} {:?}",
+            format!("{}:{}", ip(me), local),
+            format!("{}:{}", ip(remote), rport),
+            state
+        )
+        .ok();
+    }
     Ok(())
 }
 

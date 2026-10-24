@@ -45,6 +45,8 @@ impl fmt::Display for Error {
             90 => "message too long",
             98 => "address in use",
             110 => "timed out",
+            104 => "connection reset",
+            111 => "connection refused",
             113 => "host unreachable",
             _ => return write!(f, "error {}", self.0),
         };

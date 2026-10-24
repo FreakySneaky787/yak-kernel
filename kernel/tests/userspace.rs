@@ -239,6 +239,24 @@ extern "C" fn kmain() -> ! {
     assert!(out.contains("Bye!") && (0.085..0.2).contains(&real), "{}", out);
     assert!(run("ping", "10.0.2.2 1").1.contains(" ms\n"));
 
+    // M29: TCP between two user processes over loopback
+    let echod_out = Arc::new(Mutex::new(Vec::new()));
+    let image = fs::with_root(|fs| fs.read_file("/bin/echod")).unwrap();
+    let server = process::spawn("echod", &image, "7300\0-n\01", Output::Capture(echod_out.clone())).unwrap();
+    kernel::time::sleep_ms(100); // let it listen
+    let (status, out) = run("nc", "10.0.2.15 7300 hello over tcp");
+    assert_eq!((status, out.as_str()), (ExitStatus::Exited(0), "hello over tcp\n"));
+    assert_eq!(process::wait(server), Some(ExitStatus::Exited(0)));
+    let log = String::from_utf8(echod_out.lock().clone()).unwrap();
+    assert!(
+        log.contains("echoed 15 bytes") && log.contains("served 1 connection"),
+        "{}",
+        log
+    );
+    let (status, out) = run("nc", "10.0.2.15 7301 nobody listens");
+    assert_eq!(status, ExitStatus::Exited(1));
+    assert!(out.contains("connection refused"), "{}", out);
+
     assert_eq!(process::count(), 0);
     serial_println!("[ok]");
     exit(ExitCode::Success)

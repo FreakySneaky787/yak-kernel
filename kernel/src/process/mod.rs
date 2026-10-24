@@ -144,6 +144,28 @@ pub enum Handle {
     Pipe(pipe::PipeEnd),
     /// A bound UDP port (`net`); unbound when the last descriptor closes.
     Udp(Arc<crate::net::UdpSocket>),
+    /// A TCP connection; closed (FIN) when the last descriptor closes.
+    Tcp(Arc<TcpConnection>),
+    /// A listening TCP port.
+    TcpListener(Arc<TcpListener>),
+}
+
+/// Owner of a TCP connection for descriptors (see `net::tcp`).
+pub struct TcpConnection(pub crate::net::tcp::ConnId);
+
+impl Drop for TcpConnection {
+    fn drop(&mut self) {
+        crate::net::tcp::close(self.0);
+    }
+}
+
+/// Owner of a listening port for descriptors.
+pub struct TcpListener(pub u16);
+
+impl Drop for TcpListener {
+    fn drop(&mut self) {
+        crate::net::tcp::unlisten(self.0);
+    }
 }
 
 /// The descriptor table of a process started without a parent.

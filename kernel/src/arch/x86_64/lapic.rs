@@ -102,11 +102,15 @@ const ICR_LEVEL_ASSERT: u32 = 1 << 14;
 const ICR_DELIVERY_PENDING: u32 = 1 << 12;
 
 fn send_ipi(apic_id: u8, low: u32) {
-    write(REG_ICR_HIGH, (apic_id as u32) << 24);
-    write(REG_ICR_LOW, low);
-    while read(REG_ICR_LOW) & ICR_DELIVERY_PENDING != 0 {
-        core::hint::spin_loop();
-    }
+    // Two writes: an interrupt in between that sends an IPI itself would
+    // replace the destination, and ours would go to the wrong CPU.
+    super::without_interrupts(|| {
+        write(REG_ICR_HIGH, (apic_id as u32) << 24);
+        write(REG_ICR_LOW, low);
+        while read(REG_ICR_LOW) & ICR_DELIVERY_PENDING != 0 {
+            core::hint::spin_loop();
+        }
+    });
 }
 
 /// INIT IPI: resets the target CPU into its "wait for startup" state.

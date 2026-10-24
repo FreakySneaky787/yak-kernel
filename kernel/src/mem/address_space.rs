@@ -143,8 +143,7 @@ mod tests {
 
     #[test_case]
     fn mappings_are_private_and_freed() {
-        let before = pmm::stats().free_frames;
-        {
+        let lost = pmm::frames_lost(|| {
             let mut a = AddressSpace::new().unwrap();
             let b = AddressSpace::new().unwrap();
             let virt = VirtAddr(0x40_0000);
@@ -178,8 +177,8 @@ mod tests {
             a.unmap(VirtAddr(virt.0 + PAGE_SIZE), 2);
             assert!(a.page_flags(VirtAddr(virt.0 + PAGE_SIZE)).is_none());
             assert!(a.page_flags(virt).is_some());
-        }
-        assert_eq!(pmm::stats().free_frames, before, "address space leaked frames");
+        });
+        assert_eq!(lost, 0, "address space leaked frames");
     }
 
     #[test_case]

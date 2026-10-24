@@ -196,6 +196,25 @@ pub(super) fn init() {
     *PMM.lock() = Some(bitmap);
 }
 
+/// For leak tests on a running SMP system: runs `f` (which must give back
+/// every frame it takes) until the free-frame count afterwards equals the
+/// count before, at most three times. Other threads may allocate in the
+/// meantime (heap growth, new stacks), but not three times in a row; a real
+/// leak shows up every time. Returns the frames missing in the last attempt.
+#[cfg(test)]
+pub fn frames_lost(f: impl Fn()) -> usize {
+    let mut lost = 0;
+    for _ in 0..3 {
+        let before = stats().free_frames;
+        f();
+        lost = before.saturating_sub(stats().free_frames);
+        if lost == 0 {
+            break;
+        }
+    }
+    lost
+}
+
 /// The frame below 1 MiB reserved at boot (for the SMP trampoline), if any.
 static LOW_FRAME: AtomicU64 = AtomicU64::new(0);
 
@@ -331,7 +350,11 @@ mod tests {
     #[test_case]
     fn real_frames_are_distinct_aligned_and_writable() {
         const N: usize = 64;
-        let before = stats().free_frames;
+        let lost = frames_lost(|| frames_round_trip::<N>());
+        assert_eq!(lost, 0, "frames were not given back");
+    }
+
+    fn frames_round_trip<const N: usize>() {
         let mut frames = [PhysAddr(0); N];
         for (i, slot) in frames.iter_mut().enumerate() {
             let f = alloc_frame_zeroed().expect("out of memory");
@@ -347,11 +370,9 @@ mod tests {
             let v = unsafe { frames[i].to_virt().as_ptr::<u64>().read_volatile() };
             assert_eq!(v, 0xC0FFEE00 + i as u64);
         }
-        assert_eq!(stats().free_frames, before - N);
         for f in frames {
             free_frame(f);
         }
-        assert_eq!(stats().free_frames, before);
     }
 
     #[test_case]

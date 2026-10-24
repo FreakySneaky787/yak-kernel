@@ -47,6 +47,15 @@ Format: number · date · title, then symptom → cause → fix → test.
 - **Test:** `smp::tests::jobs_run_on_their_cpu` (now stable with the net thread running).
 - **Remember:** a busy-yield loop is not waiting – a ready thread starves the idle thread of its CPU.
 
+### #6 · 2026-10-25 · `run_on(0, …)` hangs sometimes (about 1 in 15 test runs)
+- **Symptom:** `jobs_run_on_their_cpu` timed out now and then; all CPUs were idle in `hlt`.
+- **Cause:** only the APs' idle loop ran jobs. Since M26 the calling thread may run on an AP, and a job for CPU 0 then waited
+  forever in the mailbox: the boot CPU's idle thread (`task::idle_loop`) never looked into it. Found with a temporary scheduler
+  dump after 25 s plus `info registers` of all CPUs through the QEMU monitor.
+- **Fix:** one `smp::idle_loop(cpu)` for every CPU; running inline on the own CPU happens with interrupts off.
+- **Test:** `smp::tests::jobs_for_every_cpu_from_every_cpu` (4 threads send jobs to all CPUs; hangs reliably with the old code).
+- **Remember:** with SMP every per-CPU duty must exist on *every* CPU, including the boot CPU.
+
 ## Known pitfalls (not bugs, but worth remembering)
 - **The Limine host utility (`limine bios-install`) needs a C compiler** (`gcc`). It is not required for booting the ISO
   in QEMU with `-cdrom`; it is only needed to make the ISO bootable as a hard disk / USB image.

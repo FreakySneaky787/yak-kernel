@@ -41,6 +41,10 @@ pub const UDP_SOCKET: u64 = 33;
 pub const SENDTO: u64 = 34;
 pub const RECVFROM: u64 = 35;
 pub const CLOCK_US: u64 = 36;
+pub const TCP_CONNECT: u64 = 37;
+pub const TCP_LISTEN: u64 = 38;
+pub const TCP_ACCEPT: u64 = 39;
+pub const SHUTDOWN: u64 = 40;
 
 pub const STDIN: u64 = 0;
 pub const STDOUT: u64 = 1;
@@ -459,4 +463,24 @@ pub fn parse_ip(s: &str) -> Option<[u8; 4]> {
         *b = parts.next()?.parse().ok()?;
     }
     parts.next().is_none().then_some(out)
+}
+
+/// Connects to `ip:port`; returns the fd of the connection (read/write/close it) or -errno.
+pub fn tcp_connect(ip: [u8; 4], port: u16, timeout_ms: u64) -> i64 {
+    unsafe { syscall3(TCP_CONNECT, u32::from_be_bytes(ip) as u64, port as u64, timeout_ms) }
+}
+
+/// Listens on `port`; returns the fd of the listener or -errno.
+pub fn tcp_listen(port: u16) -> i64 {
+    unsafe { syscall3(TCP_LISTEN, port as u64, 0, 0) }
+}
+
+/// Waits for the next connection on a listener; returns its fd or -errno.
+pub fn tcp_accept(fd: u64, from: &mut SockAddr) -> i64 {
+    unsafe { syscall3(TCP_ACCEPT, fd, from as *mut SockAddr as u64, 0) }
+}
+
+/// No more writing on a TCP connection (the peer sees the end of the stream).
+pub fn shutdown(fd: u64) -> i64 {
+    unsafe { syscall3(SHUTDOWN, fd, 0, 0) }
 }

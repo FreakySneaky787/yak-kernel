@@ -250,6 +250,122 @@ pub fn build_udp(src: Ipv4Addr, dst: Ipv4Addr, src_port: u16, dst_port: u16, pay
     p
 }
 
+// ---- TCP ----
+
+pub const PROTO_TCP: u8 = 6;
+pub const TCP_FIN: u8 = 1 << 0;
+pub const TCP_SYN: u8 = 1 << 1;
+pub const TCP_RST: u8 = 1 << 2;
+pub const TCP_PSH: u8 = 1 << 3;
+pub const TCP_ACK: u8 = 1 << 4;
+const TCP_HEADER: usize = 20;
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct TcpSegment<'a> {
+    pub src_port: u16,
+    pub dst_port: u16,
+    pub seq: u32,
+    pub ack: u32,
+    pub flags: u8,
+    pub window: u16,
+    /// From the MSS option (SYN segments), if present.
+    pub mss: Option<u16>,
+    pub payload: &'a [u8],
+}
+
+fn be32(b: &[u8], o: usize) -> u32 {
+    u32::from_be_bytes(b[o..o + 4].try_into().unwrap())
+}
+
+fn transport_checksum(src: Ipv4Addr, dst: Ipv4Addr, protocol: u8, segment: &[u8]) -> u16 {
+    let mut pseudo = Vec::with_capacity(12 + segment.len());
+    pseudo.extend_from_slice(&src);
+    pseudo.extend_from_slice(&dst);
+    pseudo.extend_from_slice(&[0, protocol]);
+    pseudo.extend_from_slice(&(segment.len() as u16).to_be_bytes());
+    pseudo.extend_from_slice(segment);
+    checksum(&pseudo)
+}
+
+/// Parses a TCP segment and verifies its checksum (`src`/`dst` = IP addresses).
+pub fn parse_tcp(src: Ipv4Addr, dst: Ipv4Addr, p: &[u8]) -> Option<TcpSegment<'_>> {
+    if p.len() < TCP_HEADER || transport_checksum(src, dst, PROTO_TCP, p) != 0 {
+        return None;
+    }
+    let offset = (p[12] >> 4) as usize * 4;
+    if offset < TCP_HEADER || offset > p.len() {
+        return None;
+    }
+    // options: only MSS (kind 2) interests us
+    let mut mss = None;
+    let mut i = TCP_HEADER;
+    while i < offset {
+        match p[i] {
+            0 => break,
+            1 => i += 1,
+            kind => {
+                let len = *p.get(i + 1)? as usize;
+                if len < 2 || i + len > offset {
+                    break;
+                }
+                if kind == 2 && len == 4 {
+                    mss = Some(be16(p, i + 2));
+                }
+                i += len;
+            }
+        }
+    }
+    Some(TcpSegment {
+        src_port: be16(p, 0),
+        dst_port: be16(p, 2),
+        seq: be32(p, 4),
+        ack: be32(p, 8),
+        flags: p[13],
+        window: be16(p, 14),
+        mss,
+        payload: &p[offset..],
+    })
+}
+
+/// Builds a TCP segment with checksum; SYN segments carry an MSS option.
+#[allow(clippy::too_many_arguments)]
+pub fn build_tcp(
+    src: Ipv4Addr,
+    dst: Ipv4Addr,
+    src_port: u16,
+    dst_port: u16,
+    seq: u32,
+    ack: u32,
+    flags: u8,
+    window: u16,
+    payload: &[u8],
+) -> Vec<u8> {
+    let options: &[u8] = if flags & TCP_SYN != 0 { &[2, 4, 0x05, 0xB4] } else { &[] }; // MSS 1460
+    let offset = TCP_HEADER + options.len();
+    let mut p = Vec::with_capacity(offset + payload.len());
+    p.extend_from_slice(&src_port.to_be_bytes());
+    p.extend_from_slice(&dst_port.to_be_bytes());
+    p.extend_from_slice(&seq.to_be_bytes());
+    p.extend_from_slice(&ack.to_be_bytes());
+    p.extend_from_slice(&[((offset / 4) as u8) << 4, flags]);
+    p.extend_from_slice(&window.to_be_bytes());
+    p.extend_from_slice(&[0, 0, 0, 0]); // checksum, urgent pointer
+    p.extend_from_slice(options);
+    p.extend_from_slice(payload);
+    let sum = transport_checksum(src, dst, PROTO_TCP, &p);
+    p[16..18].copy_from_slice(&sum.to_be_bytes());
+    p
+}
+
+/// Sequence number comparison modulo 2^32: is `a` before `b`?
+pub fn seq_lt(a: u32, b: u32) -> bool {
+    (a.wrapping_sub(b) as i32) < 0
+}
+
+pub fn seq_le(a: u32, b: u32) -> bool {
+    a == b || seq_lt(a, b)
+}
+
 /// "10.0.2.15" -> [10, 0, 2, 15]
 pub fn parse_ipv4_addr(s: &str) -> Option<Ipv4Addr> {
     let mut out = [0u8; 4];
@@ -308,6 +424,28 @@ mod tests {
         assert_eq!((eth.dst, eth.ethertype), (BROADCAST_MAC, ETHERTYPE_ARP));
         assert_eq!(parse_arp(eth.payload), Some(a));
         assert!(parse_arp(&eth.payload[..20]).is_none());
+    }
+
+    #[test_case]
+    fn tcp_round_trip_and_sequence_math() {
+        let (a, b) = ([10, 0, 2, 15], [10, 0, 2, 2]);
+        let syn = build_tcp(a, b, 40000, 80, 0xFFFF_FFF0, 0, TCP_SYN, 32768, b"");
+        let s = parse_tcp(a, b, &syn).unwrap();
+        assert_eq!(
+            (s.src_port, s.dst_port, s.seq, s.flags, s.window),
+            (40000, 80, 0xFFFF_FFF0, TCP_SYN, 32768)
+        );
+        assert_eq!(s.mss, Some(1460));
+        let data = build_tcp(a, b, 1, 2, 5, 9, TCP_ACK | TCP_PSH, 100, b"hi there");
+        let d = parse_tcp(a, b, &data).unwrap();
+        assert_eq!((d.ack, d.mss, d.payload), (9, None, &b"hi there"[..]));
+        assert!(
+            parse_tcp([10, 0, 2, 16], b, &data).is_none(),
+            "checksum must cover the IP addresses"
+        );
+        // wrap-around
+        assert!(seq_lt(0xFFFF_FFF0, 0x10) && !seq_lt(0x10, 0xFFFF_FFF0));
+        assert!(seq_le(7, 7) && seq_le(7, 8) && !seq_le(8, 7));
     }
 
     #[test_case]

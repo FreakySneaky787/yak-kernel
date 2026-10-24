@@ -12,11 +12,15 @@
 //! - Waiting (ARP, ping replies, UDP receive) uses `task::wait_for` with
 //!   `Wait::Net`; the net thread notifies after every poll, so timeouts are
 //!   checked at least every 10 ms.
+//! - Packets to our own address do not go to the card: they are queued and
+//!   handled by the net thread like received ones (loopback).
+//! - TCP lives in `tcp`; the net thread also drives its retransmission timer.
 //!
 //! The small state locks below are only taken with interrupts disabled
 //! (they are read from `wait_for` conditions, which run with interrupts off).
 
 pub mod packet;
+pub mod tcp;
 
 use crate::arch::x86_64::without_interrupts;
 use crate::drivers::e1000::E1000;
@@ -82,6 +86,8 @@ static PING_REPLIES: Mutex<BTreeMap<(u16, u16), u64>> = Mutex::new(BTreeMap::new
 static SOCKETS: Mutex<BTreeMap<u16, Arc<Mutex<VecDeque<Datagram>>>>> = Mutex::new(BTreeMap::new());
 static NEXT_IP_ID: AtomicU16 = AtomicU16::new(1);
 static NEXT_EPHEMERAL: AtomicU16 = AtomicU16::new(49152);
+/// IPv4 packets sent to ourselves, waiting for the net thread.
+static LOOPBACK: Mutex<VecDeque<Vec<u8>>> = Mutex::new(VecDeque::new());
 
 pub fn config() -> Option<Config> {
     CONFIG.get().copied()
@@ -120,6 +126,14 @@ fn poll_loop() {
                 None => break,
             }
         }
+        // only what is queued now: answers to these wait for the next round
+        let looped: Vec<Vec<u8>> = without_interrupts(|| LOOPBACK.lock().drain(..).collect());
+        if let Some(cfg) = config() {
+            for packet in looped {
+                handle_ipv4(&cfg, cfg.mac, &packet);
+            }
+        }
+        tcp::on_timer();
         task::notify(Wait::Net); // also lets waiters check their timeouts
         time::sleep_ms(10);
     }
@@ -169,18 +183,25 @@ pub fn handle_frame(frame: &[u8]) {
             }
             task::notify(Wait::Net);
         }
-        ETHERTYPE_IPV4 => {
-            let Some(ip) = parse_ipv4(eth.payload) else { return };
-            if ip.dst != cfg.ip && ip.dst != [255; 4] {
-                return;
-            }
-            if on_subnet(&cfg, ip.src) {
-                learn(ip.src, eth.src);
-            }
-            match ip.protocol {
-                PROTO_ICMP => handle_icmp(&cfg, eth.src, &ip),
-                PROTO_UDP => handle_udp(&ip),
-                _ => {}
+        ETHERTYPE_IPV4 => handle_ipv4(&cfg, eth.src, eth.payload),
+        _ => {}
+    }
+}
+
+fn handle_ipv4(cfg: &Config, from_mac: Mac, packet: &[u8]) {
+    let Some(ip) = parse_ipv4(packet) else { return };
+    if ip.dst != cfg.ip && ip.dst != [255; 4] {
+        return;
+    }
+    if on_subnet(cfg, ip.src) && ip.src != cfg.ip {
+        learn(ip.src, from_mac);
+    }
+    match ip.protocol {
+        PROTO_ICMP => handle_icmp(cfg, from_mac, &ip),
+        PROTO_UDP => handle_udp(&ip),
+        PROTO_TCP => {
+            if let Some(seg) = parse_tcp(ip.src, ip.dst, ip.payload) {
+                tcp::input(ip.src, &seg);
             }
         }
         _ => {}
@@ -256,6 +277,12 @@ pub fn resolve(ip: Ipv4Addr) -> Result<Mac, NetError> {
 /// Sends an IPv4 packet to `dst` (through the gateway if it is not local).
 pub fn send_ipv4(dst: Ipv4Addr, protocol: u8, payload: &[u8]) -> Result<(), NetError> {
     let cfg = config().ok_or(NetError::NoDevice)?;
+    if dst == cfg.ip {
+        let id = NEXT_IP_ID.fetch_add(1, Ordering::Relaxed);
+        let packet = build_ipv4(cfg.ip, cfg.ip, protocol, id, payload);
+        without_interrupts(|| LOOPBACK.lock().push_back(packet));
+        return Ok(());
+    }
     let hop = if on_subnet(&cfg, dst) || dst == [255; 4] {
         dst
     } else {

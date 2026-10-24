@@ -54,6 +54,64 @@ def start_udp_echo():
 
 UDP_PORT = start_udp_echo()
 
+
+def start_tcp_server(handle):
+    """A TCP server on the host's 127.0.0.1; `handle(conn)` serves one connection."""
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(4)
+
+    def serve():
+        while True:
+            conn, _ = srv.accept()
+            with conn:
+                handle(conn)
+
+    threading.Thread(target=serve, daemon=True).start()
+    return srv.getsockname()[1]
+
+
+def tcp_echo(conn):
+    while data := conn.recv(4096):
+        conn.sendall(data)
+
+
+BULK = bytes(b"0123456789abcdef"[i % 16] for i in range(100_000))
+
+
+def tcp_bulk(conn):
+    conn.recv(100)  # whatever the guest sends first
+    conn.sendall(BULK)
+
+
+TCP_ECHO_PORT = start_tcp_server(tcp_echo)
+TCP_BULK_PORT = start_tcp_server(tcp_bulk)
+
+# host -> guest: QEMU forwards this host port to port 7 in the guest (echod)
+with socket.socket() as _s:
+    _s.bind(("127.0.0.1", 0))
+    FWD_PORT = _s.getsockname()[1]
+HOST_TO_GUEST = {"ok": False}
+
+
+def host_to_guest_echo():
+    """Retries until echod in the guest echoes 50 KB back (it runs during one step)."""
+    data = bytes(i % 251 for i in range(50_000))
+    deadline = time.time() + 600
+    while time.time() < deadline and not HOST_TO_GUEST["ok"]:
+        try:
+            with socket.create_connection(("127.0.0.1", FWD_PORT), timeout=5) as s:
+                s.sendall(data)
+                s.shutdown(socket.SHUT_WR)
+                got = b""
+                while chunk := s.recv(65536):
+                    got += chunk
+                HOST_TO_GUEST["ok"] = got == data
+        except OSError:
+            pass
+        time.sleep(0.5)
+
 # (keys to type, substrings that must appear in the output, substrings that must not)
 STEPS = [
     ("echo hello from e2e\r", ["hello from e2e"], ["error"]),
@@ -122,6 +180,9 @@ STEPS = [
     ("time hello\r", ["Hello from user space", "real 0.1"], ["error"]),  # TSC clock (M28)
     ("ping 10.0.2.2 2\r", ["reply from 10.0.2.2: seq=1", "2 packets sent, 2 received"], ["error"]),
     (f"udpecho 10.0.2.2 {UDP_PORT} hello over UDP\r", [f"reply from 10.0.2.2:{UDP_PORT}: hello over UDP"], ["error"]),
+    (f"nc 10.0.2.2 {TCP_ECHO_PORT} hello over TCP\r", ["hello over TCP"], ["error"]),  # TCP (M29)
+    (f"echo go | nc 10.0.2.2 {TCP_BULK_PORT} | wc\r", ["  100000"], ["error"]),  # 100 KB from the host
+    ("echod -n 1\r", ["echod: listening on port 7", "echoed 50000 bytes", "served 1 connection"], ["error"]),
     ("fputest\r", ["fputest: all checks passed"], ["registers changed", "MXCSR changed", "is wrong", "error"]),  # SSE registers per thread (M24)
     # file operations as programs (M22)
     ("touch /t1.txt\r", [], ["error"]),
@@ -201,7 +262,8 @@ def run_session(root, elf, extra_args, disk, steps, title):
     proc = subprocess.Popen(
         [os.path.join(root, "scripts/run-qemu.sh"), elf, "-display", "none", *extra_args],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        env=dict(os.environ, KERNEL_MODE="run", KERNEL_DISK=disk))
+        env=dict(os.environ, KERNEL_MODE="run", KERNEL_DISK=disk,
+                 KERNEL_NETDEV_OPTS=f"hostfwd=tcp:127.0.0.1:{FWD_PORT}-:7"))
     reader = Reader(proc.stdout)
     reader.start()
     failures = 0
@@ -256,7 +318,13 @@ def main() -> int:
     disk = os.path.join(root, "build", "e2e-disk.img")
     subprocess.run([os.path.join(root, "scripts/mkdisk.sh"), disk, "64"], check=True, stderr=subprocess.DEVNULL)
 
+    threading.Thread(target=host_to_guest_echo, daemon=True).start()
     failures = run_session(root, elf, extra_args, disk, STEPS, "session 1")
+    if HOST_TO_GUEST["ok"]:
+        print("ok    host -> guest TCP: echod echoed 50000 bytes")
+    else:
+        failures += 1
+        print("FAIL  host -> guest TCP: no correct echo from echod")
     failures += run_session(root, elf, extra_args, disk, PERSIST_STEPS, "session 2 (after reboot, same disk)")
 
     fsck = subprocess.run(["fsck.fat", "-n", disk], capture_output=True, text=True)
