@@ -30,12 +30,19 @@ pub fn uptime_ms() -> u64 {
 /// before that (early boot) the CPU halts until the deadline.
 /// Requires interrupts to be enabled.
 pub fn sleep_ms(ms: u64) {
+    sleep_ms_or_abort(ms, || false);
+}
+
+/// Like `sleep_ms`, but returns early (false) once `abort()` is true - it is
+/// checked whenever the thread is woken (used for signals).
+pub fn sleep_ms_or_abort(ms: u64, abort: impl Fn() -> bool) -> bool {
     let target = ticks().saturating_add(ms.div_ceil(MS_PER_TICK));
     if crate::task::is_running() {
-        crate::task::sleep_until(target);
-        return;
+        crate::task::wait_for(crate::task::Wait::Until(target), || ticks() >= target || abort());
+        return ticks() >= target || !abort();
     }
     while ticks() < target {
         unsafe { core::arch::asm!("hlt", options(nomem, nostack)) };
     }
+    true
 }

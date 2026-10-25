@@ -9,15 +9,26 @@ use core::fmt;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExitStatus {
     Exited(i64),
-    /// Ended by the kernel; the reason (e.g. "page fault at 0x0 ...", "interrupted").
-    Killed(String),
+    /// Ended by a signal or the kernel: the reason (e.g. "page fault at 0x0 ...",
+    /// "interrupted") and the signal number (CPU exceptions count as SIGSEGV).
+    Killed(String, u32),
+}
+
+impl ExitStatus {
+    /// The shell's `$?`: the exit code, or 128 + the signal number.
+    pub fn code(&self) -> i32 {
+        match self {
+            ExitStatus::Exited(code) => *code as i32,
+            ExitStatus::Killed(_, sig) => 128 + *sig as i32,
+        }
+    }
 }
 
 impl fmt::Display for ExitStatus {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             ExitStatus::Exited(code) => write!(f, "exited with code {}", code),
-            ExitStatus::Killed(reason) => write!(f, "killed: {}", reason),
+            ExitStatus::Killed(reason, _) => write!(f, "killed: {}", reason),
         }
     }
 }
@@ -50,7 +61,10 @@ pub fn wait(pid: u64) -> Result<ExitStatus, Error> {
     check(sys::wait(pid, &mut st))?;
     Ok(if st.kind == sys::WAIT_KILLED {
         let reason = &st.reason[..st.reason_len as usize];
-        ExitStatus::Killed(String::from(core::str::from_utf8(reason).unwrap_or("?")))
+        ExitStatus::Killed(
+            String::from(core::str::from_utf8(reason).unwrap_or("?")),
+            st.code as u32,
+        )
     } else {
         ExitStatus::Exited(st.code)
     })
@@ -69,15 +83,18 @@ pub fn try_wait(pid: u64) -> Result<Option<ExitStatus>, Error> {
     }
     Ok(Some(if st.kind == sys::WAIT_KILLED {
         let reason = &st.reason[..st.reason_len as usize];
-        ExitStatus::Killed(String::from(core::str::from_utf8(reason).unwrap_or("?")))
+        ExitStatus::Killed(
+            String::from(core::str::from_utf8(reason).unwrap_or("?")),
+            st.code as u32,
+        )
     } else {
         ExitStatus::Exited(st.code)
     }))
 }
 
-/// Asks child `pid` to end (it is woken up if it is blocked).
+/// Ends process `pid` (SIGKILL; it is woken up if it is blocked).
 pub fn kill(pid: u64) -> Result<(), Error> {
-    check(sys::kill(pid)).map(|_| ())
+    crate::signal::send(pid, crate::signal::SIGKILL)
 }
 
 /// `spawn` + `wait`.

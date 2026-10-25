@@ -125,7 +125,7 @@
   to the next thread's kernel stack top (`syscall::set_kernel_stack`). Switching CR3 on the old thread's stack is fine: kernel
   stacks are in the shared half.
 - **End of a process**: `exit` syscall, CPU exception with CS.RPL = 3 (handlers call `process::kill_current` instead of panicking),
-  or `process::kill(pid)` (checked when the timer interrupts user code and on every syscall return). `exit_current` records the
+  or a fatal signal (`process::deliver_signals`, run when the timer/wake IPI interrupts user code and on every syscall return). `exit_current` records the
   status, moves the thread to the kernel CR3, frees the address space and exits the thread. The status stays in the table until
   `process::wait` (zombie); the shell always waits.
 - **System calls** (`syscall`/`sysret`): STAR = kernel CS 0x08 / sysret base 0x10, LSTAR = `syscall_entry`, FMASK clears
@@ -139,7 +139,7 @@
   | 0 | `exit(code)` | never returns |
   | 1 | `write(fd, buf, len)` | fd 1/2 → console (or a capture buffer in tests) |
   | 2 | `read(fd, buf, len)` | fd 0 → keyboard/serial keys as terminal bytes (`\n`, `0x08`, UTF-8), blocks for ≥ 1 byte |
-  | 3 | `sleep_ms(ms)` | |
+  | 3 | `sleep_ms(ms)` | `-EINTR` when a signal arrives |
   | 4 | `getpid()` | |
   | 5 | `uptime_ms()` | |
   | 6 | `yield()` | |
@@ -152,8 +152,8 @@
   | 13 | `mkdir(path, len)` | |
   | 14 | `brk(new_end)` | 0 = query; growing only moves the end (pages come on first touch), shrinking frees used pages; `-ENOMEM` outside the range |
   | 15 | `spawn(path, len, args, args_len)` | 4th argument in R10; child inherits cwd and output; `-ENOENT`, `-ENOEXEC`, `-E2BIG` |
-  | 16 | `wait(pid, *WaitStatus)` | children only (`-ECHILD`); 128-byte status: kind (1 exited, 2 killed), code, kill reason |
-  | 17 | `kill(pid)` | children only (`-ESRCH`) |
+  | 16 | `wait(pid, *WaitStatus)` | children only (`-ECHILD`); 128-byte status: kind (1 exited, 2 killed), code (exit code / signal number), kill reason |
+  | 17 | `kill(pid, sig)` | any user process (`-ESRCH`); sig 0 = existence check |
   | 18 | `chdir(path, len)` | `-ENOTDIR` for files |
   | 19 | `kshell(line, len)` | transitional: runs a kernel shell built-in (not cd/pwd/history/run) in the caller's cwd and output |
   | 20 | `kcommands(buf, len)` | NUL-separated names usable with `kshell` |
@@ -173,6 +173,9 @@
   | 34 | `sendto(fd, buf, len, ip, port)` | ≤ 1472 bytes, `-EMSGSIZE` above |
   | 35 | `recvfrom(fd, buf, len, *SockAddr, timeout_ms)` | 5th argument in R8; `-ETIMEDOUT`, `-EINTR` |
   | 36 | `clock_us()` | microseconds since boot (TSC) |
+  | 37–43 | TCP, `shutdown`, `setenv`/`getenv`/`environ` | see `kernel/src/process/syscall.rs` |
+  | 44 | `sigaction(sig, disposition, trampoline)` | `SIG_DFL` 0, `SIG_IGN` 1 or a handler; old disposition; SIGKILL → `-EINVAL` |
+  | 45 | `sigreturn()` | called by the trampoline when a handler returns (unblocks the next one) |
 - **`/bin/edit`**: `buffer.rs` is pure logic (tested by `edit --selftest`), `main.rs` draws with `ESC[r;cH`, `ESC[K`, SGR 7.
   The text area is all rows but the last; the cursor line and the status bar are redrawn per key, the whole screen only after
   scrolling or when lines are inserted/removed. Writing the bottom-right cell is safe: the console wraps lazily (only when the
@@ -185,14 +188,26 @@
   redirects by `dup2`-ing a pipe end or file over 0/1 before `spawn` and restoring its saved copies afterwards.
 - **Process tree**: `parent` (None = started by the kernel; only the kernel waits for those). When a process ends, finished
   children are dropped and running ones become orphans, removed from the table at their own exit (nobody waits for them).
-- **Kill / Ctrl+C**: `kill` stores a reason and `task::wake`s the target; blocking syscalls use abortable waits
-  (`input::read_key_or_abort`, `task::join_or_abort`, sleep returns early) and the kill takes effect when the syscall returns or
-  the timer interrupts user code. `FOREGROUND` = pid owning the console: set by the kernel shell for its programs, inherited by
+- **Signals** (M34, `process/signal.rs`): per process a disposition per signal (default = end, ignore, handler), a pending
+  mask and an `in_handler` flag. `send_signal` sets the bit and `task::wake`s the target; blocking syscalls use abortable
+  waits (`input::read_key_or_abort`, `task::join_or_abort`, `time::sleep_ms_or_abort`, pipes, sockets) that give up when
+  `signal_pending()` and return `EINTR`. Delivery happens on the way back to ring 3 – at the end of `dispatch` (it may
+  change `SyscallFrame.rip/rsp`) and in the timer / wake-IPI handlers (they change the CPU-pushed `InterruptStackFrame`
+  with volatile writes). SIGKILL first, then the lowest pending signal; default → `kill_current(reason)` (exit status
+  `Killed(reason)`, `wait` reports the number via `signal::number_for_reason`, exceptions = SIGSEGV).
+- **Handlers without a kernel register frame**: the kernel only pushes `sig, handler, rflags, rip` below the user RSP and
+  jumps to the trampoline registered with `sigaction` (`ulib::signal`). The trampoline pushes all 15 GPRs and FXSAVEs, calls
+  the handler, calls `sigreturn`, restores everything and ends with `popfq; ret` (which also restores RSP). So neither the
+  syscall stub nor the interrupt handlers need a full register frame. Price: no red zone in user code (the target sets
+  `disable-redzone`; the kernel writes right below RSP). While a handler runs, further handled signals stay pending
+  (default actions still happen); a signal arriving during the trampoline's epilogue nests safely, because everything below
+  RSP has been consumed by then. The trampoline must be a user address (`< USER_END`, it becomes a `sysret` target).
+  `spawn` resets handlers but keeps ignored signals (like `exec`). `FOREGROUND` = pid owning the console: set by the kernel shell for its programs, inherited by
   `process::wait_child` while the foreground process waits for that child (handed back when the wait ends); `spawn` alone never
   changes it (bug #4). The keyboard and COM1 interrupt handlers recognise
   Ctrl+C themselves (raw 0x03 / Ctrl tracker on set-1 scancodes, the C key is 0x2E on QWERTY and QWERTZ) and call
-  `process::interrupt_foreground`: the key is swallowed and the process killed ("interrupted"), unless it has
-  `ignore_interrupt` – then the key reaches it as byte 0x03.
+  `process::interrupt_foreground`: the key is swallowed and SIGINT sent (default: killed, "interrupted"), unless the
+  process has `ignore_interrupt` and no SIGINT handler – then the key reaches it as byte 0x03.
 - **init**: `kernel_main` runs `process::run_init("/bin/sh")` (foreground, `ignore_interrupt`) and waits; when it is missing or
   exits, the kernel shell runs on thread 0 as before.
 - **`/bin/sh`** (`user/src/bin/sh/`): compiles the kernel's `shell/line_editor.rs` and `shell/parser.rs` with `#[path]`; both

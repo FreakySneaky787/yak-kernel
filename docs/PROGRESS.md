@@ -60,6 +60,15 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 | 32 | Storage speed: sector cache for FAT32, AHCI completion interrupts (MSI) | ✅ | BlockCache unit test (hits, runs, write-through, eviction), lookup-cache invalidation test, MSI test (≥ 1 interrupt per command), benchmark line in the integration test; suite green with 1 and 4 CPUs |
 | 33 | Memory: reclaim bootloader memory, demand paging for user heaps | ✅ | `tests/reclaim.rs` (≥ 1 MiB gained, former bootloader frames are handed out and survive being overwritten, threads + a program afterwards), demand-paging unit test (32 MiB heap, 3 touched pages, < 100 frames), existing brk/heaptest checks; suite green with 1 and 4 CPUs |
 
+## Stage 7: a more Unix-like system (agreed with the user on 2026-10-25: "alle")
+| # | Milestone | Status | Tests |
+|---|---|---|---|
+| 34 | Signals: handlers in user space, `kill -SIG`, Ctrl+C as SIGINT, interrupted blocking calls | ✅ | 2 signal unit tests (dispositions, pending order, blocking during a handler, reasons ↔ numbers), `sigtest` (23 checks incl. all GPRs + XMM0–15 kept when a handler interrupts a loop without syscalls, EINTR from sleep, no nesting, SIG_IGN inherited), sh `kill` session, E2E: Ctrl+C caught by a handler, `kill -USR1 %1` |
+| 35 | Shell programming: `if`/`while`/`until`/`for`, functions, `&&`/`\|\|`, `;`, `test`, `$((...))`, `read`, multi-line input, Ctrl+C stops loops | ⬜ | |
+| 36 | Threads in user processes (spawn/join, futex-style wait/wake) and a sleeping mutex in the kernel | ⬜ | |
+| 37 | CPU protection and AVX: SMEP/SMAP, XSAVE with AVX state per thread | ⬜ | |
+| 38 | Network polish: e1000 interrupts (MSI), TCP window scaling, DHCP lease renewal | ⬜ | |
+
 ## Log
 - **2026-10-24** – Setup: Rust nightly 1.101 (rustup), target `x86_64-unknown-none`, Limine v11.x-binary.
   M1: kernel boots via BIOS and UEFI, prints "Hello from KernelTry!" on serial, colour bars on the framebuffer (1280×800×32).
@@ -264,6 +273,13 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   end; a not-present user fault inside the heap maps a zeroed page and retries (`process::handle_page_fault`), syscalls
   populate heap pages before checking user buffers. **Stage 6 is complete.**
 
+- **2026-10-25** – M34: signals (`process/signal.rs`): dispositions, pending mask, `kill(pid, sig)`, `sigaction`,
+  `sigreturn`; delivery when returning to ring 3 after a syscall or a timer/wake interrupt. Handlers run through a
+  trampoline in `ulib` that saves all registers itself – the kernel only pushes `sig, handler, rflags, rip` (so the user
+  target now has `disable-redzone`). Ctrl+C sends SIGINT (raw 0x03 only for `ignore_interrupt` programs without a
+  handler); `sleep` is interruptible; `$?` of a signalled child is 128 + signal; sh built-in `kill [-SIG] pid|%job`, `kill -l`.
+  Bug #8 (MSI test assumed one interrupt per command – MSIs coalesce in the APIC) found while running with 2 CPUs.
+
 ## Open items / later
 - Thread-level sleeping mutex (today all shared state uses spin locks with interrupts disabled).
 - `ps` CPU percentages only cover threads that still exist (dead threads are reaped with their counters).
@@ -280,6 +296,5 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   write, append, echo, sleep, clear, help. Without `/bin` on the disk, the kernel shell has no `ls`/`cat`.
 
 ## Next step
-Stage 6 (M28–M33) is done. Agree on stage 7 with the user before starting – candidates from "Open items": signals
-(`kill -TERM`, handlers), `if`/`while` in `/bin/sh`, a sleeping mutex, XSAVE/AVX, SMAP/SMEP, TCP window scaling,
-multi-threaded user processes.
+**M35 – shell programming** (stage 7, M34–M38, see the table). Before that: one hang of
+`smp::tests::jobs_for_every_cpu_from_every_cpu` was seen with `KERNEL_SMP=2` (not reproduced in 40 runs yet).

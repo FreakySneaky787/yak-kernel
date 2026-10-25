@@ -314,6 +314,16 @@ Short explanations of every subsystem: what it is and why we need it.
   fault; the handler sees "page not present, inside the heap", maps a fresh zeroed page and returns – the CPU repeats the
   instruction, which now works. A program that reserves 32 MiB but touches three pages costs three frames.
 
+## M34 – Signals
+- A **signal** is a tap on the shoulder of a running program: "the user pressed Ctrl+C", "please terminate". The kernel
+  notes it (a bit per signal) and acts the next time the program would continue running in user mode.
+- Without a handler the program simply ends. With a handler, the kernel makes the program "call" the handler as if the
+  interrupted instruction had called it: it pushes the return address onto the program's stack and jumps to a small
+  assembly routine in the program (the trampoline) that saves all registers, calls the handler and restores everything.
+  The program never notices the interruption – except that a blocking call (sleep, read) returns "interrupted" (EINTR).
+- Signals are why a shell can stop its own loop on Ctrl+C, and why `kill -TERM` lets a program clean up first, while
+  `kill -KILL` cannot be caught.
+
 ## Tooling – GNU ld and binutils
 - rustc compiles our code into object files; a **linker** combines them into the final ELF according to `kernel/linker.ld`
   (load address, section order, segments). We use **GNU ld** (`ld.bfd`) for that.

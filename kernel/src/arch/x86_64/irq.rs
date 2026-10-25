@@ -62,7 +62,19 @@ pub fn init() {
     super::tsc::init(); // uses PIT channel 2 too, so after the LAPIC calibration
 }
 
-extern "x86-interrupt" fn timer(frame: InterruptStackFrame) {
+/// Signals for a process interrupted in user mode. The handler's `frame`
+/// argument *is* the frame the CPU pushed, so changing it changes where
+/// `iretq` returns to (volatile, so the writes are not optimised away).
+fn deliver_signals(frame: &mut InterruptStackFrame) {
+    let (mut rip, mut rsp) = (frame.rip, frame.rsp);
+    crate::process::deliver_signals(&mut rip, &mut rsp, frame.rflags);
+    unsafe {
+        core::ptr::write_volatile(&mut frame.rip, rip);
+        core::ptr::write_volatile(&mut frame.rsp, rsp);
+    }
+}
+
+extern "x86-interrupt" fn timer(mut frame: InterruptStackFrame) {
     // every CPU has a timer; the clock is driven by the boot CPU's only
     if super::smp::cpu_index() == 0 {
         time::tick();
@@ -71,9 +83,9 @@ extern "x86-interrupt" fn timer(frame: InterruptStackFrame) {
     // return to this handler much later; the LAPIC must accept new ticks.
     lapic::eoi();
     crate::task::on_tick();
-    // About to return to user code: a killed process must not continue
+    // About to return to user code: act on pending signals
     if frame.cs & 3 == 3 {
-        crate::process::check_killed();
+        deliver_signals(&mut frame);
     }
 }
 
@@ -100,11 +112,11 @@ extern "x86-interrupt" fn ahci(_frame: InterruptStackFrame) {
 }
 
 /// Wakes an idle CPU (it then looks for work); nothing else to do.
-extern "x86-interrupt" fn wake(frame: InterruptStackFrame) {
+extern "x86-interrupt" fn wake(mut frame: InterruptStackFrame) {
     lapic::eoi();
     crate::task::on_wake_ipi();
     if frame.cs & 3 == 3 {
-        crate::process::check_killed();
+        deliver_signals(&mut frame);
     }
 }
 

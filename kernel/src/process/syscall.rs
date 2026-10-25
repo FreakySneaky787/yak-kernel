@@ -29,7 +29,7 @@ pub mod nr {
     pub const WRITE: u32 = 1;
     /// read(fd, buf, len) -> bytes read (fd 0 = keyboard/serial, blocks)
     pub const READ: u32 = 2;
-    /// sleep_ms(ms) -> 0
+    /// sleep_ms(ms) -> 0, or -EINTR when a signal arrives
     pub const SLEEP_MS: u32 = 3;
     /// getpid() -> pid
     pub const GETPID: u32 = 4;
@@ -57,7 +57,7 @@ pub mod nr {
     pub const SPAWN: u32 = 15;
     /// wait(pid, *mut WaitStatus or 0, flags) -> pid, or 0 with flags & WNOHANG while it runs (children only)
     pub const WAIT: u32 = 16;
-    /// kill(pid) -> 0 (children only)
+    /// kill(pid, sig) -> 0: sends signal `sig` (0 = only check that `pid` exists)
     pub const KILL: u32 = 17;
     /// chdir(path, path_len) -> 0
     pub const CHDIR: u32 = 18;
@@ -113,6 +113,10 @@ pub mod nr {
     pub const GETENV: u32 = 42;
     /// environ(buf, len) -> length of "NAME=value" entries separated by NUL bytes
     pub const ENVIRON: u32 = 43;
+    /// sigaction(sig, handler or SIG_DFL/SIG_IGN, trampoline) -> old disposition
+    pub const SIGACTION: u32 = 44;
+    /// sigreturn() -> 0: the signal handler has finished (called by the trampoline)
+    pub const SIGRETURN: u32 = 45;
 }
 
 pub mod errno {
@@ -256,8 +260,11 @@ pub extern "C" fn dispatch(frame: &mut SyscallFrame) {
         nr::WRITE => sys_write(a0, a1, a2),
         nr::READ => sys_read(a0, a1, a2),
         nr::SLEEP_MS => {
-            time::sleep_ms(a0);
-            Ok(0)
+            if time::sleep_ms_or_abort(a0, super::signal_pending) {
+                Ok(0)
+            } else {
+                Err(errno::EINTR)
+            }
         }
         nr::GETPID => Ok(task::current_id()),
         nr::UPTIME_MS => Ok(time::uptime_ms()),
@@ -275,7 +282,7 @@ pub extern "C" fn dispatch(frame: &mut SyscallFrame) {
         nr::BRK => sys_brk(a0),
         nr::SPAWN => sys_spawn(a0, a1, a2, a3),
         nr::WAIT => sys_wait(a0, a1, a2),
-        nr::KILL => sys_kill(a0),
+        nr::KILL => sys_kill(a0, a1),
         nr::CHDIR => sys_chdir(a0, a1),
         nr::KSHELL => sys_kshell(a0, a1),
         nr::KCOMMANDS => sys_kcommands(a0, a1),
@@ -300,6 +307,11 @@ pub extern "C" fn dispatch(frame: &mut SyscallFrame) {
         nr::SETENV => sys_setenv(a0, a1, a2, a3),
         nr::GETENV => sys_getenv(a0, a1, a2, a3),
         nr::ENVIRON => sys_environ(a0, a1),
+        nr::SIGACTION => sys_sigaction(a0, a1, a2),
+        nr::SIGRETURN => {
+            with_current(|p| p.signals.handler_done());
+            Ok(0)
+        }
         nr::PING => net::ping((a0 as u32).to_be_bytes(), a1 as u16, a2.min(10_000)).map_err(net_errno),
         nr::UDP_SOCKET => sys_udp_socket(a0),
         nr::SENDTO => sys_sendto(a0, a1, a2, a3, a4),
@@ -314,7 +326,7 @@ pub extern "C" fn dispatch(frame: &mut SyscallFrame) {
         Ok(v) => v,
         Err(e) => (-e) as u64,
     };
-    super::check_killed();
+    super::deliver_signals(&mut frame.rip, &mut frame.rsp, frame.rflags);
 }
 
 /// Whether the current process may access `[addr, addr + len)`.
@@ -339,6 +351,10 @@ fn copy_from_user(addr: u64, len: u64) -> Result<Vec<u8>, i64> {
 }
 
 /// Copies `data` to a user buffer (after checking it).
+pub(super) fn write_user(addr: u64, data: &[u8]) -> Result<(), i64> {
+    copy_to_user(addr, data)
+}
+
 fn copy_to_user(addr: u64, data: &[u8]) -> Result<(), i64> {
     if !accessible(addr, data.len() as u64, true) {
         return Err(errno::EFAULT);
@@ -451,12 +467,12 @@ fn write_target(target: Target, data: &[u8]) -> SysResult {
         }
         Target::Pipe(end) if end.write => {
             return end
-                .write(data, super::kill_pending)
+                .write(data, super::signal_pending)
                 .map(|n| n as u64)
                 .map_err(pipe_errno);
         }
         Target::Tcp(id) => {
-            return tcp::send(id, data, super::kill_pending)
+            return tcp::send(id, data, super::signal_pending)
                 .map(|n| n as u64)
                 .map_err(tcp_errno);
         }
@@ -495,7 +511,7 @@ fn sys_read(fd: u64, buf: u64, len: u64) -> SysResult {
             if !accessible(buf, len, true) {
                 return Err(errno::EFAULT);
             }
-            let data = tcp::recv(id, len.min(MAX_READ) as usize, super::kill_pending).map_err(tcp_errno)?;
+            let data = tcp::recv(id, len.min(MAX_READ) as usize, super::signal_pending).map_err(tcp_errno)?;
             copy_to_user(buf, &data)?;
             Ok(data.len() as u64)
         }
@@ -504,7 +520,7 @@ fn sys_read(fd: u64, buf: u64, len: u64) -> SysResult {
                 return Err(errno::EFAULT);
             }
             let data = end
-                .read(len.min(MAX_READ) as usize, super::kill_pending)
+                .read(len.min(MAX_READ) as usize, super::signal_pending)
                 .map_err(pipe_errno)?;
             copy_to_user(buf, &data)?;
             Ok(data.len() as u64)
@@ -721,9 +737,14 @@ fn sys_spawn(path: u64, path_len: u64, args: u64, args_len: u64) -> SysResult {
     let args = core::str::from_utf8(&args).map_err(|_| errno::EINVAL)?;
     let image = fs::with_root(|fs| fs.read_file(&path)).map_err(fs_errno)?;
     let me = task::current_id();
-    let (cwd, stdout, std_files, env) = with_current(|p| {
+    let (cwd, stdout, std_files, (env, signals)) = with_current(|p| {
         let fd = |i: usize| p.files.get(i).cloned().flatten();
-        (p.cwd.clone(), p.stdout.clone(), [fd(0), fd(1), fd(2)], p.env.clone())
+        (
+            p.cwd.clone(),
+            p.stdout.clone(),
+            [fd(0), fd(1), fd(2)],
+            (p.env.clone(), p.signals.for_child()),
+        )
     })
     .ok_or(errno::ESRCH)?;
     let name = path.rsplit('/').next().unwrap_or(&path);
@@ -735,6 +756,7 @@ fn sys_spawn(path: u64, path_len: u64, args: u64, args_len: u64) -> SysResult {
         ignore_interrupt: false,
         std_files: Some(std_files), // the child inherits stdin/stdout/stderr (pipes, redirections)
         env: Some(env),
+        signals: Some(signals),
     };
     super::spawn_with(name, &image, args, opts).map_err(|e| match e {
         ExecError::Elf(_) => errno::ENOEXEC,
@@ -768,6 +790,7 @@ fn sys_wait(pid: u64, status_addr: u64, flags: u64) -> SysResult {
             ExitStatus::Exited(code) => out.code = code,
             ExitStatus::Killed(reason) => {
                 out.kind = WAIT_KILLED;
+                out.code = super::signal::number_for_reason(&reason) as i64;
                 let mut len = reason.len().min(out.reason.len());
                 while !reason.is_char_boundary(len) {
                     len -= 1;
@@ -781,11 +804,27 @@ fn sys_wait(pid: u64, status_addr: u64, flags: u64) -> SysResult {
     Ok(pid)
 }
 
-fn sys_kill(pid: u64) -> SysResult {
-    if super::parent_of(pid) != Some(task::current_id()) || !super::kill(pid) {
-        return Err(errno::ESRCH);
+/// Any user process may be signalled (a single-user system).
+fn sys_kill(pid: u64, sig: u64) -> SysResult {
+    if sig >= super::signal::NSIG as u64 {
+        return Err(errno::EINVAL);
     }
-    Ok(0)
+    let found = if sig == 0 {
+        without_interrupts(|| super::PROCESSES.lock().get(&pid).is_some_and(|p| p.status.is_none()))
+    } else {
+        super::send_signal(pid, sig as u32)
+    };
+    if found { Ok(0) } else { Err(errno::ESRCH) }
+}
+
+fn sys_sigaction(sig: u64, handler: u64, trampoline: u64) -> SysResult {
+    // the trampoline becomes a `sysret` target: it must be a user address
+    if sig >= super::signal::NSIG as u64 || trampoline >= USER_END {
+        return Err(errno::EINVAL);
+    }
+    with_current(|p| p.signals.set(sig as u32, handler, trampoline))
+        .ok_or(errno::ESRCH)?
+        .map_err(|_| errno::EINVAL)
 }
 
 fn sys_chdir(path: u64, path_len: u64) -> SysResult {
@@ -1053,7 +1092,7 @@ fn sys_tcp_connect(ip: u64, port: u64, timeout_ms: u64) -> SysResult {
         (ip as u32).to_be_bytes(),
         port,
         timeout_ms.clamp(100, 60_000),
-        super::kill_pending,
+        super::signal_pending,
     )
     .map_err(tcp_errno)?;
     let conn = alloc::sync::Arc::new(super::TcpConnection(id));
@@ -1076,7 +1115,7 @@ fn sys_tcp_accept(fd: u64, from: u64) -> SysResult {
     if from != 0 && !accessible(from, size_of::<SockAddr>() as u64, true) {
         return Err(errno::EFAULT);
     }
-    let (id, ip, peer_port) = tcp::accept(port, super::kill_pending).map_err(tcp_errno)?;
+    let (id, ip, peer_port) = tcp::accept(port, super::signal_pending).map_err(tcp_errno)?;
     let conn = alloc::sync::Arc::new(super::TcpConnection(id));
     if from != 0 {
         copy_struct_to_user(
@@ -1151,7 +1190,7 @@ fn sys_recvfrom(fd: u64, buf: u64, len: u64, from: u64, timeout_ms: u64) -> SysR
         return Err(errno::EFAULT);
     }
     let d = socket
-        .recv(timeout_ms.min(60_000), super::kill_pending)
+        .recv(timeout_ms.min(60_000), super::signal_pending)
         .map_err(net_errno)?;
     let n = d.data.len().min(len as usize); // the rest of a longer datagram is dropped
     copy_to_user(buf, &d.data[..n])?;
@@ -1280,7 +1319,7 @@ fn read_stdin(buf: u64, len: u64) -> SysResult {
     let mut bytes = with_current(|p| core::mem::take(&mut p.stdin_pending)).unwrap_or_default();
     while bytes.is_empty() {
         // blocks until a key arrives; a kill (e.g. Ctrl+C) aborts the wait
-        match input::read_key_or_abort(super::kill_pending) {
+        match input::read_key_or_abort(super::signal_pending) {
             Some(event) => key_bytes(event, &mut bytes),
             None => return Err(errno::EINTR),
         }

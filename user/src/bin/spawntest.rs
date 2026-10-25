@@ -18,7 +18,7 @@ const ENOEXEC: i64 = 8;
 const ECHILD: i64 = 10;
 
 fn killed_with(status: &Result<ExitStatus, Error>, text: &str) -> bool {
-    matches!(status, Ok(ExitStatus::Killed(r)) if r.contains(text))
+    matches!(status, Ok(ExitStatus::Killed(r, _)) if r.contains(text))
 }
 
 fn main(_args: ulib::Args) -> i32 {
@@ -53,7 +53,7 @@ fn main(_args: ulib::Args) -> i32 {
             sys::sleep_ms(50);
             check(process::kill(pid).is_ok(), "kill child");
             check(
-                process::wait(pid) == Ok(ExitStatus::Killed("killed".into())),
+                process::wait(pid) == Ok(ExitStatus::Killed("killed".into(), 9)),
                 "status of the killed child",
             );
             check(process::wait(pid) == Err(Error(ECHILD)), "second wait -> ECHILD");
@@ -66,7 +66,7 @@ fn main(_args: ulib::Args) -> i32 {
             sys::sleep_ms(30);
             check(process::kill(pid).is_ok(), "kill spinner");
             check(
-                process::wait(pid) == Ok(ExitStatus::Killed("killed".into())),
+                process::wait(pid) == Ok(ExitStatus::Killed("killed".into(), 9)),
                 "status of the spinner",
             );
         }

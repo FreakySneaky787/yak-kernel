@@ -216,6 +216,13 @@ STEPS = [
     ("heaptest\r", ["heaptest: all checks passed"], ["FAIL"]),
     ("spawntest\r", ["spawntest: all checks passed"], ["FAIL"]),
     ("sleep 300\r", ["slept 300 ms"], []),  # the orphan started by spawntest prints in the meantime
+    ("sigtest\r", ["sigtest: all checks passed"], ["FAIL"]),  # M34: signals
+    ("sigtest wait-int\r" + PAUSE + CTRL_C, ["press Ctrl+C", "caught SIGINT"], ["killed"]),  # Ctrl+C = SIGINT
+    ("fault sleep &\r", ["[1]"], ["error"]),
+    ("kill -l\r", ["TERM", "USR1"], ["error"]),
+    ("kill -USR1 %1\r", [], ["error"]),  # the end is reported at one of the next prompts
+    ("wait\r", [], ["error"]),
+    ("jobs\r", [], ["Running"]),
     ("fault spin\r" + PAUSE + CTRL_C, ["spinning forever", "fault was killed: interrupted"], []),
     ("fault sleep\r" + PAUSE + CTRL_C, ["sleeping forever", "fault was killed: interrupted"], []),
     ("upper\r" + PAUSE + CTRL_C, ["Type a line", "upper was killed: interrupted"], []),  # blocked in read
@@ -251,8 +258,8 @@ STEPS = [
     ("echo hello $WHO, status $?\r", ["hello world, status 0"], ["error"]),
     ("env WHO\r", ["world"], ["error"]),
     ("ls /nothing 2>&1 | wc\r", ["      1       7"], []),  # "ls: /nothing: no such file or directory"
-    ("hello job &\r", ["[1] "], ["error"]),
-    ("wait\r", ["[1] Done     hello job"], ["error"]),
+    ("hello job &\r", ["[2] "], ["error"]),
+    ("wait\r", ["[2] Done     hello job"], ["error"]),
     ("write /s.sh 'echo from a script: $1'\r", [], ["error"]),  # quoted: the interactive shell must not expand it
     ("sh /s.sh argument\r", ["from a script: argument"], ["error"]),
     ("fputest\r", ["fputest: all checks passed"], ["registers changed", "MXCSR changed", "is wrong", "error"]),  # SSE registers per thread (M24)

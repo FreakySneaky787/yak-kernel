@@ -475,12 +475,15 @@ mod tests {
         for lba in 0..16u64 {
             with_disk(|d| d.read(lba * 8, &mut buf)).unwrap();
         }
+        // Not one interrupt per command: QEMU often finishes a command before
+        // the waiter blocks, and two MSIs that arrive while the first is still
+        // pending in the local APIC merge into one (bug #8). Some must come.
+        let deadline = crate::time::uptime_ms() + 100;
+        while interrupt_stats().1 == before && crate::time::uptime_ms() < deadline {
+            crate::time::sleep_ms(1);
+        }
         let (_, after) = interrupt_stats();
-        assert!(
-            after >= before + 16,
-            "only {} interrupts for 16 commands",
-            after - before
-        );
+        assert!(after > before, "no completion interrupt for 16 commands");
     }
 
     #[test_case]

@@ -23,16 +23,22 @@
 //! for or kill. Children of a process that ends become orphans and are
 //! removed from the table as soon as they end themselves.
 //!
+//! Signals (`signal.rs`): `send_signal` marks a signal pending; it is acted
+//! on when the process returns to user mode (`deliver_signals`). `kill`
+//! sends SIGKILL.
+//!
 //! Ctrl+C: one process is in the *foreground* (the one the console belongs
 //! to). The keyboard/serial interrupt handlers call `interrupt_foreground`,
-//! which kills it - unless it ignores interrupts (the shell), in which case
-//! the key is delivered as a normal byte (0x03). While the foreground process
+//! which sends it SIGINT - unless it asked for raw Ctrl+C (`ignore_interrupt`,
+//! e.g. the editor) and has no SIGINT handler, in which case the key is
+//! delivered as a normal byte (0x03). While the foreground process
 //! waits for a child (`wait_child`), the child is in the foreground; the
 //! console comes back when the wait ends. Children that nobody waits for
 //! (background, orphans) never get it.
 
 pub mod elf;
 pub mod pipe;
+pub mod signal;
 pub mod syscall;
 
 use crate::arch::x86_64::{disable_interrupts, without_interrupts};
@@ -48,6 +54,7 @@ use alloc::vec::Vec;
 use core::fmt;
 use core::sync::atomic::{AtomicU64, Ordering};
 use elf::ElfError;
+use signal::Signals;
 use spin::Mutex;
 
 pub type Pid = Tid;
@@ -188,8 +195,8 @@ pub struct Process {
     /// Bytes of a key that did not fit into the last `read` buffer.
     stdin_pending: Vec<u8>,
     status: Option<ExitStatus>,
-    /// Reason of a pending `kill` (honoured on the way back to user mode).
-    kill_requested: Option<&'static str>,
+    /// Dispositions and pending signals (acted on when returning to user mode).
+    pub signals: Signals,
     /// `None` for processes started by the kernel.
     pub parent: Option<Pid>,
     /// The parent ended: nobody will wait, remove the entry at exit.
@@ -264,6 +271,8 @@ pub struct Options<'a> {
     pub std_files: Option<[Option<Handle>; 3]>,
     /// Environment (default: `default_env`).
     pub env: Option<BTreeMap<String, String>>,
+    /// Signal dispositions (default: all default).
+    pub signals: Option<Signals>,
 }
 
 impl<'a> Options<'a> {
@@ -276,6 +285,7 @@ impl<'a> Options<'a> {
             ignore_interrupt: false,
             std_files: None,
             env: None,
+            signals: None,
         }
     }
 }
@@ -356,7 +366,7 @@ pub fn spawn_with(name: &str, elf: &[u8], args: &str, opts: Options) -> Result<P
                 stdout: opts.stdout,
                 stdin_pending: Vec::new(),
                 status: None,
-                kill_requested: None,
+                signals: opts.signals.unwrap_or_else(Signals::new),
                 parent: opts.parent,
                 orphan: false,
                 ignore_interrupt: opts.ignore_interrupt,
@@ -437,49 +447,79 @@ pub fn kill_current(reason: String) -> ! {
     exit_current(ExitStatus::Killed(reason))
 }
 
-/// Asks process `pid` to end. It dies the next time it is interrupted in
-/// user mode or returns from a system call; a blocked process is woken up.
-/// Returns false for unknown or already ended pids.
+/// Asks process `pid` to end (SIGKILL). It dies the next time it is
+/// interrupted in user mode or returns from a system call; a blocked process
+/// is woken up. Returns false for unknown or already ended pids.
 pub fn kill(pid: Pid) -> bool {
-    kill_with_reason(pid, "killed")
+    send_signal(pid, signal::SIGKILL)
 }
 
-fn kill_with_reason(pid: Pid, reason: &'static str) -> bool {
+/// Makes `sig` pending for process `pid` and wakes it (a blocking system
+/// call then returns `EINTR`). Returns false for unknown or already ended
+/// pids; a signal the process ignores is dropped (but still returns true).
+pub fn send_signal(pid: Pid, sig: u32) -> bool {
     without_interrupts(|| {
-        let found = PROCESSES
-            .lock()
-            .get_mut(&pid)
-            .filter(|p| p.status.is_none())
-            .map(|p| p.kill_requested = Some(reason))
-            .is_some();
-        if found {
+        let posted = match PROCESSES.lock().get_mut(&pid).filter(|p| p.status.is_none()) {
+            Some(p) => p.signals.post(sig),
+            None => return false,
+        };
+        if posted {
             task::wake(pid);
         }
-        found
+        true
     })
 }
 
 /// Ctrl+C, called by the keyboard/serial interrupt handlers. Returns true if
-/// the key was consumed (the foreground process will die), false if it should
-/// be delivered as input.
+/// the key was consumed (SIGINT was sent), false if it should be delivered
+/// as input.
 pub fn interrupt_foreground() -> bool {
     let pid = FOREGROUND.load(Ordering::Relaxed);
     if pid == 0 {
         return false;
     }
-    let ignores = without_interrupts(|| PROCESSES.lock().get(&pid).is_none_or(|p| p.ignore_interrupt));
-    !ignores && kill_with_reason(pid, "interrupted")
+    let raw = without_interrupts(|| {
+        PROCESSES
+            .lock()
+            .get(&pid)
+            .is_none_or(|p| p.ignore_interrupt && !p.signals.is_handled(signal::SIGINT))
+    });
+    !raw && send_signal(pid, signal::SIGINT)
 }
 
-/// Whether the current process has a pending kill (for blocking syscalls).
-pub fn kill_pending() -> bool {
-    with_current(|p| p.kill_requested.is_some()).unwrap_or(false)
+/// Whether the current process has a signal that needs attention (blocking
+/// system calls give up and return `EINTR`).
+pub fn signal_pending() -> bool {
+    with_current(|p| p.signals.is_pending()).unwrap_or(false)
 }
 
-/// Called on the way back to user mode: honours a pending `kill`.
-pub fn check_killed() {
-    if let Some(Some(reason)) = with_current(|p| p.kill_requested) {
-        kill_current(String::from(reason));
+/// Called on the way back to user mode (after a system call or an interrupt
+/// from user mode) with the user's RIP, RSP and RFLAGS: ends the process for
+/// a fatal signal, or redirects it to its signal trampoline (see `signal`).
+pub fn deliver_signals(rip: &mut u64, rsp: &mut u64, rflags: u64) {
+    loop {
+        let Some(action) = with_current(|p| p.signals.take()).flatten() else {
+            return;
+        };
+        match action {
+            signal::Action::Terminate(sig) => kill_current(String::from(signal::reason(sig))),
+            signal::Action::Handle {
+                sig,
+                handler,
+                trampoline,
+            } => {
+                // sig, handler, rflags, rip: what the trampoline expects at its RSP
+                let frame = [sig as u64, handler, rflags, *rip];
+                let sp = rsp.wrapping_sub(size_of_val(&frame) as u64);
+                let bytes = unsafe { core::slice::from_raw_parts(frame.as_ptr() as *const u8, size_of_val(&frame)) };
+                if syscall::write_user(sp, bytes).is_err() {
+                    kill_current(String::from("bad stack for a signal handler"));
+                }
+                *rip = trampoline;
+                *rsp = sp;
+                return;
+            }
+        }
     }
 }
 
@@ -512,7 +552,7 @@ pub fn wait_child(pid: Pid, no_hang: bool) -> Result<Option<ExitStatus>, WaitErr
     let lend = FOREGROUND
         .compare_exchange(me, pid, Ordering::Relaxed, Ordering::Relaxed)
         .is_ok();
-    let joined = task::join_or_abort(pid, kill_pending);
+    let joined = task::join_or_abort(pid, signal_pending);
     if lend {
         let _ = FOREGROUND.compare_exchange(pid, me, Ordering::Relaxed, Ordering::Relaxed);
         let _ = FOREGROUND.compare_exchange(0, me, Ordering::Relaxed, Ordering::Relaxed);

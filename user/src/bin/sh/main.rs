@@ -4,7 +4,7 @@
 //! - Line editing and word splitting reuse the kernel shell's code
 //!   (`line_editor.rs`, `parser.rs` are compiled into this program).
 //! - Built-ins: cd, pwd, echo, run, history, help, exit, export, unset, set,
-//!   source (`.`), jobs, wait, fg, true, false.
+//!   source (`.`), jobs, wait, fg, kill, true, false.
 //! - Other words: a kernel built-in (lspci, acpi, ...) runs through the
 //!   `kshell` system call; otherwise a program path or a name found in
 //!   `$PATH` (default `/bin`) is started as a child. A file starting with
@@ -78,6 +78,11 @@ const BUILTINS: &[(&str, &str, &str)] = &[
     ("jobs", "jobs", "list background jobs (started with &)"),
     ("wait", "wait [%n]", "wait for background jobs"),
     ("fg", "fg [%n]", "wait for a job in the foreground (Ctrl+C reaches it)"),
+    (
+        "kill",
+        "kill [-SIG] pid|%job... | kill -l",
+        "send a signal (default TERM); -l lists the signals",
+    ),
     ("true", "true", "do nothing, successfully"),
     ("false", "false", "do nothing, unsuccessfully"),
 ];
@@ -163,11 +168,7 @@ fn assignment(word: &str) -> Option<(&str, &str)> {
 
 /// The status a finished process leaves in `$?`.
 fn status_code(status: &ExitStatus) -> i32 {
-    match status {
-        ExitStatus::Exited(code) => *code as i32,
-        ExitStatus::Killed(reason) if reason == "interrupted" => 130,
-        ExitStatus::Killed(_) => 137,
-    }
+    status.code()
 }
 
 impl Shell {
@@ -504,6 +505,7 @@ impl Shell {
                 }
             }
             "wait" | "fg" => return self.wait_jobs(args.first().map(|s| s.as_str())),
+            "kill" => return self.kill(args),
             "run" => match args.first() {
                 Some(path) => return spawn_program(path, &args[1..]),
                 None => return Stage::Failed(String::from("usage: run <program> [args...]")),
@@ -573,6 +575,65 @@ impl Shell {
             }
         }
         self.report_finished_jobs();
+        Stage::Done(status)
+    }
+
+    /// `kill [-SIG | -s SIG] pid|%job...`, `kill -l`.
+    fn kill(&mut self, args: &[String]) -> Stage {
+        use ulib::signal;
+        let mut args = args;
+        if args.first().is_some_and(|a| a == "-l") {
+            for (name, num) in signal::NAMES {
+                println!("{:2} {}", num, name);
+            }
+            return Stage::Done(0);
+        }
+        let mut sig = signal::SIGTERM;
+        if let Some(first) = args.first().filter(|a| a.starts_with('-')) {
+            let (name, rest) = if first == "-s" {
+                (
+                    args.get(1).map(String::as_str).unwrap_or(""),
+                    &args[2.min(args.len())..],
+                )
+            } else {
+                (&first[1..], &args[1..])
+            };
+            match signal::parse(name) {
+                Some(s) => sig = s,
+                None => return Stage::Failed(alloc::format!("kill: unknown signal '{}'", name)),
+            }
+            args = rest;
+        }
+        if args.is_empty() {
+            return Stage::Failed(String::from("usage: kill [-SIG] pid|%job..."));
+        }
+        let mut status = 0;
+        for target in args {
+            let pids: Vec<u64> = match target.strip_prefix('%') {
+                Some(n) => match self.jobs.iter().find(|j| n.parse() == Ok(j.id)) {
+                    Some(job) => job.procs.iter().filter(|p| p.2.is_none()).map(|p| p.1).collect(),
+                    None => {
+                        error(&alloc::format!("kill: no job {}", target));
+                        status = 1;
+                        continue;
+                    }
+                },
+                None => match target.parse() {
+                    Ok(pid) => alloc::vec![pid],
+                    Err(_) => {
+                        error(&alloc::format!("kill: '{}' is not a pid or %job", target));
+                        status = 1;
+                        continue;
+                    }
+                },
+            };
+            for pid in pids {
+                if let Err(e) = signal::send(pid, sig) {
+                    error(&alloc::format!("kill {}: {}", pid, e));
+                    status = 1;
+                }
+            }
+        }
         Stage::Done(status)
     }
 
@@ -766,7 +827,7 @@ fn wait_all(children: &[(String, u64)]) -> i32 {
                     ExitStatus::Exited(0) => {}
                     ExitStatus::Exited(code) if last => error(&alloc::format!("{} exited with code {}", name, code)),
                     ExitStatus::Exited(_) => {}
-                    ExitStatus::Killed(reason) => {
+                    ExitStatus::Killed(reason, _) => {
                         if reason == "interrupted" {
                             interrupted = true;
                         }

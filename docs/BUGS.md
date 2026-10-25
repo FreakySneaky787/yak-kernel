@@ -66,6 +66,17 @@ Format: number · date · title, then symptom → cause → fix → test.
 - **Test:** the integration test with `KERNEL_SMP=1` (timing of `time hello` and the whole run under 30 s).
 - **Remember:** run the suite with one CPU after scheduler or interrupt changes – some paths only exist there.
 
+### #8 · 2026-10-25 · MSI test flaky: "only 12 interrupts for 16 commands"
+- **Symptom:** `ahci::tests::commands_complete_by_msi_interrupt` failed in about 1 of 10 runs with `KERNEL_SMP=2`.
+- **Cause:** the test's assumption was wrong, not the driver. QEMU often completes a command before the waiter blocks
+  (`wait_for` checks PxCI first), so the thread goes on without needing the interrupt. The MSI for it is still sent to the
+  boot CPU; when that CPU runs with interrupts off for a moment, the next command's MSI arrives while the first one is
+  still pending in the local APIC's IRR – both set the same bit and become *one* interrupt.
+- **Fix:** the test only requires that completion interrupts arrive at all (waiting up to 100 ms for the first).
+- **Test:** the test itself (repeated runs with 2 CPUs).
+- **Remember:** interrupts with the same vector coalesce while pending – never count interrupts to count events; the
+  handler must look at the device's status registers (ours does).
+
 ## Known pitfalls (not bugs, but worth remembering)
 - **The Limine host utility (`limine bios-install`) needs a C compiler** (`gcc`). It is not required for booting the ISO
   in QEMU with `-cdrom`; it is only needed to make the ISO bootable as a hard disk / USB image.

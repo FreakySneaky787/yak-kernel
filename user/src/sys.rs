@@ -48,6 +48,8 @@ pub const SHUTDOWN: u64 = 40;
 pub const SETENV: u64 = 41;
 pub const GETENV: u64 = 42;
 pub const ENVIRON: u64 = 43;
+pub const SIGACTION: u64 = 44;
+pub const SIGRETURN: u64 = 45;
 
 pub const STDIN: u64 = 0;
 pub const STDOUT: u64 = 1;
@@ -257,8 +259,15 @@ pub fn wait_nohang(pid: u64, status: &mut WaitStatus) -> i64 {
     unsafe { syscall3(WAIT, pid, status as *mut WaitStatus as u64, WNOHANG) }
 }
 
-pub fn kill(pid: u64) -> i64 {
-    unsafe { syscall3(KILL, pid, 0, 0) }
+/// Sends signal `sig` to `pid` (0 = only check that it exists).
+pub fn kill(pid: u64, sig: u32) -> i64 {
+    unsafe { syscall3(KILL, pid, sig as u64, 0) }
+}
+
+/// Sets the disposition of `sig` (`SIG_DFL`, `SIG_IGN` or a handler run
+/// through `trampoline`, see `signal`); returns the old one or -errno.
+pub fn sigaction(sig: u32, disposition: u64, trampoline: u64) -> i64 {
+    unsafe { syscall3(SIGACTION, sig as u64, disposition, trampoline) }
 }
 
 pub fn chdir(path: &str) -> i64 {

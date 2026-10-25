@@ -112,6 +112,10 @@ extern "C" fn kmain() -> ! {
     kernel::time::sleep_ms(300); // the orphan (hello sleeps 100 ms) ends and is cleaned up
     assert_eq!(process::count(), 0, "orphan left in the process table");
 
+    // M34: signals (handlers, default actions, EINTR, registers kept across a handler)
+    let (status, out) = run("sigtest", "");
+    assert_eq!(status, ExitStatus::Exited(0), "{}", out);
+
     // M20: the shell as a user program, driven by injected serial input
     kernel::serial::inject_rx(
         b"echo hi from sh\rcd docs\rpwd\rls\reco\x1b[Dh\x1b[C edited\rmem\rnope\rfault exit 4\rexit 7\r",
@@ -310,6 +314,13 @@ extern "C" fn kmain() -> ! {
     ] {
         assert!(out.contains(expected), "missing {:?} in:\n{}", expected, out);
     }
+
+    // M34: the shell's kill built-in (signal names, %job)
+    kernel::serial::inject_rx(b"fault sleep &\rkill -USR1 %1\rwait\rkill -NOPE 1\rexit 0\r");
+    let (status, out) = run("sh", "");
+    assert_eq!(status, ExitStatus::Exited(0), "{}", out);
+    assert!(out.contains("killed: user signal 1"), "{}", out);
+    assert!(out.contains("kill: unknown signal 'NOPE'"), "{}", out);
 
     // M32: disk speed (informational: prints the time; checks the result)
     let data: Vec<u8> = (0..300_000u32).map(|i| b"abcdefghij\n"[(i % 11) as usize]).collect();

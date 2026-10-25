@@ -27,7 +27,7 @@ fn main(mut args: ulib::Args) -> i32 {
     eprintln!("real {}.{:06} s", us / 1_000_000, us % 1_000_000);
     match status {
         Ok(ExitStatus::Exited(code)) => code as i32,
-        Ok(ExitStatus::Killed(reason)) => {
+        Ok(ExitStatus::Killed(reason, _)) => {
             eprintln!("time: {} was killed: {}", program, reason);
             1
         }
