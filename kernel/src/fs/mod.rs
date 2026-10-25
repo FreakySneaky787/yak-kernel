@@ -5,7 +5,7 @@
 
 pub mod fat32;
 
-use crate::drivers::block::{BlockDevice, BlockError};
+use crate::drivers::block::{BlockCache, BlockDevice, BlockError};
 use alloc::string::String;
 use alloc::vec::Vec;
 use fat32::{FatFs, FsError};
@@ -40,23 +40,37 @@ impl BlockDevice for SystemDisk {
     }
 }
 
+/// What the root file system runs on: the system disk behind a
+/// write-through sector cache.
+pub type RootDisk = BlockCache<SystemDisk>;
+
+/// Sectors kept in the cache (512 KiB).
+pub const CACHE_SECTORS: usize = 1024;
+
 /// The mounted root file system. Like `DISK`, held with interrupts enabled
 /// during I/O; never use it from interrupt handlers.
-pub static ROOT: Mutex<Option<FatFs<SystemDisk>>> = Mutex::new(None);
+pub static ROOT: Mutex<Option<FatFs<RootDisk>>> = Mutex::new(None);
 
 /// Mounts the FAT32 file system of the system disk as the root.
 pub fn mount_root() -> Result<(), FsError> {
     if crate::drivers::DISK.lock().is_none() {
         return Err(FsError::NotMounted);
     }
-    let fs = FatFs::mount(SystemDisk)?;
+    let fs = FatFs::mount(BlockCache::new(SystemDisk, CACHE_SECTORS))?;
     *ROOT.lock() = Some(fs);
     Ok(())
 }
 
 /// Runs `f` with the root file system.
-pub fn with_root<R>(f: impl FnOnce(&mut FatFs<SystemDisk>) -> Result<R, FsError>) -> Result<R, FsError> {
+pub fn with_root<R>(f: impl FnOnce(&mut FatFs<RootDisk>) -> Result<R, FsError>) -> Result<R, FsError> {
     f(ROOT.lock().as_mut().ok_or(FsError::NotMounted)?)
+}
+
+/// (hits, misses, cached sectors) of the root file system's cache.
+pub fn cache_stats() -> Option<(u64, u64, usize)> {
+    ROOT.lock()
+        .as_ref()
+        .map(|fs| (fs.device().hits, fs.device().misses, fs.device().cached_sectors()))
 }
 
 /// Turns `path` (absolute or relative to `cwd`) into an absolute path

@@ -297,6 +297,15 @@ Short explanations of every subsystem: what it is and why we need it.
 - `cmd &` starts a program without waiting; the shell keeps a job list and reports when the job is done.
 - A **script** is just a file with shell lines; `#!` at the start tells the shell to run it with `sh`.
 
+## M32 – Measure before you optimise
+- The first guess ("the disk is slow, add a cache") was only part of the truth: the virtual disk answered in microseconds;
+  most of the time went into walking the same FAT chain and directory again for every 4 KiB read. Timing each step separately
+  showed where to work.
+- A **cache** keeps recently used sectors in RAM; *write-through* means every write still goes to the disk immediately, so
+  the cache can never lose data.
+- **MSI** (message signaled interrupts): instead of an interrupt wire, a PCI device writes a small message to a special
+  address – the local APIC – which turns it into an interrupt. No routing tables needed.
+
 ## Tooling – GNU ld and binutils
 - rustc compiles our code into object files; a **linker** combines them into the final ELF according to `kernel/linker.ld`
   (load address, section order, segments). We use **GNU ld** (`ld.bfd`) for that.

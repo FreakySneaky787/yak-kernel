@@ -29,6 +29,7 @@ pub fn install_irq_handlers(idt: &mut Idt) {
     idt.set(pic::PIC2_OFFSET + 7, pic_spurious);
     idt.set(lapic::SPURIOUS_VECTOR, apic_spurious);
     idt.set(super::smp::WAKE_VECTOR, wake);
+    idt.set(crate::drivers::ahci::VECTOR, ahci);
 }
 
 /// Routes a legacy ISA IRQ through the I/O APIC to the current CPU,
@@ -80,6 +81,7 @@ extern "x86-interrupt" fn keyboard(_frame: InterruptStackFrame) {
     crate::drivers::keyboard::handle_interrupt(crate::process::interrupt_foreground);
     crate::task::wake_input_waiters();
     lapic::eoi();
+    crate::task::preempt_idle();
 }
 
 extern "x86-interrupt" fn com1(_frame: InterruptStackFrame) {
@@ -87,6 +89,14 @@ extern "x86-interrupt" fn com1(_frame: InterruptStackFrame) {
     crate::serial::handle_interrupt(|byte| byte == 0x03 && crate::process::interrupt_foreground());
     crate::task::wake_input_waiters();
     lapic::eoi();
+    crate::task::preempt_idle();
+}
+
+/// AHCI command completion (MSI).
+extern "x86-interrupt" fn ahci(_frame: InterruptStackFrame) {
+    crate::drivers::ahci::handle_interrupt();
+    lapic::eoi();
+    crate::task::preempt_idle();
 }
 
 /// Wakes an idle CPU (it then looks for work); nothing else to do.

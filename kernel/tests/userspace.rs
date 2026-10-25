@@ -311,6 +311,29 @@ extern "C" fn kmain() -> ! {
         assert!(out.contains(expected), "missing {:?} in:\n{}", expected, out);
     }
 
+    // M32: disk speed (informational: prints the time; checks the result)
+    let data: Vec<u8> = (0..300_000u32).map(|i| b"abcdefghij\n"[(i % 11) as usize]).collect();
+    fs::with_root(|fs| fs.write_file("/bench.txt", &data)).unwrap();
+    let (status, out) = run("time", "wc /bench.txt");
+    assert_eq!(status, ExitStatus::Exited(0), "{}", out);
+    assert!(out.contains(" 300000 /bench.txt"), "{}", out);
+    serial_println!("  BENCH reading 300 KB: {}", out.lines().last().unwrap_or(""));
+    let t0 = kernel::time::uptime_us();
+    let mut buf = alloc::vec![0u8; 4096];
+    let mut off = 0u64;
+    loop {
+        let n = fs::with_root(|fs| fs.read_at("/bench.txt", off, &mut buf)).unwrap();
+        if n == 0 {
+            break;
+        }
+        off += n as u64;
+    }
+    serial_println!(
+        "  BENCH kernel read_at 4 KiB chunks: {} us for {} bytes",
+        kernel::time::uptime_us() - t0,
+        off
+    );
+
     assert_eq!(process::count(), 0);
     serial_println!("[ok]");
     exit(ExitCode::Success)

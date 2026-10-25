@@ -79,6 +79,14 @@
   created by `scripts/mkdisk.sh` from `rootfs/`. QEMU: `-device ide-hd,bus=ide.0` = AHCI port 0 (the boot CD is ATAPI on port 2).
   Run mode uses the persistent `build/disk.img`; every test binary and the E2E test get fresh images.
 
+## Disk caching and interrupts (M32)
+- The root file system runs on `BlockCache<SystemDisk>`: write-through (the disk is always current, a power-off loses
+  nothing), 1024 sectors, LRU eviction of the oldest eighth when full. Runs of missing sectors are fetched with one request.
+- `FatFs` additionally keeps the last cluster chain and the last path lookup; any write to the volume drops both.
+- AHCI: MSI to the boot CPU's LAPIC on vector 0x50; the handler acknowledges all ports, remembers task-file errors per port
+  and notifies `Wait::Disk`. Commands wait with `wait_for` when interrupts are on and the scheduler runs, else they poll.
+  The `DISK` lock stays held while waiting (other threads wanting the disk spin; fine for now).
+
 ## File system
 - One FAT32 volume on the system disk, mounted at boot as `fs::ROOT` (a spin lock like `DISK`: never from interrupt handlers).
   `FatFs<D: BlockDevice>` is generic, so the same code runs on `SystemDisk` (adapter for `drivers::DISK`) and on `RamDisk` in tests.

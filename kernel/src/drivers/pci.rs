@@ -15,6 +15,11 @@ const REG_CLASS: u8 = 0x08;
 const REG_HEADER_TYPE: u8 = 0x0C;
 const REG_BAR0: u8 = 0x10;
 const REG_INTERRUPT: u8 = 0x3C;
+const REG_STATUS: u8 = 0x06;
+const REG_CAPABILITIES: u8 = 0x34;
+const STATUS_CAPABILITY_LIST: u16 = 1 << 4;
+const COMMAND_INTX_DISABLE: u16 = 1 << 10;
+pub const CAP_MSI: u8 = 0x05;
 
 const COMMAND_MEMORY_SPACE: u16 = 1 << 1;
 const COMMAND_BUS_MASTER: u16 = 1 << 2;
@@ -99,6 +104,51 @@ impl Device {
         let cmd = self.location.read16(REG_COMMAND);
         self.location
             .write16(REG_COMMAND, cmd | COMMAND_MEMORY_SPACE | COMMAND_BUS_MASTER);
+    }
+
+    /// Offset of the capability `id` in the configuration space, if the
+    /// device has it (the capabilities form a linked list from 0x34).
+    pub fn capability(&self, id: u8) -> Option<u8> {
+        if self.location.read16(REG_STATUS) & STATUS_CAPABILITY_LIST == 0 {
+            return None;
+        }
+        let mut ptr = (self.location.read16(REG_CAPABILITIES) & 0xFC) as u8;
+        for _ in 0..48 {
+            if ptr == 0 {
+                return None;
+            }
+            let header = self.location.read16(ptr);
+            if header as u8 == id {
+                return Some(ptr);
+            }
+            ptr = ((header >> 8) as u8) & 0xFC;
+        }
+        None
+    }
+
+    /// Switches the device to message signaled interrupts: it then writes
+    /// `vector` to the local APIC of `apic_id` instead of using an interrupt
+    /// pin (whose routing would need the ACPI AML tables). False if the
+    /// device has no MSI capability.
+    pub fn enable_msi(&self, vector: u8, apic_id: u8) -> bool {
+        let Some(cap) = self.capability(CAP_MSI) else {
+            return false;
+        };
+        let control = self.location.read16(cap + 2);
+        let is_64bit = control & (1 << 7) != 0;
+        // message address: the LAPIC MMIO window with the destination APIC ID
+        self.location.write32(cap + 4, 0xFEE0_0000 | (apic_id as u32) << 12);
+        if is_64bit {
+            self.location.write32(cap + 8, 0);
+            self.location.write16(cap + 12, vector as u16); // fixed delivery, edge
+        } else {
+            self.location.write16(cap + 8, vector as u16);
+        }
+        // enable, one message (multiple message enable = 0)
+        self.location.write16(cap + 2, (control & !(0b111 << 4)) | 1);
+        let cmd = self.location.read16(REG_COMMAND);
+        self.location.write16(REG_COMMAND, cmd | COMMAND_INTX_DISABLE);
+        true
     }
 
     pub fn command(&self) -> u16 {

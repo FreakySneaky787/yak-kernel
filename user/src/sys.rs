@@ -340,6 +340,7 @@ pub const PROC_JOIN: u32 = 4;
 pub const PROC_WAIT_PIPE: u32 = 5;
 pub const PROC_DEAD: u32 = 6;
 pub const PROC_WAIT_NET: u32 = 7;
+pub const PROC_WAIT_DISK: u32 = 8;
 
 const _: () = assert!(core::mem::size_of::<SysInfo>() == 176 && core::mem::size_of::<ProcInfo>() == 64);
 

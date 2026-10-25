@@ -17,6 +17,7 @@ fn state_name(state: u32) -> &'static str {
         sys::PROC_WAIT_PIPE => "wait pipe",
         sys::PROC_DEAD => "dead",
         sys::PROC_WAIT_NET => "wait net",
+        sys::PROC_WAIT_DISK => "wait disk",
         _ => "?",
     }
 }

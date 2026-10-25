@@ -20,10 +20,18 @@ use crate::mem::{PAGE_SIZE, PhysAddr};
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::ptr::{read_volatile, write_volatile};
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 // HBA (global) registers
 const HBA_CAP: u64 = 0x00;
 const HBA_GHC: u64 = 0x04;
+const HBA_IS: u64 = 0x08;
+const GHC_INTERRUPT_ENABLE: u32 = 1 << 1;
+/// Port interrupt enables: D2H register FIS (command done) and task file error.
+const PORT_IE_DHRE: u32 = 1 << 0;
+const PORT_IE_TFEE: u32 = 1 << 30;
+/// Interrupt vector of the controller's MSI.
+pub const VECTOR: u8 = 0x50;
 const HBA_PI: u64 = 0x0C;
 const HBA_VS: u64 = 0x10;
 const GHC_AHCI_ENABLE: u32 = 1 << 31;
@@ -85,6 +93,42 @@ fn mmio_write(addr: u64, value: u32) {
     unsafe { write_volatile(addr as *mut u32, value) }
 }
 
+/// Completion interrupts: the controller's register base for the handler,
+/// whether MSI is on, how many interrupts came, and the ports that reported
+/// a task file error (the handler clears PxIS, so the waiter would not see it).
+static HBA_BASE: AtomicU64 = AtomicU64::new(0);
+static IRQ_ENABLED: AtomicBool = AtomicBool::new(false);
+static IRQ_COUNT: AtomicU64 = AtomicU64::new(0);
+static ERROR_PORTS: AtomicU32 = AtomicU32::new(0);
+
+/// Whether commands complete by interrupt (MSI) and how many interrupts came.
+pub fn interrupt_stats() -> (bool, u64) {
+    (IRQ_ENABLED.load(Ordering::Relaxed), IRQ_COUNT.load(Ordering::Relaxed))
+}
+
+/// Called from the interrupt handler: acknowledges all ports and wakes the
+/// threads waiting for a command (`Wait::Disk`).
+pub fn handle_interrupt() {
+    let hba = HBA_BASE.load(Ordering::Relaxed);
+    if hba == 0 {
+        return;
+    }
+    let pending = mmio_read(hba + HBA_IS);
+    for port in 0..32 {
+        if pending & (1 << port) != 0 {
+            let port_base = hba + 0x100 + port as u64 * 0x80;
+            let status = mmio_read(port_base + PORT_IS);
+            if status & IS_TASK_FILE_ERROR != 0 {
+                ERROR_PORTS.fetch_or(1 << port, Ordering::Relaxed);
+            }
+            mmio_write(port_base + PORT_IS, status); // write 1 to clear
+        }
+    }
+    mmio_write(hba + HBA_IS, pending);
+    IRQ_COUNT.fetch_add(1, Ordering::Relaxed);
+    crate::task::notify(crate::task::Wait::Disk);
+}
+
 fn wait_until(mut condition: impl FnMut() -> bool) -> Result<(), BlockError> {
     for _ in 0..TIMEOUT_SPINS {
         if condition() {
@@ -129,6 +173,13 @@ pub fn probe() -> Result<(Vec<AhciDisk>, Vec<PortInfo>), &'static str> {
 
     mmio_write(hba + HBA_GHC, mmio_read(hba + HBA_GHC) | GHC_AHCI_ENABLE);
     let implemented = mmio_read(hba + HBA_PI);
+    HBA_BASE.store(hba, Ordering::Relaxed);
+    // completion interrupts by MSI to the boot CPU; without MSI we keep polling
+    if dev.enable_msi(VECTOR, crate::arch::x86_64::lapic::id()) {
+        mmio_write(hba + HBA_IS, u32::MAX);
+        mmio_write(hba + HBA_GHC, mmio_read(hba + HBA_GHC) | GHC_INTERRUPT_ENABLE);
+        IRQ_ENABLED.store(true, Ordering::Relaxed);
+    }
 
     let mut disks = Vec::new();
     let mut ports = Vec::new();
@@ -194,7 +245,12 @@ impl AhciDisk {
         disk.set_reg(PORT_FB + 4, (fb >> 32) as u32);
         disk.set_reg(PORT_SERR, u32::MAX); // clear errors (write 1 to clear)
         disk.set_reg(PORT_IS, u32::MAX);
-        disk.set_reg(PORT_IE, 0); // we poll, no interrupts
+        let ie = if IRQ_ENABLED.load(Ordering::Relaxed) {
+            PORT_IE_DHRE | PORT_IE_TFEE
+        } else {
+            0
+        };
+        disk.set_reg(PORT_IE, ie);
         disk.start()?;
 
         disk.identify()?;
@@ -271,10 +327,21 @@ impl AhciDisk {
         }
 
         // --- issue and wait ---
+        let port_bit = 1u32 << self.port;
+        ERROR_PORTS.fetch_and(!port_bit, Ordering::Relaxed);
         self.set_reg(PORT_IS, u32::MAX);
         self.set_reg(PORT_CI, 1);
-        wait_until(|| self.reg(PORT_CI) & 1 == 0 || self.reg(PORT_IS) & IS_TASK_FILE_ERROR != 0)?;
-        if self.reg(PORT_IS) & IS_TASK_FILE_ERROR != 0 || self.reg(PORT_TFD) & TFD_ERR != 0 {
+        let failed =
+            || self.reg(PORT_IS) & IS_TASK_FILE_ERROR != 0 || ERROR_PORTS.load(Ordering::Relaxed) & port_bit != 0;
+        let done = || self.reg(PORT_CI) & 1 == 0 || failed();
+        if IRQ_ENABLED.load(Ordering::Relaxed) && crate::arch::x86_64::interrupts_enabled() && crate::task::is_running()
+        {
+            // sleep until the completion interrupt (other threads run meanwhile)
+            crate::task::wait_for(crate::task::Wait::Disk, done);
+        } else {
+            wait_until(done)?; // early boot: interrupts are still off
+        }
+        if failed() || self.reg(PORT_TFD) & TFD_ERR != 0 {
             self.set_reg(PORT_IS, u32::MAX);
             return Err(BlockError::Device);
         }
@@ -398,6 +465,22 @@ mod tests {
             d.read(lba, &mut back).unwrap();
             assert!(back == data, "data read back differs");
         });
+    }
+
+    #[test_case]
+    fn commands_complete_by_msi_interrupt() {
+        let (msi, before) = interrupt_stats();
+        assert!(msi, "QEMU's ICH9 AHCI supports MSI");
+        let mut buf = [0u8; 4096];
+        for lba in 0..16u64 {
+            with_disk(|d| d.read(lba * 8, &mut buf)).unwrap();
+        }
+        let (_, after) = interrupt_stats();
+        assert!(
+            after >= before + 16,
+            "only {} interrupts for 16 commands",
+            after - before
+        );
     }
 
     #[test_case]

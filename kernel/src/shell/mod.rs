@@ -628,6 +628,23 @@ fn cmd_disk(_: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), Stri
         bytes / (1024 * 1024)
     )
     .ok();
+    let (msi, irqs) = crate::drivers::ahci::interrupt_stats();
+    if msi {
+        writeln!(out, "Completion: MSI interrupts ({} so far)", irqs).ok();
+    } else {
+        writeln!(out, "Completion: polling").ok();
+    }
+    if let Some((hits, misses, cached)) = fs::cache_stats() {
+        writeln!(
+            out,
+            "Cache: {} KiB in use, {} hits, {} misses ({} % hits)",
+            cached / 2,
+            hits,
+            misses,
+            hits * 100 / (hits + misses).max(1)
+        )
+        .ok();
+    }
     Ok(())
 }
 
@@ -694,6 +711,7 @@ fn cmd_ps(_: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), String
             task::State::Blocked(task::Wait::Join(id)) => format!("join {}", id),
             task::State::Blocked(task::Wait::Pipe(_)) => String::from("wait pipe"),
             task::State::Blocked(task::Wait::Net) => String::from("wait net"),
+            task::State::Blocked(task::Wait::Disk) => String::from("wait disk"),
             task::State::Dead => String::from("dead"),
         };
         let on = t.cpu.map_or(String::from("-"), |c| format!("{}", c));

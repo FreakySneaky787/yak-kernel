@@ -57,7 +57,7 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 | 29 | TCP: connect/listen/accept, retransmission, flow control; client and server programs | ✅ | TCP packet test, refused + 100 KB loopback echo in the kernel, `nc`/`echod` between processes, E2E: host echo, 100 KB from the host, host → guest 50 KB via hostfwd |
 | 30 | DHCP and a DNS client; HTTP client (`wget`) and server (`httpd`) | ✅ | DHCP packet test, `card_is_configured` checks the DHCP lease, `host --selftest` (7 DNS checks), httpd + wget over loopback (200/404), E2E: fake DNS on the host, wget from a host HTTP server, the host fetches from httpd via hostfwd |
 | 31 | Shell: scripts, environment variables, `2>`, background jobs (`&`, `jobs`, `wait`) | ✅ | scripted sh session (expansion, inheritance, `$?`, `2>`, job + `wait`, `#!` script) and a `set -e` script in the integration test, 8 E2E steps |
-| 32 | Storage speed: sector cache for FAT32, AHCI completion interrupts (MSI) | ⬜ | |
+| 32 | Storage speed: sector cache for FAT32, AHCI completion interrupts (MSI) | ✅ | BlockCache unit test (hits, runs, write-through, eviction), lookup-cache invalidation test, MSI test (≥ 1 interrupt per command), benchmark line in the integration test; suite green with 1 and 4 CPUs |
 | 33 | Memory: reclaim bootloader memory, demand paging for user heaps | ⬜ | |
 
 ## Log
@@ -248,8 +248,16 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   Found: lines of concurrent programs were mixed mid-line because `println!` wrote every format piece separately – the
   `ulib` print macros now format first and write once.
 
+- **2026-10-25** – M32: measured first (300 KB through `wc`: 0.12 s; `read_at` in 4 KiB steps: 94 ms – the disk itself
+  needs only ~3 ms, the time went into walking the FAT chain and the directory on *every* call). Now: `BlockCache` (write-
+  through sector cache, 512 KiB, LRU by eighths) under the root file system, `read_at` reads contiguous clusters with one
+  request, FatFs caches the last cluster chain and the last path lookup (both dropped on any write). Result: `read_at` 94 →
+  5 ms, `wc` of 300 KB 0.12 → 0.038 s. AHCI completes commands by MSI (PCI capability list, `Device::enable_msi`): the
+  waiting thread blocks on `Wait::Disk` instead of spinning (single commands get slower, ~2×, but the CPU is free);
+  polling remains for early boot. Bug #7 (an idle CPU only noticed threads woken by its own interrupts at the next tick)
+  found with `KERNEL_SMP=1` and fixed (`task::preempt_idle` at the end of waking interrupt handlers).
+
 ## Open items / later
-- AHCI uses polling; switching to completion interrupts (MSI or the PCI interrupt line) would free the CPU during I/O.
 - Thread-level sleeping mutex (today all shared state uses spin locks with interrupts disabled).
 - `ps` CPU percentages only cover threads that still exist (dead threads are reaped with their counters).
 - Reclaim `BOOTLOADER_RECLAIMABLE` memory once we no longer use Limine's stack, page tables and responses.
@@ -266,7 +274,8 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   write, append, echo, sleep, clear, help. Without `/bin` on the disk, the kernel shell has no `ls`/`cat`.
 
 ## Next step
-**M32 – storage speed:** a sector/cluster cache between FAT32 and the disk (write-through, LRU, a few hundred KiB; FAT
-sectors and directories benefit most), measured with `time cat` of a large file before/after; then AHCI completion
-interrupts via MSI (PCI capability list, message address/data to the local APIC) so a disk wait blocks the thread instead
-of polling. Then M33 (reclaim bootloader memory, demand paging for user heaps).
+**M33 – memory:** reclaim `BOOTLOADER_RECLAIMABLE` memory once nothing of Limine is used any more (its stack is left in
+`kmain`, but the page tables are still Limine's and the responses are read at boot – copy what is needed first, or keep
+the page-table frames reserved), and demand paging for user heaps (`brk` only reserves the range; the page-fault handler
+maps a zeroed page on the first touch, the kill path stays for real faults). Tests: free memory grows after the reclaim,
+a program that grows its heap by 32 MiB but touches only a few pages uses only a few frames.

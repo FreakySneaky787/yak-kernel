@@ -60,6 +60,8 @@ pub enum Wait {
     Pipe(u64),
     /// Waiting for the network (ARP answer, ping reply, UDP datagram, timeout).
     Net,
+    /// Waiting for a disk command to complete.
+    Disk,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -413,6 +415,24 @@ pub fn on_tick() {
         s.wake(|w| matches!(w, Wait::Until(t) if t <= now));
     });
     schedule();
+}
+
+/// Called at the end of interrupt handlers that may have woken threads: if
+/// this CPU is only idling, switch to the woken thread right away instead of
+/// at the next timer tick (other CPUs are kicked with an IPI by `make_ready`,
+/// but nobody kicks the CPU that handles the interrupt itself).
+pub fn preempt_idle() {
+    if !is_running() {
+        return;
+    }
+    let cpu = smp::cpu_index();
+    let idle_with_work = SCHEDULER
+        .lock()
+        .as_ref()
+        .is_some_and(|s| s.idle[cpu] != NO_THREAD && s.current[cpu] == s.idle[cpu] && !s.ready.is_empty());
+    if idle_with_work {
+        schedule();
+    }
 }
 
 /// Called from the wake-up IPI: look for work.

@@ -142,6 +142,12 @@ pub struct FatFs<D: BlockDevice> {
     label: String,
     /// One cached sector of the first FAT: (sector relative to the volume, data).
     fat_cache: Option<(u64, [u8; SECTOR_SIZE])>,
+    /// The cluster chain asked for last (first cluster, chain); dropped on
+    /// every FAT change. Saves walking the FAT again for each `read_at`.
+    chain_cache: Option<(u32, Vec<u32>)>,
+    /// The path looked up last and its entry; dropped on every write to the
+    /// disk (any write may change a directory entry).
+    lookup_cache: Option<(String, DirEntry)>,
 }
 
 fn u16_at(b: &[u8], o: usize) -> u16 {
@@ -398,6 +404,9 @@ pub fn format<D: BlockDevice>(dev: &mut D, label: &str) -> Result<()> {
     Ok(())
 }
 
+/// Most clusters `read_at` reads with one device request.
+const MAX_READ_RUN: usize = 128;
+
 // ---- the file system ------------------------------------------------------------------
 
 impl<D: BlockDevice> FatFs<D> {
@@ -455,6 +464,8 @@ impl<D: BlockDevice> FatFs<D> {
             next_free: 2,
             label,
             fat_cache: None,
+            chain_cache: None,
+            lookup_cache: None,
         };
         fs.count_free_clusters()?;
         Ok(fs)
@@ -477,6 +488,10 @@ impl<D: BlockDevice> FatFs<D> {
         self.dev
     }
 
+    pub fn device(&self) -> &D {
+        &self.dev
+    }
+
     // ---- low level: sectors, FAT, clusters ----
 
     fn read_sectors(&mut self, sector: u64, buf: &mut [u8]) -> Result<()> {
@@ -484,6 +499,7 @@ impl<D: BlockDevice> FatFs<D> {
     }
 
     fn write_sectors(&mut self, sector: u64, buf: &[u8]) -> Result<()> {
+        self.lookup_cache = None;
         Ok(self.dev.write(self.volume_start + sector, buf)?)
     }
 
@@ -526,7 +542,7 @@ impl<D: BlockDevice> FatFs<D> {
     }
 
     fn load_fat_sector(&mut self, sector: u64) -> Result<&mut [u8; SECTOR_SIZE]> {
-        if self.fat_cache.map(|(s, _)| s) != Some(sector) {
+        if self.fat_cache.as_ref().map(|(s, _)| *s) != Some(sector) {
             let mut data = [0u8; SECTOR_SIZE];
             self.read_sectors(sector, &mut data)?;
             self.fat_cache = Some((sector, data));
@@ -541,6 +557,7 @@ impl<D: BlockDevice> FatFs<D> {
 
     /// Sets a FAT entry in every FAT copy (keeping the 4 reserved top bits).
     fn fat_set(&mut self, cluster: u32, value: u32) -> Result<()> {
+        self.chain_cache = None;
         let (sector, offset) = self.fat_position(cluster);
         let data = self.load_fat_sector(sector)?;
         let old = u32_at(data, offset);
@@ -572,6 +589,17 @@ impl<D: BlockDevice> FatFs<D> {
 
     /// All clusters of the chain starting at `first` (empty for cluster 0).
     fn chain(&mut self, first: u32) -> Result<Vec<u32>> {
+        if let Some((f, chain)) = &self.chain_cache {
+            if *f == first && first != 0 {
+                return Ok(chain.clone());
+            }
+        }
+        let chain = self.walk_chain(first)?;
+        self.chain_cache = Some((first, chain.clone()));
+        Ok(chain)
+    }
+
+    fn walk_chain(&mut self, first: u32) -> Result<Vec<u32>> {
         let mut clusters = Vec::new();
         let mut c = first;
         while c != 0 && c < FAT_EOC_MIN {
@@ -762,6 +790,17 @@ impl<D: BlockDevice> FatFs<D> {
         if !path.starts_with('/') {
             return Err(FsError::InvalidPath);
         }
+        if let Some((cached, entry)) = &self.lookup_cache {
+            if cached == path {
+                return Ok(entry.clone());
+            }
+        }
+        let entry = self.lookup_uncached(path)?;
+        self.lookup_cache = Some((String::from(path), entry.clone()));
+        Ok(entry)
+    }
+
+    fn lookup_uncached(&mut self, path: &str) -> Result<DirEntry> {
         let mut entry = self.root_entry();
         for part in path.split('/').filter(|p| !p.is_empty()) {
             if !entry.is_dir() {
@@ -818,19 +857,26 @@ impl<D: BlockDevice> FatFs<D> {
             return Ok(0);
         }
         let len = (size - offset).min(buf.len() as u64) as usize;
-        let cluster_size = self.bytes_per_cluster as u64;
+        let cs = self.bytes_per_cluster;
         let chain = self.chain(entry.cluster)?;
-        let mut cluster_buf = vec![0u8; self.bytes_per_cluster];
         let mut done = 0;
         while done < len {
-            let pos = offset + done as u64;
-            let cluster = *chain
-                .get((pos / cluster_size) as usize)
-                .ok_or(FsError::Corrupt("file shorter than its size"))?;
-            self.read_cluster(cluster, &mut cluster_buf)?;
-            let within = (pos % cluster_size) as usize;
-            let take = (self.bytes_per_cluster - within).min(len - done);
-            buf[done..done + take].copy_from_slice(&cluster_buf[within..within + take]);
+            let pos = offset as usize + done;
+            let (index, within) = (pos / cs, pos % cs);
+            let first = *chain.get(index).ok_or(FsError::Corrupt("file shorter than its size"))?;
+            // clusters that follow each other on the disk are read with one request
+            let wanted = (within + len - done).div_ceil(cs);
+            let mut run = 1;
+            while run < wanted.min(MAX_READ_RUN) && chain.get(index + run) == Some(&(first + run as u32)) {
+                run += 1;
+            }
+            if !self.valid_cluster(first) || !self.valid_cluster(first + run as u32 - 1) {
+                return Err(FsError::Corrupt("cluster number out of range"));
+            }
+            let mut data = vec![0u8; run * cs];
+            self.read_sectors(self.cluster_sector(first), &mut data)?;
+            let take = (run * cs - within).min(len - done);
+            buf[done..done + take].copy_from_slice(&data[within..within + take]);
             done += take;
         }
         Ok(len)
@@ -1246,6 +1292,35 @@ mod tests {
         }
         assert_eq!(fs.lookup("/w.bin").unwrap().size, 1620);
         assert_eq!(fs.write_at("/missing", 0, b"x"), Err(FsError::NotFound));
+    }
+
+    #[test_case]
+    fn cached_lookups_see_every_change() {
+        let mut fs = ram_fs();
+        fs.write_file("/c.txt", b"one").unwrap();
+        assert_eq!(fs.lookup("/c.txt").unwrap().size, 3);
+        fs.append_file("/c.txt", b" two").unwrap();
+        assert_eq!(fs.lookup("/c.txt").unwrap().size, 7, "size after append");
+        let mut buf = [0u8; 16];
+        assert_eq!(fs.read_at("/c.txt", 0, &mut buf).unwrap(), 7);
+        assert_eq!(&buf[..7], b"one two");
+        fs.write_at("/c.txt", 4, b"TWO!").unwrap();
+        assert_eq!(fs.read_at("/c.txt", 0, &mut buf).unwrap(), 8);
+        assert_eq!(&buf[..8], b"one TWO!");
+        fs.rename("/c.txt", "/d.txt").unwrap();
+        assert_eq!(
+            fs.lookup("/c.txt").err(),
+            Some(FsError::NotFound),
+            "stale entry after rename"
+        );
+        fs.remove("/d.txt").unwrap();
+        assert_eq!(
+            fs.lookup("/d.txt").err(),
+            Some(FsError::NotFound),
+            "stale entry after remove"
+        );
+        fs.write_file("/d.txt", b"new").unwrap();
+        assert_eq!(fs.read_file("/d.txt").unwrap(), b"new", "stale chain after re-creating");
     }
 
     #[test_case]

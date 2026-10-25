@@ -880,6 +880,7 @@ pub const PROC_JOIN: u32 = 4;
 pub const PROC_WAIT_PIPE: u32 = 5;
 pub const PROC_DEAD: u32 = 6;
 pub const PROC_WAIT_NET: u32 = 7;
+pub const PROC_WAIT_DISK: u32 = 8;
 
 const _: () = assert!(size_of::<SysInfo>() == 176 && size_of::<ProcInfo>() == 64);
 
@@ -955,6 +956,7 @@ fn sys_proclist(addr: u64, max: u64) -> SysResult {
                 State::Blocked(Wait::Join(_)) => PROC_JOIN,
                 State::Blocked(Wait::Pipe(_)) => PROC_WAIT_PIPE,
                 State::Blocked(Wait::Net) => PROC_WAIT_NET,
+                State::Blocked(Wait::Disk) => PROC_WAIT_DISK,
                 State::Dead => PROC_DEAD,
             },
             user: super::is_process(t.id) as u32,

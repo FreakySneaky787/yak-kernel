@@ -56,6 +56,16 @@ Format: number · date · title, then symptom → cause → fix → test.
 - **Test:** `smp::tests::jobs_for_every_cpu_from_every_cpu` (4 threads send jobs to all CPUs; hangs reliably with the old code).
 - **Remember:** with SMP every per-CPU duty must exist on *every* CPU, including the boot CPU.
 
+### #7 · 2026-10-25 · With one CPU, every disk command took 10 ms
+- **Symptom:** after switching AHCI to MSI, `KERNEL_SMP=1 make test` timed out; `time hello` took 0.38 s instead of 0.1 s.
+- **Cause:** the reading thread blocked, the CPU went to its idle thread and `hlt`. The completion interrupt made the thread
+  ready, but the CPU returned into the idle thread and only switched at the next timer tick. With more CPUs `make_ready`
+  sends a wake-up IPI to *another* idle CPU, which hid the problem; nothing kicks the CPU that handles the interrupt itself.
+- **Fix:** `task::preempt_idle()` at the end of interrupt handlers that wake threads (AHCI, keyboard, COM1): an idling CPU
+  switches to the woken thread at once.
+- **Test:** the integration test with `KERNEL_SMP=1` (timing of `time hello` and the whole run under 30 s).
+- **Remember:** run the suite with one CPU after scheduler or interrupt changes – some paths only exist there.
+
 ## Known pitfalls (not bugs, but worth remembering)
 - **The Limine host utility (`limine bios-install`) needs a C compiler** (`gcc`). It is not required for booting the ISO
   in QEMU with `-cdrom`; it is only needed to make the ISO bootable as a hard disk / USB image.
