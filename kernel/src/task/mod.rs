@@ -62,6 +62,10 @@ pub enum Wait {
     Net,
     /// Waiting for a disk command to complete.
     Disk,
+    /// Waiting for the sleeping lock at this address (`sync::Mutex`).
+    Lock(u64),
+    /// `futex_wait` on this key (process id and user address, see `process::futex`).
+    Futex(u64),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -104,6 +108,8 @@ struct Thread {
     last_cpu: usize,
     /// Idle threads are never queued; each belongs to one CPU.
     idle: bool,
+    /// The process (main thread id) a user thread belongs to; its own id otherwise.
+    owner: Tid,
 }
 
 struct Scheduler {
@@ -132,6 +138,8 @@ pub struct ThreadInfo {
     /// The CPU it runs on right now, if it is running.
     pub cpu: Option<usize>,
     pub last_cpu: usize,
+    /// Process (main thread) the thread belongs to; its own id if none.
+    pub owner: Tid,
 }
 
 impl Scheduler {
@@ -216,6 +224,7 @@ impl Scheduler {
                 on_cpu: None,
                 last_cpu: 0,
                 idle: false,
+                owner: id,
             }),
         );
         id
@@ -284,6 +293,10 @@ fn spawn_internal(name: &str, entry: Entry) -> Tid {
 }
 
 fn spawn_with(name: &str, entry: Entry, cr3: PhysAddr, user_entry: Option<UserEntry>) -> Tid {
+    spawn_owned(name, entry, cr3, user_entry, None)
+}
+
+fn spawn_owned(name: &str, entry: Entry, cr3: PhysAddr, user_entry: Option<UserEntry>, owner: Option<Tid>) -> Tid {
     let stack = stack::alloc_stack(THREAD_STACK_PAGES).expect("out of memory for a thread stack");
     // Double box: a thin pointer fits into one register for the trampoline
     let arg = Box::into_raw(Box::new(entry)) as u64;
@@ -291,6 +304,9 @@ fn spawn_with(name: &str, entry: Entry, cr3: PhysAddr, user_entry: Option<UserEn
     with_scheduler(|s| {
         let id = s.new_thread(name, State::Ready, rsp, Some(stack), cr3);
         s.thread(id).user_entry = user_entry;
+        if let Some(owner) = owner {
+            s.thread(id).owner = owner;
+        }
         s.ready.push_back(id);
         s.kick_idle_cpu();
         id
@@ -308,6 +324,12 @@ pub fn spawn(name: &str, f: impl FnOnce() + Send + 'static) -> Tid {
 /// keep it alive until the thread has switched away from it for good.
 pub fn spawn_user(name: &str, cr3: PhysAddr, entry: UserEntry) -> Tid {
     spawn_with(name, Box::new(|| {}), cr3, Some(entry))
+}
+
+/// Like `spawn_user`, for a further thread of the process whose main thread
+/// is `owner` (same address space).
+pub fn spawn_user_thread(name: &str, cr3: PhysAddr, entry: UserEntry, owner: Tid) -> Tid {
+    spawn_owned(name, Box::new(|| {}), cr3, Some(entry), Some(owner))
 }
 
 /// Entry point of every new thread (called by the assembly trampoline).
@@ -568,6 +590,16 @@ pub fn retarget_cr3(old: PhysAddr, new: PhysAddr) {
     });
 }
 
+/// The process the current thread belongs to: its owner (see `spawn_user_thread`),
+/// for all other threads the thread itself.
+pub fn current_owner() -> Tid {
+    with_scheduler(|s| {
+        let id = s.current[smp::cpu_index()];
+        if id == NO_THREAD { 0 } else { s.thread(id).owner }
+    })
+    .unwrap_or(0)
+}
+
 pub fn current_id() -> Tid {
     with_scheduler(|s| s.current[smp::cpu_index()]).map_or(0, |id| if id == NO_THREAD { 0 } else { id })
 }
@@ -584,6 +616,7 @@ pub fn list() -> Vec<ThreadInfo> {
                 cpu_ticks: t.cpu_ticks,
                 cpu: t.on_cpu,
                 last_cpu: t.last_cpu,
+                owner: t.owner,
             })
             .collect()
     })

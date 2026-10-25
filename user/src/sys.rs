@@ -50,6 +50,12 @@ pub const GETENV: u64 = 42;
 pub const ENVIRON: u64 = 43;
 pub const SIGACTION: u64 = 44;
 pub const SIGRETURN: u64 = 45;
+pub const THREAD_SPAWN: u64 = 46;
+pub const THREAD_EXIT: u64 = 47;
+pub const THREAD_JOIN: u64 = 48;
+pub const FUTEX_WAIT: u64 = 49;
+pub const FUTEX_WAKE: u64 = 50;
+pub const GETTID: u64 = 51;
 
 pub const STDIN: u64 = 0;
 pub const STDOUT: u64 = 1;
@@ -133,8 +139,40 @@ pub fn sleep_ms(ms: u64) {
     unsafe { syscall3(SLEEP_MS, ms, 0, 0) };
 }
 
+/// The process id (the same in every thread).
 pub fn getpid() -> u64 {
     unsafe { syscall3(GETPID, 0, 0, 0) as u64 }
+}
+
+/// The id of the calling thread (the pid in the main thread).
+pub fn gettid() -> u64 {
+    unsafe { syscall3(GETTID, 0, 0, 0) as u64 }
+}
+
+/// Starts a thread at `entry` with stack pointer `stack` and `arg` in RDI; tid or -errno.
+pub fn thread_spawn(entry: u64, stack: u64, arg: u64) -> i64 {
+    unsafe { syscall3(THREAD_SPAWN, entry, stack, arg) }
+}
+
+/// Ends the calling thread (the whole process in the main thread).
+pub fn thread_exit(code: i32) -> ! {
+    unsafe { syscall3(THREAD_EXIT, code as u64, 0, 0) };
+    unreachable!("thread_exit returned")
+}
+
+/// Waits for thread `tid`; its exit code (as u32) or -errno.
+pub fn thread_join(tid: u64) -> i64 {
+    unsafe { syscall3(THREAD_JOIN, tid, 0, 0) }
+}
+
+/// Blocks while `*word == expected` until `futex_wake`; 0, -EAGAIN, -ETIMEDOUT or -EINTR.
+pub fn futex_wait(word: &core::sync::atomic::AtomicU32, expected: u32, timeout_ms: u64) -> i64 {
+    unsafe { syscall3(FUTEX_WAIT, word.as_ptr() as u64, expected as u64, timeout_ms) }
+}
+
+/// Wakes up to `n` threads waiting on `word`; returns how many.
+pub fn futex_wake(word: &core::sync::atomic::AtomicU32, n: u32) -> i64 {
+    unsafe { syscall3(FUTEX_WAKE, word.as_ptr() as u64, n as u64, 0) }
 }
 
 pub fn uptime_ms() -> u64 {
@@ -350,6 +388,8 @@ pub const PROC_WAIT_PIPE: u32 = 5;
 pub const PROC_DEAD: u32 = 6;
 pub const PROC_WAIT_NET: u32 = 7;
 pub const PROC_WAIT_DISK: u32 = 8;
+pub const PROC_WAIT_LOCK: u32 = 9;
+pub const PROC_WAIT_FUTEX: u32 = 10;
 
 const _: () = assert!(core::mem::size_of::<SysInfo>() == 176 && core::mem::size_of::<ProcInfo>() == 64);
 

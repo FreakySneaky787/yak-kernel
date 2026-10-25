@@ -116,6 +116,19 @@ extern "C" fn kmain() -> ! {
     let (status, out) = run("sigtest", "");
     assert_eq!(status, ExitStatus::Exited(0), "{}", out);
 
+    // M36: threads, futexes, the thread-safe heap; no thread may be left over
+    let alive = || {
+        kernel::task::list()
+            .iter()
+            .filter(|t| t.state != kernel::task::State::Dead)
+            .count()
+    };
+    let threads_before = alive();
+    let (status, out) = run("threadtest", "");
+    assert_eq!(status, ExitStatus::Exited(0), "{}", out);
+    assert_eq!(process::count(), 0, "processes left over");
+    assert_eq!(alive(), threads_before, "threads left over");
+
     // M20: the shell as a user program, driven by injected serial input
     kernel::serial::inject_rx(
         b"echo hi from sh\rcd docs\rpwd\rls\reco\x1b[Dh\x1b[C edited\rmem\rnope\rfault exit 4\rexit 7\r",

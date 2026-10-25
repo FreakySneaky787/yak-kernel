@@ -66,11 +66,18 @@ impl AddressSpace {
     /// Unmaps `pages` pages starting at `virt` and frees their frames
     /// (pages that are not mapped are skipped).
     pub fn unmap(&mut self, virt: VirtAddr, pages: usize) {
-        for i in 0..pages as u64 {
-            if let Ok(frame) = paging::unmap_page_in(self.root, VirtAddr(virt.0 + i * PAGE_SIZE)) {
-                free_frame(frame);
-            }
+        for frame in self.unmap_keeping_frames(virt, pages) {
+            free_frame(frame);
         }
+    }
+
+    /// Like `unmap`, but returns the frames instead of freeing them: with
+    /// several threads, other CPUs may still have them in their TLB until
+    /// they are flushed.
+    pub fn unmap_keeping_frames(&mut self, virt: VirtAddr, pages: usize) -> alloc::vec::Vec<PhysAddr> {
+        (0..pages as u64)
+            .filter_map(|i| paging::unmap_page_in(self.root, VirtAddr(virt.0 + i * PAGE_SIZE)).ok())
+            .collect()
     }
 
     /// Copies `data` to the user address `virt` (pages must be mapped).

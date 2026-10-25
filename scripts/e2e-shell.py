@@ -217,6 +217,7 @@ STEPS = [
     ("spawntest\r", ["spawntest: all checks passed"], ["FAIL"]),
     ("sleep 300\r", ["slept 300 ms"], []),  # the orphan started by spawntest prints in the meantime
     ("sigtest\r", ["sigtest: all checks passed"], ["FAIL"]),  # M34: signals
+    ("threadtest\r", ["threadtest: all checks passed"], ["FAIL"]),  # M36: threads
     ("sigtest wait-int\r" + PAUSE + CTRL_C, ["press Ctrl+C", "caught SIGINT"], ["killed"]),  # Ctrl+C = SIGINT
     ("fault sleep &\r", ["[1]"], ["error"]),
     ("kill -l\r", ["TERM", "USR1"], ["error"]),

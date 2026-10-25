@@ -62,7 +62,7 @@ Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.s
 - `kernel/src/qemu.rs` – exit QEMU (isa-debug-exit)
 - `kernel/src/mem/` – `mod.rs` (PhysAddr/VirtAddr, HHDM), `pmm.rs` (bitmap frame allocator), `paging.rs` (page tables: translate/map/unmap, kernel root),
   `address_space.rs` (per-process PML4), `stack.rs` (guarded kernel stacks), `heap.rs` (linked-list `#[global_allocator]`)
-- `kernel/src/process/` – `mod.rs` (process table, spawn/wait/kill, fds), `elf.rs` (ELF64 loader), `pipe.rs`, `signal.rs` (signal state and delivery), `syscall.rs` (syscall dispatcher)
+- `kernel/src/process/` – `mod.rs` (process table, spawn/wait/kill, fds), `elf.rs` (ELF64 loader), `pipe.rs`, `futex.rs`, `signal.rs` (signal state and delivery), `syscall.rs` (syscall dispatcher)
 - `kernel/src/input.rs` – merged keyboard + serial input, `TerminalDecoder`; `kernel/src/ringbuf.rs` – IRQ-safe byte ring buffer
 - `kernel/src/shell/` – kernel shell (fallback when `/bin/sh` is missing): `mod.rs` (commands, `Shell::run`, `execute_builtin` for `kshell`),
   `line_editor.rs`, `parser.rs` (both also compiled into `/bin/sh`), `keys.rs`
@@ -75,12 +75,12 @@ Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.s
   `scripts/check-test-disks.sh` – `fsck.fat` + mtools validation of the test disks (run by `make test`);
   `scripts/install-user.sh` – copies `build/user/bin/*` into `/bin` of a disk image
 - `user/` – user programs: `src/lib.rs` (`ulib`: `_start`, `Args`), `sys.rs` (syscalls), `io.rs` (`print!`, `read_line`),
-  `fs.rs` (`File`, `Dir`, `stat`), `heap.rs` (allocator on `brk`), `dns.rs` (DNS client), `env.rs` (environment), `signal.rs` (handlers + trampoline),
+  `fs.rs` (`File`, `Dir`, `stat`), `heap.rs` (allocator on `brk`), `dns.rs` (DNS client), `env.rs` (environment), `signal.rs` (handlers + trampoline), `thread.rs` (spawn/join), `sync.rs` (futex `Mutex`),
   `process.rs` (`spawn`/`wait`/`kill`), `src/bin/*.rs` (one program each: tools cat, ls, cp, mv, rm, mkdir, touch, stat,
-  sort, wc, grep, ps, mem, uptime, df, date, upper, hello, ping, netinfo, udpecho, time, nc, echod, host, wget, httpd, env; self-tests fault, fstest, heaptest, spawntest, pipetest, sigtest),
+  sort, wc, grep, ps, mem, uptime, df, date, upper, hello, ping, netinfo, udpecho, time, nc, echod, host, wget, httpd, env; self-tests fault, fstest, heaptest, spawntest, pipetest, sigtest, threadtest),
   `src/bin/sh/` (the shell, started as init: `main.rs` executor + built-ins, `syntax.rs` tokenizer/parser, `arith.rs`,
   `glob.rs`, `testcmd.rs`), `src/bin/edit/` (full-screen editor), `linker.ld`
-- `kernel/src/time.rs` – ticks, `uptime_ms`, `sleep_ms`
+- `kernel/src/time.rs` – ticks, `uptime_ms`, `sleep_ms`; `kernel/src/sync.rs` – sleeping `Mutex` (blocks instead of spinning)
 - `kernel/src/drivers/keyboard.rs` – PS/2 driver, ring buffer, `read_key()`; `drivers/scancode.rs` – decoder + layouts (DE/US)
 - `kernel/src/arch/x86_64/` – CPU specifics: `port.rs` (in/out), `gdt.rs` (GDT+TSS), `idt.rs` (IDT structure),
   `interrupts.rs` (exception handlers, kernel IDT), `syscall.rs` (syscall entry stub, MSRs, `enter_user`), `irq.rs` (IRQ routing + handlers), `lapic.rs` (local APIC + timer), `ioapic.rs`, `pic.rs` (legacy, masked), `pit.rs` (timer calibration), `msr.rs`, `cpu.rs` (cpuid), `power.rs` (reboot/poweroff),

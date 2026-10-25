@@ -10,6 +10,7 @@
 //! - `heap`: the `#[global_allocator]` – programs can use `alloc` (`Vec`, `String`, ...).
 //! - `process`: start child programs, wait for them, kill them.
 //! - `signal`: signal handlers, `kill` with a signal.
+//! - `thread`: further threads (`spawn`, `join`); `sync`: `Mutex` on futexes.
 //! - `dns`: name -> IPv4 address.
 //! - A panic handler that prints the message and exits with code 101.
 
@@ -24,7 +25,9 @@ pub mod heap;
 pub mod io;
 pub mod process;
 pub mod signal;
+pub mod sync;
 pub mod sys;
+pub mod thread;
 
 use core::panic::PanicInfo;
 

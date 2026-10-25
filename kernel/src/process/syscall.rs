@@ -119,6 +119,18 @@ pub mod nr {
     pub const SIGACTION: u32 = 44;
     /// sigreturn() -> 0: the signal handler has finished (called by the trampoline)
     pub const SIGRETURN: u32 = 45;
+    /// thread_spawn(entry, stack_top, arg) -> tid: a further thread, starts at `entry` with RDI = arg
+    pub const THREAD_SPAWN: u32 = 46;
+    /// thread_exit(code) -> never returns (in the main thread: the process ends)
+    pub const THREAD_EXIT: u32 = 47;
+    /// thread_join(tid) -> exit code of the thread (as u32)
+    pub const THREAD_JOIN: u32 = 48;
+    /// futex_wait(addr, expected, timeout_ms or 0) -> 0; -EAGAIN if *addr != expected, -ETIMEDOUT, -EINTR
+    pub const FUTEX_WAIT: u32 = 49;
+    /// futex_wake(addr, n) -> number of threads woken
+    pub const FUTEX_WAKE: u32 = 50;
+    /// gettid() -> id of the calling thread (getpid() is the process)
+    pub const GETTID: u32 = 51;
 }
 
 pub mod errno {
@@ -131,6 +143,7 @@ pub mod errno {
     pub const ECHILD: i64 = 10;
     pub const ENOMEM: i64 = 12;
     pub const EBADF: i64 = 9;
+    pub const EAGAIN: i64 = 11;
     pub const EFAULT: i64 = 14;
     pub const EEXIST: i64 = 17;
     pub const ENOTDIR: i64 = 20;
@@ -268,7 +281,25 @@ pub extern "C" fn dispatch(frame: &mut SyscallFrame) {
                 Err(errno::EINTR)
             }
         }
-        nr::GETPID => Ok(task::current_id()),
+        nr::GETPID => Ok(task::current_owner()),
+        nr::GETTID => Ok(task::current_id()),
+        nr::THREAD_SPAWN => sys_thread_spawn(a0, a1, a2),
+        nr::THREAD_EXIT => super::exit_thread(a0 as i64),
+        nr::THREAD_JOIN => match super::join_thread(a0) {
+            None => Err(errno::ESRCH),
+            Some(Err(_)) => Err(errno::EINTR),
+            Some(Ok(code)) => Ok(code as u32 as u64),
+        },
+        nr::FUTEX_WAIT => {
+            use super::futex::FutexError;
+            super::futex::wait(a0, a1 as u32, a2).map(|_| 0).map_err(|e| match e {
+                FutexError::WouldBlock => errno::EAGAIN,
+                FutexError::TimedOut => errno::ETIMEDOUT,
+                FutexError::Interrupted => errno::EINTR,
+                FutexError::Fault => errno::EFAULT,
+            })
+        }
+        nr::FUTEX_WAKE => Ok(super::futex::wake(a0, a1.min(u32::MAX as u64) as usize) as u64),
         nr::UPTIME_MS => Ok(time::uptime_ms()),
         nr::YIELD => {
             task::yield_now();
@@ -705,6 +736,14 @@ fn sys_mkdir(path: u64, path_len: u64) -> SysResult {
 /// Moves the end of the heap to `new_end` (mapping zeroed pages or freeing
 /// them). Fails with ENOMEM outside `[heap_start, heap_start + HEAP_MAX]`
 /// or when memory runs out.
+fn sys_thread_spawn(entry: u64, stack: u64, arg: u64) -> SysResult {
+    // both end up in `iretq` to ring 3: user addresses only
+    if entry == 0 || entry >= USER_END || stack == 0 || stack >= USER_END {
+        return Err(errno::EINVAL);
+    }
+    super::spawn_thread(entry, stack, arg).ok_or(errno::EAGAIN)
+}
+
 fn sys_brk(new_end: u64) -> SysResult {
     use crate::mem::{PAGE_SIZE, VirtAddr, align_up};
     let (start, end) = with_current(|p| (p.heap_start, p.heap_end)).ok_or(errno::EBADF)?;
@@ -718,14 +757,27 @@ fn sys_brk(new_end: u64) -> SysResult {
     // Growing only moves the end: pages are mapped on first use (demand
     // paging, see `process::handle_page_fault`). Shrinking frees the pages
     // that were used (unmapped ones are skipped).
-    with_current(|p| {
-        if new_top < old_top {
-            if let Some(space) = p.space.as_mut() {
-                space.unmap(VirtAddr(new_top), ((old_top - new_top) / PAGE_SIZE) as usize);
-            }
-        }
+    let (freed, root, threads) = with_current(|p| {
         p.heap_end = new_end;
-    });
+        let root = p.space.as_ref().map(|s| s.root());
+        let freed = match p.space.as_mut() {
+            Some(space) if new_top < old_top => {
+                space.unmap_keeping_frames(VirtAddr(new_top), ((old_top - new_top) / PAGE_SIZE) as usize)
+            }
+            _ => Vec::new(),
+        };
+        (freed, root, p.thread_count())
+    })
+    .ok_or(errno::EBADF)?;
+    if threads > 0 && !freed.is_empty() {
+        // other threads may run on other CPUs with these pages in their TLB
+        if let Some(root) = root {
+            crate::mem::paging::shoot_down(root);
+        }
+    }
+    for frame in freed {
+        crate::mem::pmm::free_frame(frame);
+    }
     Ok(new_end)
 }
 
@@ -738,7 +790,7 @@ fn sys_spawn(path: u64, path_len: u64, args: u64, args_len: u64) -> SysResult {
     let args = copy_from_user(args, args_len)?;
     let args = core::str::from_utf8(&args).map_err(|_| errno::EINVAL)?;
     let image = fs::with_root(|fs| fs.read_file(&path)).map_err(fs_errno)?;
-    let me = task::current_id();
+    let me = task::current_owner();
     let (cwd, stdout, std_files, (env, signals)) = with_current(|p| {
         let fd = |i: usize| p.files.get(i).cloned().flatten();
         (
@@ -922,6 +974,8 @@ pub const PROC_WAIT_PIPE: u32 = 5;
 pub const PROC_DEAD: u32 = 6;
 pub const PROC_WAIT_NET: u32 = 7;
 pub const PROC_WAIT_DISK: u32 = 8;
+pub const PROC_WAIT_LOCK: u32 = 9;
+pub const PROC_WAIT_FUTEX: u32 = 10;
 
 const _: () = assert!(size_of::<SysInfo>() == 176 && size_of::<ProcInfo>() == 64);
 
@@ -988,7 +1042,12 @@ fn sys_proclist(addr: u64, max: u64) -> SysResult {
         let mut info = ProcInfo {
             tid: t.id,
             cpu_ticks: t.cpu_ticks,
-            parent: super::parent_of(t.id).unwrap_or(0),
+            // the parent of a further thread is its process
+            parent: if t.owner != t.id {
+                t.owner
+            } else {
+                super::parent_of(t.id).unwrap_or(0)
+            },
             state: match t.state {
                 State::Running => PROC_RUNNING,
                 State::Ready => PROC_READY,
@@ -998,9 +1057,11 @@ fn sys_proclist(addr: u64, max: u64) -> SysResult {
                 State::Blocked(Wait::Pipe(_)) => PROC_WAIT_PIPE,
                 State::Blocked(Wait::Net) => PROC_WAIT_NET,
                 State::Blocked(Wait::Disk) => PROC_WAIT_DISK,
+                State::Blocked(Wait::Lock(_)) => PROC_WAIT_LOCK,
+                State::Blocked(Wait::Futex(_)) => PROC_WAIT_FUTEX,
                 State::Dead => PROC_DEAD,
             },
-            user: super::is_process(t.id) as u32,
+            user: (t.owner != t.id || super::is_process(t.id)) as u32,
             name: [0; 32],
         };
         copy_str(&mut info.name, &t.name);

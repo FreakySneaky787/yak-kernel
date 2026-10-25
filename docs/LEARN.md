@@ -332,6 +332,17 @@ Short explanations of every subsystem: what it is and why we need it.
   that handles them.
 - When a line is not finished (an open quote, an `if` without `fi`), the shell asks for more with the prompt `> `.
 
+## M36 – Threads and futexes
+- A **thread** is a second "line of execution" inside the same program: same memory, same files, own registers and stack.
+  For the kernel it is just one more schedulable thread that happens to use the process's page tables.
+- Ending a process gets harder: other threads may be running on other CPUs right now. The kernel marks the process as
+  ending, every thread notices on its next way into or out of the kernel and leaves, and the last step (freeing the
+  memory) waits until all are gone.
+- A **futex** lets user programs build locks that cost nothing when uncontended: an atomic instruction takes the lock;
+  only a thread that has to wait asks the kernel to sleep "while this word still has that value", and the unlocking
+  thread asks the kernel to wake it.
+- The kernel got a **sleeping mutex** too: a thread that finds the disk busy now sleeps instead of spinning.
+
 ## Tooling – GNU ld and binutils
 - rustc compiles our code into object files; a **linker** combines them into the final ELF according to `kernel/linker.ld`
   (load address, section order, segments). We use **GNU ld** (`ld.bfd`) for that.

@@ -242,6 +242,21 @@ pub fn copy_kernel_tables(moving: &dyn Fn(PhysAddr) -> bool) -> Result<PhysAddr,
     })
 }
 
+/// TLB shootdown: every CPU that currently runs in the address space `root`
+/// reloads CR3, dropping stale entries for pages unmapped there (needed when
+/// threads of one process run on several CPUs). Blocks until all are done;
+/// call with interrupts enabled.
+pub fn shoot_down(root: PhysAddr) {
+    use crate::arch::x86_64::smp;
+    for cpu in 0..smp::online_count() {
+        smp::run_on(cpu, move || {
+            if read_cr3() == root {
+                unsafe { write_cr3(root) };
+            }
+        });
+    }
+}
+
 /// Makes `root` the kernel's PML4 (it must map exactly what the old one maps).
 pub fn set_kernel_root(root: PhysAddr) {
     KERNEL_ROOT.store(root.0, Ordering::Relaxed);

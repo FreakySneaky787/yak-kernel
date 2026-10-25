@@ -25,6 +25,7 @@ pub mod qemu;
 pub mod ringbuf;
 pub mod serial;
 pub mod shell;
+pub mod sync;
 pub mod task;
 pub mod testing;
 pub mod time;

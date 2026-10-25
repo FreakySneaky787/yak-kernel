@@ -61,8 +61,13 @@
   scheduler lock *not* held – `ready` may take other locks), then schedules. Wakers (`notify`, `wake`, `make_ready`): a blocked
   thread that is still `on_cpu` is set back to `Running` (it will see its condition), otherwise it is queued and an idle CPU
   gets a `WAKE_VECTOR` IPI. Lock order: `PROCESSES` → `SCHEDULER`; pipe/keyboard/serial locks are leaves.
-- No TLB shootdowns: kernel virtual ranges are never reused after unmapping (stacks) or never unmapped (heap), and a process
-  has one thread, so only the CPU running it uses its user mappings; a CPU always reloads CR3 when it switches processes.
+- TLB: kernel virtual ranges are never reused after unmapping (stacks) or never unmapped (heap), so the kernel half needs
+  no shootdowns. User pages of a process with threads may be cached on several CPUs: `sys_brk` unmaps without freeing
+  (`unmap_keeping_frames`), calls `paging::shoot_down(root)` (a `run_on` job per CPU that reloads CR3 if it runs in
+  `root`) and only then frees the frames. A CPU always reloads CR3 when it switches address spaces.
+- **Sleeping lock** (`sync::Mutex`, M36): CAS on a flag; a contended `lock` blocks on `Wait::Lock(address)` (spins
+  only before the scheduler runs or with interrupts off); unlock notifies when the waiter count is non-zero. Used for
+  `drivers::DISK` and `fs::ROOT`, whose holders block on the AHCI interrupt during I/O. Not for interrupt handlers.
 - `task::Scheduler` (behind a spin lock, only touched with interrupts disabled): `BTreeMap<Tid, Box<Thread>>` (boxed so the saved
   RSP has a stable address), a FIFO ready queue, the current TID and the idle TID. Thread 0 = the boot code ("main"), runs the shell.
 - Context switch: `kernel_switch_context(old_rsp_ptr, new_rsp)` pushes rbp/rbx/r12–r15, swaps RSP, pops, `ret`. A new thread's stack
@@ -177,6 +182,12 @@
   | 37–43 | TCP, `shutdown`, `setenv`/`getenv`/`environ` | see `kernel/src/process/syscall.rs` |
   | 44 | `sigaction(sig, disposition, trampoline)` | `SIG_DFL` 0, `SIG_IGN` 1 or a handler; old disposition; SIGKILL → `-EINVAL` |
   | 45 | `sigreturn()` | called by the trampoline when a handler returns (unblocks the next one) |
+  | 46 | `thread_spawn(entry, stack, arg)` | tid; ≤ 64 running further threads (`-EAGAIN`); entry/stack must be user addresses |
+  | 47 | `thread_exit(code)` | ends the thread; in the main thread the process |
+  | 48 | `thread_join(tid)` | exit code as u32; `-ESRCH` if not a further thread of the caller or already joined |
+  | 49 | `futex_wait(addr, expected, timeout_ms)` | `-EAGAIN` if `*addr != expected`, `-ETIMEDOUT`, `-EINTR` |
+  | 50 | `futex_wake(addr, n)` | number of threads woken |
+  | 51 | `gettid()` | `getpid()` returns the process id in every thread |
 - **`/bin/edit`**: `buffer.rs` is pure logic (tested by `edit --selftest`), `main.rs` draws with `ESC[r;cH`, `ESC[K`, SGR 7.
   The text area is all rows but the last; the cursor line and the status bar are redrawn per key, the whole screen only after
   scrolling or when lines are inserted/removed. Writing the bottom-right cell is safe: the console wraps lazily (only when the
@@ -189,6 +200,19 @@
   redirects by `dup2`-ing a pipe end or file over 0/1 before `spawn` and restoring its saved copies afterwards.
 - **Process tree**: `parent` (None = started by the kernel; only the kernel waits for those). When a process ends, finished
   children are dropped and running ones become orphans, removed from the table at their own exit (nobody waits for them).
+- **Threads** (M36): `thread_spawn(entry, stack, arg)` starts a kernel thread with the process's CR3 whose `owner` is the
+  main thread; `task::current_owner()` is the pid, so `with_current`, `getpid`, files and signals are per process.
+  `Process::threads` maps further tids to `None` (running) / exit code (until `thread_join`). The end of a process
+  (`exit` in any thread, a fatal signal or a fault) sets `exiting`; `signal_pending()` is then true for every thread
+  (blocking calls give up) and `deliver_signals` sends any thread that is about to enter ring 3 into `exit_current`.
+  A further thread just wakes the others and exits; the main thread joins all further threads, then records the status,
+  frees the address space and exits – so `wait` (which joins the main thread) only returns when every thread is gone.
+  Signals are taken by whichever thread returns to user mode first.
+- **Futexes** (`process/futex.rs`): `futex_wait(addr, expected, timeout)` reads the word under the `FUTEXES` lock (inside
+  `with_current`, so no other thread can unmap it meanwhile), queues the thread under the key (pid << 47 | addr) and
+  blocks (`Wait::Futex`, or `Wait::Until` with a timeout); `futex_wake(addr, n)` moves up to n waiters to the `woken`
+  set and `task::wake`s them. `ulib::sync::RawLock` (0 free / 1 locked / 2 contended) only calls the kernel when
+  contended; the user heap uses it, `ulib::thread::spawn` gives every thread a 256 KiB stack from the heap.
 - **Signals** (M34, `process/signal.rs`): per process a disposition per signal (default = end, ignore, handler), a pending
   mask and an `in_handler` flag. `send_signal` sets the bit and `task::wake`s the target; blocking syscalls use abortable
   waits (`input::read_key_or_abort`, `task::join_or_abort`, `time::sleep_ms_or_abort`, pipes, sockets) that give up when

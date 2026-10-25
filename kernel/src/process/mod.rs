@@ -20,6 +20,14 @@
 //! relative paths in system calls start there) and a table of file
 //! descriptors: 0 = stdin, 1 = stdout, 2 = stderr, then open files/directories.
 //!
+//! Threads (M36): a process can start further threads (`spawn_thread`) in
+//! its address space; they are kernel threads whose `owner` is the main
+//! thread, whose id is the pid. The process ends when the main thread ends
+//! or any thread calls `exit` / dies of a signal or fault: `exit_current`
+//! marks it `exiting`, every further thread leaves on its next way back to
+//! user mode (or when its blocking call gives up), and the main thread waits
+//! for them before it frees the address space. Futexes: `futex.rs`.
+//!
 //! Processes can spawn children (`parent`), which only their parent may wait
 //! for or kill. Children of a process that ends become orphans and are
 //! removed from the table as soon as they end themselves.
@@ -38,6 +46,7 @@
 //! (background, orphans) never get it.
 
 pub mod elf;
+pub mod futex;
 pub mod pipe;
 pub mod signal;
 pub mod syscall;
@@ -210,6 +219,10 @@ pub struct Process {
     ignore_interrupt: bool,
     /// Environment variables (inherited by children at `spawn`).
     pub env: BTreeMap<String, String>,
+    /// Further threads: `None` while running, the exit code until joined.
+    threads: BTreeMap<Tid, Option<i64>>,
+    /// The process is ending with this status (see `exit_current`).
+    exiting: Option<ExitStatus>,
 }
 
 /// The environment of processes started by the kernel.
@@ -223,6 +236,11 @@ pub fn default_env() -> BTreeMap<String, String> {
 impl Process {
     pub fn set_ignore_interrupt(&mut self, on: bool) {
         self.ignore_interrupt = on;
+    }
+
+    /// Number of further threads that still run.
+    pub fn thread_count(&self) -> usize {
+        self.threads.values().filter(|r| r.is_none()).count()
     }
 
     /// Whether `addr` lies in a demand-paged range: the heap (below its end
@@ -374,6 +392,8 @@ pub fn spawn_with(name: &str, elf: &[u8], args: &str, opts: Options) -> Result<P
                 stdin_pending: Vec::new(),
                 status: None,
                 signals: opts.signals.unwrap_or_else(Signals::new),
+                threads: BTreeMap::new(),
+                exiting: None,
                 parent: opts.parent,
                 orphan: false,
                 ignore_interrupt: opts.ignore_interrupt,
@@ -411,18 +431,102 @@ pub fn run_in(cwd: &str, name: &str, elf: &[u8], args: &str, stdout: Output) -> 
 
 /// Runs `f` on the process the current thread belongs to.
 pub fn with_current<R>(f: impl FnOnce(&mut Process) -> R) -> Option<R> {
-    without_interrupts(|| PROCESSES.lock().get_mut(&task::current_id()).map(f))
+    without_interrupts(|| PROCESSES.lock().get_mut(&task::current_owner()).map(f))
 }
 
-/// Ends the current process: records `status`, leaves and frees its address
-/// space and exits the thread.
+/// Most further threads a process may have at once.
+pub const MAX_THREADS: usize = 64;
+
+/// Starts a further thread of the current process at `entry` with stack
+/// pointer `stack` and `arg` in RDI. Returns its id.
+pub fn spawn_thread(entry: u64, stack: u64, arg: u64) -> Option<Tid> {
+    let pid = task::current_owner();
+    without_interrupts(|| {
+        let mut procs = PROCESSES.lock();
+        let p = procs.get_mut(&pid)?;
+        let running = p.threads.values().filter(|r| r.is_none()).count();
+        if p.exiting.is_some() || running >= MAX_THREADS {
+            return None;
+        }
+        let root = p.space.as_ref()?.root();
+        let name = alloc::format!("{}/t", p.name);
+        let user = UserEntry {
+            rip: entry,
+            rsp: stack,
+            arg0: arg,
+            arg1: 0,
+        };
+        // inserted before the lock is released: the thread cannot look itself up earlier
+        let tid = task::spawn_user_thread(&name, root, user, pid);
+        p.threads.insert(tid, None);
+        Some(tid)
+    })
+}
+
+/// Ends the current thread with `code`; for the main thread that is the
+/// end of the process.
+pub fn exit_thread(code: i64) -> ! {
+    disable_interrupts();
+    let (me, pid) = (task::current_id(), task::current_owner());
+    if me == pid {
+        exit_current(ExitStatus::Exited(code));
+    }
+    if let Some(p) = PROCESSES.lock().get_mut(&pid) {
+        p.threads.insert(me, Some(code));
+    }
+    task::exit()
+}
+
+/// Waits for further thread `tid` of the current process and returns its
+/// exit code. `None` if it is not one (or was joined already), `Some(Err)`
+/// if the wait was interrupted.
+pub fn join_thread(tid: Tid) -> Option<Result<i64, WaitError>> {
+    let me = task::current_id();
+    if tid == me || !with_current(|p| p.threads.contains_key(&tid))? {
+        return None;
+    }
+    if !task::join_or_abort(tid, signal_pending) {
+        return Some(Err(WaitError::Interrupted));
+    }
+    // the thread is gone; its code is recorded unless it died with the process
+    with_current(|p| p.threads.remove(&tid))
+        .flatten()
+        .map(|code| Ok(code.unwrap_or(-1)))
+}
+
+/// Ends the current process with `status` (if several threads end it, the
+/// first status counts). A further thread only starts the end: it wakes the
+/// others and leaves. The main thread waits until all further threads are
+/// gone, then records the status, frees the address space and exits.
 pub fn exit_current(status: ExitStatus) -> ! {
     disable_interrupts();
-    let pid = task::current_id();
+    let (me, pid) = (task::current_id(), task::current_owner());
+    let others: Vec<Tid> = {
+        let mut procs = PROCESSES.lock();
+        let p = procs.get_mut(&pid).expect("exit_current: not a user process");
+        if p.exiting.is_none() {
+            p.exiting = Some(status);
+        }
+        p.threads
+            .iter()
+            .filter(|&(&t, r)| r.is_none() && t != me)
+            .map(|(&t, _)| t)
+            .collect()
+    };
+    for &t in &others {
+        task::wake(t); // a blocking call gives up (`signal_pending`)
+    }
+    if me != pid {
+        task::wake(pid);
+        task::exit(); // the main thread finishes the process
+    }
+    for t in others {
+        task::join(t);
+    }
     let space = {
         let mut procs = PROCESSES.lock();
         let p = procs.get_mut(&pid).expect("exit_current: not a user process");
-        p.status = Some(status);
+        p.status = p.exiting.take();
         p.files.clear();
         let space = p.space.take();
         let (parent, orphan) = (p.parent, p.orphan);
@@ -450,7 +554,7 @@ pub fn exit_current(status: ExitStatus) -> ! {
 /// Ends the current process because of `reason` (called by exception handlers).
 pub fn kill_current(reason: String) -> ! {
     let name = with_current(|p| p.name.clone()).unwrap_or_default();
-    crate::serial_println!("process {} ({}) killed: {}", task::current_id(), name, reason);
+    crate::serial_println!("process {} ({}) killed: {}", task::current_owner(), name, reason);
     exit_current(ExitStatus::Killed(reason))
 }
 
@@ -497,13 +601,17 @@ pub fn interrupt_foreground() -> bool {
 /// Whether the current process has a signal that needs attention (blocking
 /// system calls give up and return `EINTR`).
 pub fn signal_pending() -> bool {
-    with_current(|p| p.signals.is_pending()).unwrap_or(false)
+    with_current(|p| p.signals.is_pending() || p.exiting.is_some()).unwrap_or(false)
 }
 
 /// Called on the way back to user mode (after a system call or an interrupt
 /// from user mode) with the user's RIP, RSP and RFLAGS: ends the process for
 /// a fatal signal, or redirects it to its signal trampoline (see `signal`).
 pub fn deliver_signals(rip: &mut u64, rsp: &mut u64, rflags: u64) {
+    // the process is ending: no thread may continue in user mode
+    if with_current(|p| p.exiting.is_some()) == Some(true) {
+        exit_current(ExitStatus::Exited(0)); // the recorded status wins
+    }
     loop {
         let Some(action) = with_current(|p| p.signals.take()).flatten() else {
             return;
@@ -542,7 +650,7 @@ pub enum WaitError {
 /// and aborted when the caller gets killed. With `no_hang`, a child that is
 /// still running gives `Ok(None)` at once (for background jobs).
 pub fn wait_child(pid: Pid, no_hang: bool) -> Result<Option<ExitStatus>, WaitError> {
-    let me = task::current_id();
+    let me = task::current_owner();
     let (is_child, finished) = without_interrupts(|| {
         PROCESSES
             .lock()

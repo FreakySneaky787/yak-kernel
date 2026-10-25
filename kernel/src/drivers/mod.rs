@@ -6,14 +6,14 @@ pub mod pci;
 pub mod rtc;
 pub mod scancode;
 
+use crate::sync::Mutex;
 use alloc::vec::Vec;
-use spin::Mutex;
 
 /// The system disk (first SATA disk), if one was found at boot.
 ///
-/// The lock is held during disk I/O with interrupts **enabled** (commands are
-/// polled and may take a while; the timer must keep running). Never take it
-/// from an interrupt handler.
+/// A sleeping lock (`sync::Mutex`): it is held during disk I/O, which blocks
+/// on the completion interrupt; other threads that need the disk sleep
+/// meanwhile. Never take it from an interrupt handler.
 pub static DISK: Mutex<Option<ahci::AhciDisk>> = Mutex::new(None);
 
 /// AHCI ports found at boot (for diagnostics).

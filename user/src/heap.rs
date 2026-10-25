@@ -5,9 +5,11 @@
 //! size and the next pointer in its first 16 bytes. All sizes and addresses
 //! are multiples of 16. Freeing merges a block with its neighbours, so the
 //! heap does not fragment into tiny pieces. When no block fits, the heap is
-//! grown by at least `GROW_MIN` bytes. Programs are single-threaded, so no
-//! lock is needed.
+//! grown by at least `GROW_MIN` bytes. A `sync::RawLock` makes it safe for
+//! several threads (signal handlers must not allocate: the interrupted code
+//! may hold the lock).
 
+use crate::sync::RawLock;
 use crate::sys;
 use core::alloc::{GlobalAlloc, Layout};
 use core::cell::UnsafeCell;
@@ -28,10 +30,11 @@ struct Inner {
 }
 
 pub struct Heap {
+    lock: RawLock,
     inner: UnsafeCell<Inner>,
 }
 
-// A program has exactly one thread.
+// `inner` is only touched with `lock` held.
 unsafe impl Sync for Heap {}
 
 const fn align_up(value: usize, align: usize) -> usize {
@@ -41,6 +44,7 @@ const fn align_up(value: usize, align: usize) -> usize {
 impl Heap {
     pub const fn new() -> Heap {
         Heap {
+            lock: RawLock::new(),
             inner: UnsafeCell::new(Inner {
                 head: ptr::null_mut(),
                 end: 0,
@@ -133,6 +137,7 @@ impl Inner {
 
 unsafe impl GlobalAlloc for Heap {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        let _guard = self.lock.lock();
         let inner = unsafe { &mut *self.inner.get() };
         let size = align_up(layout.size().max(UNIT), UNIT);
         let align = layout.align().max(UNIT);
@@ -149,6 +154,7 @@ unsafe impl GlobalAlloc for Heap {
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        let _guard = self.lock.lock();
         let inner = unsafe { &mut *self.inner.get() };
         let size = align_up(layout.size().max(UNIT), UNIT);
         unsafe { inner.insert(ptr as usize, size) };

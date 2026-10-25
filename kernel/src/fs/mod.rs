@@ -6,10 +6,10 @@
 pub mod fat32;
 
 use crate::drivers::block::{BlockCache, BlockDevice, BlockError};
+use crate::sync::Mutex;
 use alloc::string::String;
 use alloc::vec::Vec;
 use fat32::{FatFs, FsError};
-use spin::Mutex;
 
 /// Block device adapter for the global system disk (`drivers::DISK`).
 pub struct SystemDisk;
@@ -47,8 +47,8 @@ pub type RootDisk = BlockCache<SystemDisk>;
 /// Sectors kept in the cache (512 KiB).
 pub const CACHE_SECTORS: usize = 1024;
 
-/// The mounted root file system. Like `DISK`, held with interrupts enabled
-/// during I/O; never use it from interrupt handlers.
+/// The mounted root file system. Like `DISK`, a sleeping lock held during
+/// I/O (other threads block meanwhile); never use it from interrupt handlers.
 pub static ROOT: Mutex<Option<FatFs<RootDisk>>> = Mutex::new(None);
 
 /// Mounts the FAT32 file system of the system disk as the root.
