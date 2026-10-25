@@ -3,7 +3,8 @@
 //! time. Each one loads its own pattern into all 16 XMM registers and its own
 //! rounding mode into MXCSR, keeps spinning, and checks after every round
 //! that nothing changed - another process's values would show up here if the
-//! kernel did not save and restore the registers. They also compute pi with
+//! kernel did not save and restore the registers. With AVX (XSAVE) they do
+//! the same with all 16 YMM registers (256 bit). They also compute pi with
 //! hardware floating point. Exit code = number of failures.
 
 #![no_std]
@@ -54,6 +55,25 @@ fn spin_and_store_xmm(out: &mut [u8; 256], spins: u64) {
     }
 }
 
+/// Loads 16 × 32 bytes into YMM0..YMM15, spins (preempted meanwhile) and
+/// stores them again - in one asm block, so the compiler cannot touch them.
+#[target_feature(enable = "avx")]
+unsafe fn ymm_round_trip(regs: &[u8; 512], out: &mut [u8; 512], spins: u64) {
+    unsafe {
+        asm!(
+            "vmovdqu ymm0, [{p} + 0]", "vmovdqu ymm1, [{p} + 32]", "vmovdqu ymm2, [{p} + 64]", "vmovdqu ymm3, [{p} + 96]", "vmovdqu ymm4, [{p} + 128]", "vmovdqu ymm5, [{p} + 160]", "vmovdqu ymm6, [{p} + 192]", "vmovdqu ymm7, [{p} + 224]", "vmovdqu ymm8, [{p} + 256]", "vmovdqu ymm9, [{p} + 288]", "vmovdqu ymm10, [{p} + 320]", "vmovdqu ymm11, [{p} + 352]", "vmovdqu ymm12, [{p} + 384]", "vmovdqu ymm13, [{p} + 416]", "vmovdqu ymm14, [{p} + 448]", "vmovdqu ymm15, [{p} + 480]",
+            "2:", "dec {n}", "jnz 2b",
+            "mov {p}, {o}",
+            "vmovdqu [{p} + 0], ymm0", "vmovdqu [{p} + 32], ymm1", "vmovdqu [{p} + 64], ymm2", "vmovdqu [{p} + 96], ymm3", "vmovdqu [{p} + 128], ymm4", "vmovdqu [{p} + 160], ymm5", "vmovdqu [{p} + 192], ymm6", "vmovdqu [{p} + 224], ymm7", "vmovdqu [{p} + 256], ymm8", "vmovdqu [{p} + 288], ymm9", "vmovdqu [{p} + 320], ymm10", "vmovdqu [{p} + 352], ymm11", "vmovdqu [{p} + 384], ymm12", "vmovdqu [{p} + 416], ymm13", "vmovdqu [{p} + 448], ymm14", "vmovdqu [{p} + 480], ymm15",
+            p = inout(reg) regs.as_ptr() => _,
+            o = in(reg) out.as_mut_ptr(),
+            n = inout(reg) spins.max(1) => _,
+            out("ymm0") _, out("ymm1") _, out("ymm2") _, out("ymm3") _, out("ymm4") _, out("ymm5") _, out("ymm6") _, out("ymm7") _, out("ymm8") _, out("ymm9") _, out("ymm10") _, out("ymm11") _, out("ymm12") _, out("ymm13") _, out("ymm14") _, out("ymm15") _,
+            options(nostack),
+        );
+    }
+}
+
 fn mxcsr() -> u32 {
     let mut v = 0u32;
     unsafe { asm!("stmxcsr [{}]", in(reg) &mut v, options(nostack)) };
@@ -98,6 +118,20 @@ fn worker(n: u64) -> i32 {
             sys::yield_now(); // also switch voluntarily
         }
     }
+    if ulib::avx_enabled() {
+        let mut ymm = [0u8; 512];
+        for (i, b) in ymm.iter_mut().enumerate() {
+            *b = (n as u8).wrapping_mul(91).wrapping_add((i * 7) as u8);
+        }
+        let mut seen = [0u8; 512];
+        for round in 0..ROUNDS / 2 {
+            unsafe { ymm_round_trip(&ymm, &mut seen, 2_000_000) };
+            if seen != ymm {
+                println!("worker {}: YMM registers changed in round {}", n, round);
+                return 1;
+            }
+        }
+    }
     set_mxcsr(0x1F80);
     let p = pi(200_000);
     if (p - 3.141_587_653_589_8).abs() > 1e-9 {
@@ -127,8 +161,10 @@ fn main(mut args: ulib::Args) -> i32 {
         failures += 1;
     }
     if failures == 0 {
+        let regs = if ulib::avx_enabled() { "XMM + YMM" } else { "XMM" };
         println!(
-            "fputest: all checks passed (4 workers, XMM + MXCSR kept across preemption, pi = {:.6})",
+            "fputest: all checks passed (4 workers, {} + MXCSR kept across preemption, pi = {:.6})",
+            regs,
             pi(200_000)
         );
     }

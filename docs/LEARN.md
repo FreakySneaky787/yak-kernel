@@ -343,6 +343,14 @@ Short explanations of every subsystem: what it is and why we need it.
   thread asks the kernel to wake it.
 - The kernel got a **sleeping mutex** too: a thread that finds the disk busy now sleeps instead of spinning.
 
+## M37 – Guard rails in the CPU, and wider registers
+- **SMEP** and **SMAP** are two CPU switches that protect the kernel from itself: with SMEP the kernel can never execute
+  code that lives in a user program's memory, with SMAP it cannot even read or write that memory – except in short,
+  explicit windows (`stac` … `clac`) around the few functions that copy data between user programs and the kernel. A
+  bug that follows a user-supplied pointer elsewhere now crashes at once instead of silently doing the wrong thing.
+- **AVX** registers (YMM) are 256 bits wide, twice the SSE registers. The kernel must save and restore them on every
+  thread switch; the `xsave` instruction does that for every state component the kernel enabled in the register XCR0.
+
 ## Tooling – GNU ld and binutils
 - rustc compiles our code into object files; a **linker** combines them into the final ELF according to `kernel/linker.ld`
   (load address, section order, segments). We use **GNU ld** (`ld.bfd`) for that.

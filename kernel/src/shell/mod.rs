@@ -524,6 +524,10 @@ fn cmd_cpu(_: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), Strin
     let flags = [
         ("sse", f.sse),
         ("sse2", f.sse2),
+        ("xsave", f.xsave),
+        ("avx", f.avx),
+        ("smep", f.smep),
+        ("smap", f.smap),
         ("apic", f.apic),
         ("x2apic", f.x2apic),
         ("nx", f.nx),
@@ -537,6 +541,16 @@ fn cmd_cpu(_: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), Strin
         }
     }
     writeln!(out).ok();
+    let (smep, smap) = cpu::protection();
+    let on = |b: bool| if b { "on" } else { "off" };
+    writeln!(
+        out,
+        "In use: SMEP {}, SMAP {}, AVX state {}",
+        on(smep),
+        on(smap),
+        on(crate::arch::x86_64::fpu::avx_enabled())
+    )
+    .ok();
     let ids = crate::arch::x86_64::smp::online_apic_ids();
     write!(out, "CPUs:   {} online (APIC IDs", ids.len()).ok();
     for id in ids {

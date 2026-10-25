@@ -2,7 +2,9 @@
 //!
 //! The kernel runs a handler by pushing `sig`, `handler`, `rflags` and the
 //! interrupted `rip` onto the stack and jumping to `trampoline` below. It
-//! saves every register and the SSE state, calls `handler(sig)`, tells the
+//! saves every register and the x87/SSE/AVX state (`xsave64` when the
+//! kernel enabled XSAVE - CPUID.1:ECX.OSXSAVE - into a 1 KiB area, else
+//! `fxsave64`), calls `handler(sig)`, tells the
 //! kernel that the handler is done (`sigreturn`, which lets the next one
 //! run), restores everything and returns to the interrupted code with
 //! `popfq; ret`. This needs code without a red zone (`disable-redzone` in
@@ -76,13 +78,35 @@ core::arch::global_asm!(
     "push r14",
     "push r15",
     "mov rbx, rsp", // callee-saved: survives the handler
-    "and rsp, -16",
-    "sub rsp, 512",
-    "fxsave [rsp]",
+    "and rsp, -64",
+    "sub rsp, 1024",
+    "cmp byte ptr [rip + {xsave}], 0",
+    "je 2f",
+    // the XSAVE header must be clean (xrstor faults on reserved bits)
+    "xor eax, eax",
+    "mov ecx, 8",
+    "3:",
+    "mov qword ptr [rsp + 504 + rcx * 8], rax",
+    "loop 3b",
+    "mov eax, -1",
+    "mov edx, -1",
+    "xsave64 [rsp]",
+    "jmp 4f",
+    "2:",
+    "fxsave64 [rsp]",
+    "4:",
     "cld",
     "mov edi, dword ptr [rbx + 120]",
     "call qword ptr [rbx + 128]",
-    "fxrstor [rsp]",
+    "cmp byte ptr [rip + {xsave}], 0",
+    "je 5f",
+    "mov eax, -1",
+    "mov edx, -1",
+    "xrstor64 [rsp]",
+    "jmp 6f",
+    "5:",
+    "fxrstor64 [rsp]",
+    "6:",
     "mov eax, {sigreturn}",
     "syscall", // clobbers rax, rcx, r11: restored below
     "mov rsp, rbx",
@@ -105,6 +129,7 @@ core::arch::global_asm!(
     "popfq",
     "ret",
     sigreturn = const sys::SIGRETURN,
+    xsave = sym crate::XSAVE_ENABLED,
 );
 
 unsafe extern "C" {

@@ -90,6 +90,17 @@ Format: number · date · title, then symptom → cause → fix → test.
   a few instructions).
 - **Remember:** idle threads have the lowest priority by construction; anything they hold can starve.
 
+### #10 · 2026-10-25 · `stack_overflow` test: #GP with error code 0x102 after `-cpu max`
+- **Symptom:** after switching QEMU to `-cpu max`, `tests/stack_overflow.rs` died with a general protection fault
+  (code 0x102) instead of the expected double fault.
+- **Cause:** error code 0x102 = "IDT entry 0x20": the timer interrupt. The test loads its own IDT with only exception
+  handlers, but interrupts were still enabled; the recursion used to finish before the next tick, and with the slower
+  emulated CPU model a tick arrived first.
+- **Fix:** test kernels with their own IDT disable interrupts before loading it (`stack_overflow.rs`, `page_fault.rs`).
+- **Test:** both tests, with `-cpu max`.
+- **Remember:** a #GP with bit 1 of the error code set points at an IDT vector (index = code >> 3) – usually an
+  interrupt without a handler.
+
 ## Known pitfalls (not bugs, but worth remembering)
 - **The Limine host utility (`limine bios-install`) needs a C compiler** (`gcc`). It is not required for booting the ISO
   in QEMU with `-cdrom`; it is only needed to make the ISO bootable as a hard disk / USB image.

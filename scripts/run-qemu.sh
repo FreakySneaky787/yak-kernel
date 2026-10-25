@@ -9,6 +9,7 @@
 #   KERNEL_DEBUG=1     QEMU waits for gdb (-s -S)
 #   KERNEL_DISK=<img>  use this disk image instead of the default one
 #   KERNEL_SMP=<n>     number of CPU cores (default 4)
+#   KERNEL_CPU=<model> QEMU CPU model (default max; qemu64 has no SMEP/SMAP/XSAVE/AVX)
 #   KERNEL_NETDEV_OPTS extra options for the user-mode network (e.g. hostfwd=udp::5555-:7)
 set -euo pipefail
 
@@ -70,7 +71,8 @@ else
 fi
 
 QEMU_ARGS=(
-    -M q35 -m 256M -smp "${KERNEL_SMP:-4}"
+    # "max": every feature TCG emulates (SMEP, SMAP, XSAVE, AVX/AVX2 ...)
+    -M q35 -m 256M -smp "${KERNEL_SMP:-4}" -cpu "${KERNEL_CPU:-max}"
     -cdrom "$ISO"
     -boot d
     -no-reboot

@@ -27,7 +27,7 @@
 
 mod switch;
 
-use crate::arch::x86_64::fpu::{self, FxState};
+use crate::arch::x86_64::fpu::{self, FpuState};
 use crate::arch::x86_64::smp::{self, MAX_CPUS};
 use crate::arch::x86_64::{disable_interrupts, enable_interrupts, interrupts_enabled, syscall, without_interrupts};
 use crate::mem::PhysAddr;
@@ -101,7 +101,7 @@ struct Thread {
     /// Set for user threads until they enter ring 3.
     user_entry: Option<UserEntry>,
     /// x87/SSE registers while the thread is not running (see `arch::x86_64::fpu`).
-    fpu: Box<FxState>,
+    fpu: Box<FpuState>,
     /// The CPU executing (or still switching away from) this thread.
     on_cpu: Option<usize>,
     /// Last CPU the thread ran on (for `ps`).
@@ -220,7 +220,7 @@ impl Scheduler {
                 cpu_ticks: 0,
                 cr3,
                 user_entry: None,
-                fpu: Box::new(FxState::initial()),
+                fpu: Box::new(FpuState::initial()),
                 on_cpu: None,
                 last_cpu: 0,
                 idle: false,
@@ -393,12 +393,12 @@ fn schedule() {
     t.on_cpu = Some(cpu);
     t.last_cpu = cpu;
     let (new_rsp, cr3, kernel_stack) = (t.rsp, t.cr3, t.stack.map(|st| st.top.as_u64()));
-    let new_fpu: *const FxState = &*t.fpu;
+    let new_fpu: *const FpuState = &*t.fpu;
     s.current[cpu] = next;
     let old = s.thread(current);
     let old_rsp: *mut u64 = &mut old.rsp;
     // A dead thread's registers are never needed again
-    let old_fpu: Option<*mut FxState> = (old.state != State::Dead).then(|| &mut *old.fpu as *mut FxState);
+    let old_fpu: Option<*mut FpuState> = (old.state != State::Dead).then(|| &mut *old.fpu as *mut FpuState);
     PREV[cpu].store(current, Ordering::Relaxed);
     // Keep the lock across the switch; the next thread releases it
     core::mem::forget(guard);

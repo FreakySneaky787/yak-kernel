@@ -221,7 +221,7 @@
   with volatile writes). SIGKILL first, then the lowest pending signal; default → `kill_current(reason)` (exit status
   `Killed(reason)`, `wait` reports the number via `signal::number_for_reason`, exceptions = SIGSEGV).
 - **Handlers without a kernel register frame**: the kernel only pushes `sig, handler, rflags, rip` below the user RSP and
-  jumps to the trampoline registered with `sigaction` (`ulib::signal`). The trampoline pushes all 15 GPRs and FXSAVEs, calls
+  jumps to the trampoline registered with `sigaction` (`ulib::signal`). The trampoline pushes all 15 GPRs and XSAVEs (or FXSAVEs), calls
   the handler, calls `sigreturn`, restores everything and ends with `popfq; ret` (which also restores RSP). So neither the
   syscall stub nor the interrupt handlers need a full register frame. Price: no red zone in user code (the target sets
   `disable-redzone`; the kernel writes right below RSP). While a handler runs, further handled signals stay pending
@@ -259,7 +259,12 @@
   without holding `PROCESSES` (only `fs::ROOT`), then update the descriptor. `read` of a file uses `FatFs::read_at`, ≤ 64 KiB per call.
   FS errors map to Linux errno values (`ENOENT`, `EISDIR`, ...).
 - **User pointers**: every buffer is checked page by page against the process's page tables (present + USER, + WRITABLE for
-  `read`) before the kernel touches it; then it is accessed directly (the process CR3 is active). No SMAP/SMEP yet.
+  `read`) before the kernel touches it; then it is accessed directly (the process CR3 is active) inside
+  `cpu::user_access` (M37): with SMAP that is `stac` … `clac`, the only window in which the kernel may touch user pages
+  (`copy_from_user`, `copy_to_user`, the futex read). SMEP keeps the kernel from executing user pages. Both are enabled
+  per CPU by `cpu::enable_protection` when CPUID has them; QEMU runs `-cpu max` (TCG) so they are there
+  (`KERNEL_CPU=qemu64` runs without SMEP/SMAP/XSAVE/AVX - the fallback paths). `tests/smap.rs` checks that a kernel
+  read and a kernel jump into a user page fault.
 - **User programs** (`user/`, crate `ulib` + `src/bin/*`): own target `user/x86_64-kerneltry-user.json` (x86-64 with SSE2 and
   the normal hard-float ABI, static, `code-model=small`, red zone allowed – interrupts from ring 3 switch stacks), built with
   `-Zbuild-std=core,alloc` (+ `compiler-builtins-mem`; needs `rust-src` and `gcc` as host linker for build scripts),
@@ -276,12 +281,15 @@
 - **Shell**: a word that is not a built-in is a program path or a name in `/bin`; `run <path> [args]` does the same explicitly.
   Programs run in the shell's cwd. `ls`, `cat` and `cp` are programs (no built-ins any more). Non-zero exit codes and kills
   are reported as errors. `Shell::capture_programs` makes program output go to the command's `out` (unit tests).
-- **FPU/SSE** (`arch::x86_64::fpu`): the kernel is soft-float and never uses x87/MMX/XMM, so user register contents survive
-  syscalls and interrupts untouched. Each thread has a boxed, 16-byte aligned 512-byte `FxState` (initialised from a clean
-  image taken after `fninit` + `ldmxcsr 0x1F80`); `schedule()` saves the outgoing (unless dead) and restores the incoming
-  thread's state right before `kernel_switch_context`. No lazy switching (CR0.TS stays clear), no XSAVE/AVX.
-- Limitations: no AVX state;
-  no Ctrl+C for a running program (`kill` exists in the kernel API only); a program blocked in `read` is only killed after its next key.
+- **FPU/SSE/AVX** (`arch::x86_64::fpu`): the kernel is soft-float and never uses x87/MMX/XMM/YMM, so user register contents
+  survive syscalls and interrupts untouched. Each thread has a boxed, 64-byte aligned 1 KiB `FpuState` (initialised from a
+  clean image taken after `fninit` + `ldmxcsr 0x1F80`); `schedule()` saves the outgoing (unless dead) and restores the
+  incoming thread's state right before `kernel_switch_context`. With XSAVE (M37): CR4.OSXSAVE, XCR0 = x87 | SSE | AVX
+  (set by `xsetbv` on every CPU), `xsave64`/`xrstor64` with the XCR0 mask, area size from CPUID 0xD (832 bytes, must fit
+  1 KiB); without XSAVE `fxsave64`/`fxrstor64`. No lazy switching (CR0.TS stays clear), no AVX-512.
+- **User programs and AVX**: the user target stays at SSE2, so every program runs on any CPU; code that wants AVX checks
+  `ulib::avx_enabled()` (CPUID OSXSAVE + XCR0) and uses `#[target_feature(enable = "avx")]` (`fputest`, `sigtest`).
+  The signal trampoline saves with `xsave64` (header zeroed first) when `ulib::XSAVE_ENABLED`.
 
 ## Time
 - `time::ticks` (100 Hz, boot CPU's LAPIC timer) for sleeping and timeouts; `time::uptime_us` from the TSC (frequency measured

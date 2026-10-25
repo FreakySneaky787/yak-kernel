@@ -87,7 +87,32 @@ impl<'a> Iterator for Args<'a> {
     }
 }
 
+/// Whether the kernel enabled XSAVE (then AVX may be in use and the signal
+/// trampoline saves the registers with `xsave64`). Set in `start_rust`.
+#[doc(hidden)]
+pub static XSAVE_ENABLED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// CPUID.1:ECX.OSXSAVE - XSAVE is enabled by the kernel (CR4.OSXSAVE).
+pub fn xsave_enabled() -> bool {
+    #[allow(unused_unsafe)]
+    let ecx = unsafe { core::arch::x86_64::__cpuid(1) }.ecx;
+    ecx & (1 << 27) != 0
+}
+
+/// Whether AVX can be used: the CPU has it and the kernel saves it (XCR0 bit 2).
+pub fn avx_enabled() -> bool {
+    #[allow(unused_unsafe)]
+    let has_avx = unsafe { core::arch::x86_64::__cpuid(1) }.ecx & (1 << 28) != 0;
+    if !xsave_enabled() || !has_avx {
+        return false;
+    }
+    let (lo, _hi): (u32, u32);
+    unsafe { core::arch::asm!("xgetbv", in("ecx") 0, out("eax") lo, out("edx") _hi, options(nomem, nostack)) };
+    lo & 0b110 == 0b110
+}
+
 extern "C" fn start_rust(ptr: *const u8, len: usize) -> ! {
+    XSAVE_ENABLED.store(xsave_enabled(), core::sync::atomic::Ordering::Relaxed);
     let bytes = unsafe { core::slice::from_raw_parts(ptr, len) };
     let args = core::str::from_utf8(bytes).unwrap_or("");
     let code = unsafe { ulib_user_main(Args::new(args)) };

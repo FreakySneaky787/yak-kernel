@@ -235,12 +235,55 @@ fn spin_keeping_registers() -> u64 {
     result
 }
 
+#[target_feature(enable = "avx")]
+unsafe fn trash_ymm() {
+    unsafe {
+        asm!("vpcmpeqd ymm0, ymm0, ymm0", "vpcmpeqd ymm1, ymm1, ymm1", "vpcmpeqd ymm2, ymm2, ymm2", "vpcmpeqd ymm3, ymm3, ymm3", "vpcmpeqd ymm4, ymm4, ymm4", "vpcmpeqd ymm5, ymm5, ymm5", "vpcmpeqd ymm6, ymm6, ymm6", "vpcmpeqd ymm7, ymm7, ymm7", "vpcmpeqd ymm8, ymm8, ymm8", "vpcmpeqd ymm9, ymm9, ymm9", "vpcmpeqd ymm10, ymm10, ymm10", "vpcmpeqd ymm11, ymm11, ymm11", "vpcmpeqd ymm12, ymm12, ymm12", "vpcmpeqd ymm13, ymm13, ymm13", "vpcmpeqd ymm14, ymm14, ymm14", "vpcmpeqd ymm15, ymm15, ymm15", out("ymm0") _, out("ymm1") _, out("ymm2") _, out("ymm3") _, out("ymm4") _, out("ymm5") _, out("ymm6") _, out("ymm7") _, out("ymm8") _, out("ymm9") _, out("ymm10") _, out("ymm11") _, out("ymm12") _, out("ymm13") _, out("ymm14") _, out("ymm15") _, options(nomem, nostack))
+    };
+}
+
+/// Like `set_flag_and_trash`, for the YMM registers.
+extern "C" fn set_flag_and_trash_ymm(_sig: u32) {
+    FLAG.store(1, Ordering::SeqCst);
+    unsafe { trash_ymm() };
+}
+
+/// Loads YMM0..15 from `pattern`, spins until FLAG is set (the handler
+/// destroys all YMM registers), stores them to `out`.
+#[target_feature(enable = "avx")]
+unsafe fn spin_keeping_ymm(pattern: &[u8; 512], out: &mut [u8; 512]) {
+    unsafe {
+        asm!(
+            "vmovdqu ymm0, [{p} + 0]", "vmovdqu ymm1, [{p} + 32]", "vmovdqu ymm2, [{p} + 64]", "vmovdqu ymm3, [{p} + 96]", "vmovdqu ymm4, [{p} + 128]", "vmovdqu ymm5, [{p} + 160]", "vmovdqu ymm6, [{p} + 192]", "vmovdqu ymm7, [{p} + 224]", "vmovdqu ymm8, [{p} + 256]", "vmovdqu ymm9, [{p} + 288]", "vmovdqu ymm10, [{p} + 320]", "vmovdqu ymm11, [{p} + 352]", "vmovdqu ymm12, [{p} + 384]", "vmovdqu ymm13, [{p} + 416]", "vmovdqu ymm14, [{p} + 448]", "vmovdqu ymm15, [{p} + 480]",
+            "2:",
+            "cmp dword ptr [rip + {flag}], 0",
+            "je 2b",
+            "vmovdqu [{o} + 0], ymm0", "vmovdqu [{o} + 32], ymm1", "vmovdqu [{o} + 64], ymm2", "vmovdqu [{o} + 96], ymm3", "vmovdqu [{o} + 128], ymm4", "vmovdqu [{o} + 160], ymm5", "vmovdqu [{o} + 192], ymm6", "vmovdqu [{o} + 224], ymm7", "vmovdqu [{o} + 256], ymm8", "vmovdqu [{o} + 288], ymm9", "vmovdqu [{o} + 320], ymm10", "vmovdqu [{o} + 352], ymm11", "vmovdqu [{o} + 384], ymm12", "vmovdqu [{o} + 416], ymm13", "vmovdqu [{o} + 448], ymm14", "vmovdqu [{o} + 480], ymm15",
+            p = in(reg) pattern.as_ptr(),
+            o = in(reg) out.as_mut_ptr(),
+            flag = sym FLAG,
+            out("ymm0") _, out("ymm1") _, out("ymm2") _, out("ymm3") _, out("ymm4") _, out("ymm5") _, out("ymm6") _, out("ymm7") _, out("ymm8") _, out("ymm9") _, out("ymm10") _, out("ymm11") _, out("ymm12") _, out("ymm13") _, out("ymm14") _, out("ymm15") _,
+            options(nostack),
+        )
+    };
+}
+
 /// The modes children are started in.
 fn child(mode: &str) -> i32 {
     match mode {
         "spin" => {
             signal::set_handler(SIGUSR1, set_flag_and_trash).unwrap();
             spin_keeping_registers() as i32
+        }
+        "spin-avx" => {
+            if !ulib::avx_enabled() {
+                return 0;
+            }
+            signal::set_handler(SIGUSR1, set_flag_and_trash_ymm).unwrap();
+            let pattern: [u8; 512] = core::array::from_fn(|i| (i * 13 + 5) as u8);
+            let mut out = [0u8; 512];
+            unsafe { spin_keeping_ymm(&pattern, &mut out) };
+            (out != pattern) as i32
         }
         "sleep" => {
             signal::set_handler(SIGUSR1, count).unwrap();
@@ -364,6 +407,19 @@ fn main(mut args: ulib::Args) -> i32 {
             );
         }
         Err(_) => check(false, "spawn spin child"),
+    }
+
+    // ... and the AVX registers (XSAVE in the trampoline)
+    match process::spawn("/bin/sigtest", ["spin-avx"]) {
+        Ok(pid) => {
+            sys::sleep_ms(100);
+            let _ = signal::send(pid, SIGUSR1);
+            check(
+                process::wait(pid) == Ok(ExitStatus::Exited(0)),
+                "YMM registers survive a handler",
+            );
+        }
+        Err(_) => check(false, "spawn spin-avx child"),
     }
 
     if failures == 0 {

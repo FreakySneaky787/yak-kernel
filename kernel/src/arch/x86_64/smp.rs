@@ -202,6 +202,7 @@ extern "C" fn ap_main(cpu: u64) -> ! {
     gdt::init_cpu(cpu, df_stack.top.as_u64());
     interrupts::kernel_idt().expect("IDT not built").load();
     super::fpu::init();
+    super::cpu::enable_protection();
     super::syscall::init(cpu);
     lapic::init_local();
     crate::task::init_cpu(cpu, &alloc::format!("idle{}", cpu));

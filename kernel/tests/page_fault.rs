@@ -38,6 +38,8 @@ extern "C" fn kmain() -> ! {
         idt.set_with_error_code(vector::PAGE_FAULT, test_page_fault);
         idt
     });
+    // the test IDT has no IRQ vectors: a timer tick would raise #GP (bug #10)
+    kernel::arch::x86_64::disable_interrupts();
     idt.load();
 
     unsafe { (UNMAPPED as *mut u8).write_volatile(42) };

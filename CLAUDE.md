@@ -30,7 +30,8 @@ The conversation with the user happens in German.
 | `python3 -I scripts/screenshot.py <elf> <out.png> [s] [keys…]` | boot headless, optionally send keys (QEMU `sendkey` names = US key positions), save screenshot + serial log |
 
 Tests run headless and abort after 30 s (`KERNEL_TEST_TIMEOUT`), so Claude can run them unattended.
-QEMU runs with 4 cores; `KERNEL_SMP=1 make test` (or 2, …) checks other core counts – worth doing after scheduler changes.
+QEMU runs with 4 cores and `-cpu max`; `KERNEL_SMP=1 make test` (or 2, …) checks other core counts – worth doing after scheduler changes;
+`KERNEL_CPU=qemu64 make test` runs without SMEP/SMAP/XSAVE/AVX (fallback paths).
 Interrupt problems: QEMU monitor `info pic`, `info lapic`, `info registers`.
 Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.sh` invocation.
 
@@ -84,8 +85,8 @@ Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.s
 - `kernel/src/drivers/keyboard.rs` – PS/2 driver, ring buffer, `read_key()`; `drivers/scancode.rs` – decoder + layouts (DE/US)
 - `kernel/src/arch/x86_64/` – CPU specifics: `port.rs` (in/out), `gdt.rs` (GDT+TSS), `idt.rs` (IDT structure),
   `interrupts.rs` (exception handlers, kernel IDT), `syscall.rs` (syscall entry stub, MSRs, `enter_user`), `irq.rs` (IRQ routing + handlers), `lapic.rs` (local APIC + timer), `ioapic.rs`, `pic.rs` (legacy, masked), `pit.rs` (timer calibration), `msr.rs`, `cpu.rs` (cpuid), `power.rs` (reboot/poweroff),
-  `fpu.rs` (x87/SSE enable, FXSAVE areas), `smp.rs` (AP trampoline, INIT/SIPI, `run_on`), `tsc.rs` (µs clock), interrupt helpers in `mod.rs`
-- `kernel/tests/` – integration tests (each one is a separate kernel; `reclaim.rs` is the only one that reclaims bootloader memory)
+  `fpu.rs` (x87/SSE/AVX enable, XSAVE/FXSAVE areas), `cpu.rs` also SMEP/SMAP + `user_access`, `smp.rs` (AP trampoline, INIT/SIPI, `run_on`), `tsc.rs` (µs clock), interrupt helpers in `mod.rs`
+- `kernel/tests/` – integration tests (each one is a separate kernel; `reclaim.rs` is the only one that reclaims bootloader memory, `smap.rs` checks SMEP/SMAP)
 - `kernel/linker.ld` – higher-half layout at `0xffffffff80000000`
 - `scripts/run-qemu.sh` – cargo runner: builds the ISO and starts QEMU
 - `vendor/limine` – Limine binaries (not in git, `make limine`)

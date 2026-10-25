@@ -180,7 +180,7 @@ STEPS = [
     ("mem\r", ["Physical:", "MiB usable", "Heap:"], []),
     ("memmap\r", ["usable", "kernel and modules"], []),
     ("uptime\r", ["up 00:", "ticks at 100 Hz"], []),
-    ("cpu\r", ["Vendor:", "Flags:", "lm", f"CPUs:   {CPUS} online"], []),  # SMP (M25), cores from KERNEL_SMP
+    ("cpu\r", ["Vendor:", "Flags:", "lm", f"CPUs:   {CPUS} online", "In use: SMEP on, SMAP on, AVX state on"], []),  # SMP (M25), M37
     ("acpi\r", ["APIC", "I/O APIC", "ISA IRQ 0 -> GSI 2"], []),
     ("layout us\r", ["keyboard layout: Us"], []),
     ("layout de\r", ["keyboard layout: De"], []),

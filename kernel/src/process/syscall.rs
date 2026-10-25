@@ -380,7 +380,10 @@ fn copy_from_user(addr: u64, len: u64) -> Result<Vec<u8>, i64> {
         return Err(errno::EFAULT);
     }
     // The process's page tables are active: the user buffer is directly readable
-    Ok(unsafe { core::slice::from_raw_parts(addr as *const u8, len as usize) }.to_vec())
+    let bytes = crate::arch::x86_64::cpu::user_access(|| unsafe {
+        core::slice::from_raw_parts(addr as *const u8, len as usize).to_vec()
+    });
+    Ok(bytes)
 }
 
 /// Copies `data` to a user buffer (after checking it).
@@ -392,7 +395,9 @@ fn copy_to_user(addr: u64, data: &[u8]) -> Result<(), i64> {
     if !accessible(addr, data.len() as u64, true) {
         return Err(errno::EFAULT);
     }
-    unsafe { core::ptr::copy_nonoverlapping(data.as_ptr(), addr as *mut u8, data.len()) };
+    crate::arch::x86_64::cpu::user_access(|| unsafe {
+        core::ptr::copy_nonoverlapping(data.as_ptr(), addr as *mut u8, data.len())
+    });
     Ok(())
 }
 
@@ -1388,8 +1393,12 @@ fn read_stdin(buf: u64, len: u64) -> SysResult {
         }
     }
     let n = bytes.len().min(len as usize);
-    unsafe { core::ptr::copy_nonoverlapping(bytes.as_ptr(), buf as *mut u8, n) };
     let rest = bytes.split_off(n);
+    // checked again: another thread may have changed the mapping while we waited
+    if let Err(e) = copy_to_user(buf, &bytes) {
+        with_current(|p| p.stdin_pending = [bytes, rest.clone()].concat());
+        return Err(e);
+    }
     with_current(|p| p.stdin_pending = rest);
     Ok(n as u64)
 }

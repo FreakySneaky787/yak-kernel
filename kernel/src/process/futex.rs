@@ -58,10 +58,9 @@ pub fn wait(addr: u64, expected: u32, timeout_ms: u64) -> Result<(), FutexError>
         // read under the process table lock: no other thread can unmap the page meanwhile
         let value = with_current(|p| {
             p.populate(addr, 4);
-            p.space
-                .as_ref()
-                .filter(|s| s.is_accessible(addr, 4, false))
-                .map(|_| unsafe { core::ptr::read_volatile(addr as *const u32) })
+            p.space.as_ref().filter(|s| s.is_accessible(addr, 4, false)).map(|_| {
+                crate::arch::x86_64::cpu::user_access(|| unsafe { core::ptr::read_volatile(addr as *const u32) })
+            })
         })
         .flatten()
         .ok_or(FutexError::Fault)?;

@@ -66,7 +66,7 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 | 34 | Signals: handlers in user space, `kill -SIG`, Ctrl+C as SIGINT, interrupted blocking calls | ✅ | 2 signal unit tests (dispositions, pending order, blocking during a handler, reasons ↔ numbers), `sigtest` (23 checks incl. all GPRs + XMM0–15 kept when a handler interrupts a loop without syscalls, EINTR from sleep, no nesting, SIG_IGN inherited), sh `kill` session, E2E: Ctrl+C caught by a handler, `kill -USR1 %1` |
 | 35 | Shell programming: `if`/`while`/`until`/`for`, functions, `&&`/`\|\|`, `;`, `test`, `$((...))`, `read`, wildcards, multi-line input, Ctrl+C stops loops | ✅ | `/m35.sh` in the integration test (39 output lines compared exactly: all constructs, break/continue n, functions + recursion, read from pipes and files, globbing, `set -e`), interactive session (continuation prompt, syntax error, exit in a function), stack growth unit test, 6 E2E steps incl. Ctrl+C ending a loop |
 | 36 | Threads in user processes (spawn/join, futex-style wait/wake) and a sleeping mutex in the kernel | ✅ | 2 `sync::Mutex` unit tests (exclusion, a waiter blocks on `Wait::Lock`), `threadtest` (17 checks: shared counter, join codes, futex mutex + heap from 4 threads, futex EAGAIN/timeout/wake, ESRCH, exit / fault / main return / SIGTERM with running threads), no threads left over in the integration test, E2E; suite green with 1–4 CPUs |
-| 37 | CPU protection and AVX: SMEP/SMAP, XSAVE with AVX state per thread | ⬜ | |
+| 37 | CPU protection and AVX: SMEP/SMAP, XSAVE with AVX state per thread | ✅ | `tests/smap.rs` (user_access works, kernel read and kernel jump into a user page fault), CR4/XCR0 unit tests, YMM save/restore unit test, `fputest` with YMM0–15 in 4 preempted workers, `sigtest` YMM kept across a handler, E2E `cpu` shows SMEP/SMAP/AVX on; suite also green with `KERNEL_CPU=qemu64` and 1 CPU |
 | 38 | Network polish: e1000 interrupts (MSI), TCP window scaling, DHCP lease renewal | ⬜ | |
 
 ## Log
@@ -295,11 +295,17 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   disk and the root file system (found while writing its test: `bool::then_some` built the guard eagerly, so a
   failed `try_lock` unlocked somebody else's lock - `then` is lazy).
 
+- **2026-10-25** – M37: QEMU now runs `-cpu max` (TCG; `KERNEL_CPU` overrides). SMEP + SMAP on every CPU that has them,
+  user memory only inside `cpu::user_access` (`stac`/`clac`); `read_stdin` now copies with `copy_to_user` after its
+  wait. XSAVE with XCR0 = x87 | SSE | AVX, 1 KiB `FpuState` per thread; the signal trampoline uses `xsave64`.
+  User programs stay SSE2 and detect AVX at run time. Bug #10 (test IDTs without IRQ vectors, exposed by the slower
+  CPU model) fixed.
+
 ## Open items / later
 - `ps` CPU percentages only cover threads that still exist (dead threads are reaped with their counters).
 - Shell lines longer than one console row are not handled by the line editor (input is capped at 120 characters).
 - `gcc` is installed now → `make limine-tool` (bios-install for USB/HDD images) could be used (not tried yet).
-- User space: no AVX (XSAVE not enabled, AVX instructions kill the program), no SMAP/SMEP, the image is mapped eagerly
+- User space: no AVX-512, the image is mapped eagerly
   (heap and stack on demand), no thread-local storage, no guard pages for thread stacks, no SIGCHLD/SIGSTOP/alarm, no signal masks.
 - Network: no fragmentation, no TCP window scaling/SACK/persist timer, DHCP lease not renewed, DNS only A records;
   polled driver (10 ms latency).
@@ -312,6 +318,8 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   write, append, echo, sleep, clear, help. Without `/bin` on the disk, the kernel shell has no `ls`/`cat`.
 
 ## Next step
-**M37 – CPU protection and AVX** (stage 7, see the table): enable SMEP/SMAP when the CPU has them (CR4 bits; `stac`/`clac`
-around every user memory access in the kernel – `copy_from_user`, `copy_to_user`, futex read, signal frame), and
-XSAVE: per-thread XSAVE areas sized from CPUID 0xD, XCR0 = x87|SSE|AVX, user target with AVX (`fputest` checks YMM).
+**M38 – network polish** (last milestone of stage 7): e1000 receive interrupts by MSI (replaces the 10 ms polling of the
+net thread; keep polling as fallback), TCP window scaling (RFC 7323 option in SYN/SYN-ACK, larger receive buffer), DHCP
+lease renewal (T1 = half the lease: REQUEST to the server, rebinding at T2). Tests: ping latency well below 10 ms,
+a 1 MB TCP transfer over loopback with a window > 64 KiB, a renewal against QEMU's DHCP server with a short lease is
+not possible (QEMU's lease is fixed) - test the renewal state machine with a unit test instead.

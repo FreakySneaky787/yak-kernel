@@ -62,6 +62,8 @@ extern "C" fn kmain() -> ! {
             .set_ist(DOUBLE_FAULT_IST);
         idt
     });
+    // the test IDT has no IRQ vectors: a timer tick would raise #GP (bug #10)
+    kernel::arch::x86_64::disable_interrupts();
     idt.load();
 
     let stack = alloc_stack(4).expect("cannot allocate test stack");
