@@ -351,6 +351,15 @@ Short explanations of every subsystem: what it is and why we need it.
 - **AVX** registers (YMM) are 256 bits wide, twice the SSE registers. The kernel must save and restore them on every
   thread switch; the `xsave` instruction does that for every state component the kernel enabled in the register XCR0.
 
+## M38 – Finding an interrupt by trying
+- Old PCI devices signal interrupts on a wire (INTA#). Which input of the I/O APIC that wire reaches is written down
+  only in the ACPI tables' byte code (AML), which we do not run. So the kernel *asks the hardware*: it connects one
+  possible input after the other to the network handler and makes the card fake an event; where the interrupt shows
+  up, the wire is. Now the network thread sleeps until a packet really arrives instead of looking every 10 ms.
+- **Window scaling** lets TCP say "I can take more than 64 KiB" (the window field has only 16 bits): both sides agree
+  on a multiplier in their first packets.
+- A DHCP address is only *leased*: half-way through, the client asks the server to extend it.
+
 ## Tooling – GNU ld and binutils
 - rustc compiles our code into object files; a **linker** combines them into the final ELF according to `kernel/linker.ld`
   (load address, section order, segments). We use **GNU ld** (`ld.bfd`) for that.

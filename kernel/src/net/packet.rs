@@ -270,6 +270,8 @@ pub struct TcpSegment<'a> {
     pub window: u16,
     /// From the MSS option (SYN segments), if present.
     pub mss: Option<u16>,
+    /// From the window scale option (SYN segments, RFC 7323), if present.
+    pub wscale: Option<u8>,
     pub payload: &'a [u8],
 }
 
@@ -296,8 +298,9 @@ pub fn parse_tcp(src: Ipv4Addr, dst: Ipv4Addr, p: &[u8]) -> Option<TcpSegment<'_
     if offset < TCP_HEADER || offset > p.len() {
         return None;
     }
-    // options: only MSS (kind 2) interests us
+    // options: MSS (kind 2) and window scale (kind 3) interest us
     let mut mss = None;
+    let mut wscale = None;
     let mut i = TCP_HEADER;
     while i < offset {
         match p[i] {
@@ -311,6 +314,9 @@ pub fn parse_tcp(src: Ipv4Addr, dst: Ipv4Addr, p: &[u8]) -> Option<TcpSegment<'_
                 if kind == 2 && len == 4 {
                     mss = Some(be16(p, i + 2));
                 }
+                if kind == 3 && len == 3 {
+                    wscale = Some(p[i + 2].min(14)); // RFC 7323: larger shifts count as 14
+                }
                 i += len;
             }
         }
@@ -323,11 +329,13 @@ pub fn parse_tcp(src: Ipv4Addr, dst: Ipv4Addr, p: &[u8]) -> Option<TcpSegment<'_
         flags: p[13],
         window: be16(p, 14),
         mss,
+        wscale,
         payload: &p[offset..],
     })
 }
 
-/// Builds a TCP segment with checksum; SYN segments carry an MSS option.
+/// Builds a TCP segment with checksum; SYN segments carry an MSS option
+/// and, with `wscale`, a window scale option (NOP + kind 3).
 #[allow(clippy::too_many_arguments)]
 pub fn build_tcp(
     src: Ipv4Addr,
@@ -338,9 +346,16 @@ pub fn build_tcp(
     ack: u32,
     flags: u8,
     window: u16,
+    wscale: Option<u8>,
     payload: &[u8],
 ) -> Vec<u8> {
-    let options: &[u8] = if flags & TCP_SYN != 0 { &[2, 4, 0x05, 0xB4] } else { &[] }; // MSS 1460
+    let mut options: Vec<u8> = Vec::new();
+    if flags & TCP_SYN != 0 {
+        options.extend_from_slice(&[2, 4, 0x05, 0xB4]); // MSS 1460
+        if let Some(shift) = wscale {
+            options.extend_from_slice(&[1, 3, 3, shift]);
+        }
+    }
     let offset = TCP_HEADER + options.len();
     let mut p = Vec::with_capacity(offset + payload.len());
     p.extend_from_slice(&src_port.to_be_bytes());
@@ -350,7 +365,7 @@ pub fn build_tcp(
     p.extend_from_slice(&[((offset / 4) as u8) << 4, flags]);
     p.extend_from_slice(&window.to_be_bytes());
     p.extend_from_slice(&[0, 0, 0, 0]); // checksum, urgent pointer
-    p.extend_from_slice(options);
+    p.extend_from_slice(&options);
     p.extend_from_slice(payload);
     let sum = transport_checksum(src, dst, PROTO_TCP, &p);
     p[16..18].copy_from_slice(&sum.to_be_bytes());
@@ -386,6 +401,24 @@ pub struct DhcpReply {
     pub router: Ipv4Addr,
     pub dns: Ipv4Addr,
     pub lease_secs: u32,
+}
+
+/// A REQUEST that extends the lease of `ciaddr` (RENEWING / REBINDING):
+/// the address is in `ciaddr`, no requested-address or server option, no
+/// broadcast flag (we have an address, the server answers it directly).
+pub fn build_dhcp_renew(xid: u32, mac: Mac, ciaddr: Ipv4Addr) -> Vec<u8> {
+    let mut p = alloc::vec![0u8; DHCP_OPTIONS];
+    p[0] = 1; // BOOTREQUEST
+    p[1] = 1; // Ethernet
+    p[2] = 6;
+    p[4..8].copy_from_slice(&xid.to_be_bytes());
+    p[12..16].copy_from_slice(&ciaddr);
+    p[28..34].copy_from_slice(&mac);
+    p[236..240].copy_from_slice(&DHCP_MAGIC.to_be_bytes());
+    p.extend_from_slice(&[53, 1, DHCP_REQUEST]);
+    p.extend_from_slice(&[55, 3, 1, 3, 6]);
+    p.push(255);
+    p
 }
 
 /// A client message (DISCOVER or REQUEST) with the broadcast flag set, so
@@ -512,16 +545,18 @@ mod tests {
     #[test_case]
     fn tcp_round_trip_and_sequence_math() {
         let (a, b) = ([10, 0, 2, 15], [10, 0, 2, 2]);
-        let syn = build_tcp(a, b, 40000, 80, 0xFFFF_FFF0, 0, TCP_SYN, 32768, b"");
+        let syn = build_tcp(a, b, 40000, 80, 0xFFFF_FFF0, 0, TCP_SYN, 32768, Some(7), b"");
         let s = parse_tcp(a, b, &syn).unwrap();
         assert_eq!(
             (s.src_port, s.dst_port, s.seq, s.flags, s.window),
             (40000, 80, 0xFFFF_FFF0, TCP_SYN, 32768)
         );
-        assert_eq!(s.mss, Some(1460));
-        let data = build_tcp(a, b, 1, 2, 5, 9, TCP_ACK | TCP_PSH, 100, b"hi there");
+        assert_eq!((s.mss, s.wscale), (Some(1460), Some(7)));
+        let plain_syn = build_tcp(a, b, 40000, 80, 1, 0, TCP_SYN, 1000, None, b"");
+        assert_eq!(parse_tcp(a, b, &plain_syn).unwrap().wscale, None);
+        let data = build_tcp(a, b, 1, 2, 5, 9, TCP_ACK | TCP_PSH, 100, Some(7), b"hi there");
         let d = parse_tcp(a, b, &data).unwrap();
-        assert_eq!((d.ack, d.mss, d.payload), (9, None, &b"hi there"[..]));
+        assert_eq!((d.ack, d.mss, d.wscale, d.payload), (9, None, None, &b"hi there"[..]));
         assert!(
             parse_tcp([10, 0, 2, 16], b, &data).is_none(),
             "checksum must cover the IP addresses"
@@ -536,6 +571,10 @@ mod tests {
         let mac = [0x52, 0x54, 0, 0x12, 0x34, 0x56];
         let d = build_dhcp(DHCP_REQUEST, 0xABCD, mac, Some([10, 0, 2, 15]), Some([10, 0, 2, 2]));
         assert_eq!((d[0], &d[28..34]), (1, &mac[..]));
+        // a renewal names our address in ciaddr and asks for a unicast answer
+        let r = build_dhcp_renew(0x1234, mac, [10, 0, 2, 15]);
+        assert_eq!((&r[12..16], &r[10..12]), (&[10, 0, 2, 15][..], &[0, 0][..]));
+        assert!(r.windows(3).any(|w| w == [53, 1, DHCP_REQUEST]) && !r.windows(2).any(|w| w == [50, 4]));
         assert!(
             d.windows(6).any(|w| w == [50, 4, 10, 0, 2, 15]),
             "requested address missing"

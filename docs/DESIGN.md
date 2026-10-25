@@ -298,13 +298,22 @@
 ## Network
 - **Driver** (`drivers/e1000.rs`): Intel 82540EM as emulated by QEMU, BAR0 MMIO (128 KiB, mapped via `ensure_hhdm_mapped`).
   RX ring 32 × 16-byte descriptors (one frame), TX ring 8; DMA buffers 2 KiB (two per frame). RCTL: broadcast accepted, CRC
-  stripped; TCTL: pad short packets. TX descriptors start with DD set so "DD = slot free". Polled – no MSI on this model and
-  INTx routing would need the ACPI `_PRT` (AML), which we do not interpret.
+  stripped; TCTL: pad short packets. TX descriptors start with DD set so "DD = slot free". Interrupts (M38): no MSI on this model,
+  and the INTA# → I/O APIC wiring would need the ACPI `_PRT` (AML). `net::probe_irq` routes each free PCI input (GSI 16-23,
+  level-triggered, active low) in turn to vector 0x51 and makes the card raise "link status change" by software (`ICS`);
+  the input where it arrives is kept. The handler reads `ICR` through a register base saved at probe time (no NIC lock:
+  the net thread holds it with interrupts on), which clears the causes and releases the level-triggered line, sets
+  `RX_PENDING` and wakes the net thread. Enabled causes: RXT0, RXO, RXDMT0, LSC. No interrupt found → polling.
 - **Stack** (`net/`): configured by DHCP at boot (`net/dhcp.rs`), static fallback = QEMU's slirp defaults (10.0.2.15/24,
   gateway and host = 10.0.2.2, DNS 10.0.2.3). TCP (`net/tcp.rs`) is described in its module docs; packets to our own address
   go through a loopback queue handled by the net thread. DNS is a user-space library (`ulib::dns`). The `net`
-  kernel thread polls every 10 ms, then `notify(Wait::Net)` – that doubles as the tick for timeouts of everyone waiting on the
-  network. ARP: cache learned from requests/replies addressed to us and from IPv4 packets of on-link hosts; `resolve` sends up
+  kernel thread runs a round when the card interrupts or a packet is looped back (`RX_PENDING` + `task::wake`), at the latest
+  every 10 ms; each round ends with `notify(Wait::Net)` – that doubles as the tick for timeouts of everyone waiting on the
+  network and for TCP's retransmission timer. Ping to the gateway: ~0.5 ms (polled: 0-10 ms).
+- **DHCP lease** (`net/dhcp.rs`): the "dhcp" thread renews at T1 (unicast REQUEST with `ciaddr`), retries after half
+  the remaining time (≥ 60 s), rebinds by broadcast from T2, falls back to the static configuration at the end.
+- **TCP windows** (M38): window scaling (RFC 7323, shift 3) when both SYNs carry the option; receive and send buffers
+  256 KiB, up to 128 segments in flight. ARP: cache learned from requests/replies addressed to us and from IPv4 packets of on-link hosts; `resolve` sends up
   to 3 requests. IPv4: no options sent, fragments dropped, DF set. ICMP: echo requests answered, replies with our id recorded.
   UDP: ports map to bounded queues (64 datagrams); checksums sent, not verified on receipt.
 - **User API**: `ping` (one echo, waits ≤ timeout), `udp_socket` → `Handle::Udp(Arc<UdpSocket>)` (port released when the last
@@ -350,6 +359,9 @@ One GDT and TSS per CPU (`gdt::init_cpu`), same layout everywhere. The user data
 | 33 | ISA IRQ1 – PS/2 keyboard (I/O APIC GSI 1) |
 | 36 | ISA IRQ4 – COM1 receive (I/O APIC GSI 4) |
 | 39 / 47 | spurious IRQ 7 / 15 of the masked 8259 (ignored, no EOI) |
+| 0x50 | AHCI command completion (MSI, M32) |
+| 0x51 | e1000 (INTA# through the I/O APIC input found by `net::probe_irq`, level / active low, M38) |
+| 0x60 | wake-up IPI between CPUs (`smp::WAKE_VECTOR`) |
 | 0xFF | local APIC spurious vector (ignored, no EOI) |
 
 - Interrupt controllers: **local APIC + I/O APIC** (since M12). Information comes from the ACPI MADT (`acpi.rs`).

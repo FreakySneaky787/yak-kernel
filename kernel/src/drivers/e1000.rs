@@ -9,20 +9,29 @@
 //! - transmit: we fill a descriptor (buffer, length, "end of packet" +
 //!   "report status") and move the tail (TDT); the card sends and sets DD.
 //!
-//! Polled (QEMU's e1000 has no MSI, and legacy INTx routing would need the
-//! ACPI _PRT tables): the network thread calls `receive` regularly.
+//! Interrupts: QEMU's e1000 has no MSI, and which I/O APIC input its INTA#
+//! pin reaches would need the ACPI _PRT tables (AML). The network stack
+//! finds out by trying (`net::probe_irq`): it routes one free PCI input
+//! (GSI 16-23, level, active low) after the other to the interrupt vector,
+//! makes the card raise a "link status change" by software (`ICS`) and sees
+//! where it arrives. The handler only reads `ICR` (which clears the causes
+//! and releases the level-triggered line) through `IRQ_REGS`, without the
+//! card's lock, and wakes the network thread. Without a working interrupt
+//! the network thread just polls every 10 ms.
 
 use super::pci;
 use crate::mem::paging::{self, Flags};
 use crate::mem::pmm::alloc_frame_zeroed;
 use crate::mem::{PhysAddr, VirtAddr};
 use alloc::vec::Vec;
-use core::sync::atomic::{Ordering, fence};
+use core::sync::atomic::{AtomicU64, Ordering, fence};
 
 const REG_CTRL: u64 = 0x0000;
 const REG_STATUS: u64 = 0x0008;
 const REG_EERD: u64 = 0x0014;
 const REG_ICR: u64 = 0x00C0;
+const REG_ICS: u64 = 0x00C8;
+const REG_IMS: u64 = 0x00D0;
 const REG_IMC: u64 = 0x00D8;
 const REG_RCTL: u64 = 0x0100;
 const REG_TCTL: u64 = 0x0400;
@@ -54,6 +63,24 @@ const TCMD_IFCS: u8 = 1 << 1; // insert the CRC
 const TCMD_RS: u8 = 1 << 3; // report status (sets DD)
 const DESC_DD: u8 = 1 << 0;
 const RX_EOP: u8 = 1 << 1;
+/// Interrupt causes: link status change, receive descriptors low, overrun, receive timer.
+pub const ICR_LSC: u32 = 1 << 2;
+const ICR_RXDMT0: u32 = 1 << 4;
+const ICR_RXO: u32 = 1 << 6;
+const ICR_RXT0: u32 = 1 << 7;
+
+/// Register base for the interrupt handler (0 = no card).
+static IRQ_REGS: AtomicU64 = AtomicU64::new(0);
+
+/// Called from the interrupt handler: reads (and so clears) the interrupt
+/// causes. Returns them; 0 = not ours (the line may be shared).
+pub fn take_interrupt_causes() -> u32 {
+    let base = IRQ_REGS.load(Ordering::Relaxed);
+    if base == 0 {
+        return 0;
+    }
+    unsafe { ((base + REG_ICR) as *const u32).read_volatile() }
+}
 
 const RX_COUNT: usize = 32;
 const TX_COUNT: usize = 8;
@@ -160,6 +187,7 @@ impl E1000 {
             nic.tx_bufs[i + 1] = PhysAddr(frame.as_u64() + BUF_SIZE as u64);
         }
         nic.reset_and_start();
+        IRQ_REGS.store(nic.regs.as_u64(), Ordering::Relaxed);
         Ok(nic)
     }
 
@@ -244,6 +272,22 @@ impl E1000 {
             mac[word as usize * 2..word as usize * 2 + 2].copy_from_slice(&data.to_le_bytes());
         }
         mac
+    }
+
+    /// Enables the interrupt causes in `causes` (`IMS`), or all receive
+    /// causes with `None`.
+    pub fn enable_interrupts(&self, causes: Option<u32>) {
+        self.write(REG_IMS, causes.unwrap_or(ICR_RXT0 | ICR_RXO | ICR_RXDMT0 | ICR_LSC));
+    }
+
+    pub fn disable_interrupts(&self) {
+        self.write(REG_IMC, 0xFFFF_FFFF);
+        self.read(REG_ICR);
+    }
+
+    /// Makes the card raise the causes `causes` by software (`ICS`).
+    pub fn trigger_interrupt(&self, causes: u32) {
+        self.write(REG_ICS, causes);
     }
 
     pub fn mac(&self) -> [u8; 6] {

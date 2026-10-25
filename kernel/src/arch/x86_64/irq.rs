@@ -30,6 +30,7 @@ pub fn install_irq_handlers(idt: &mut Idt) {
     idt.set(lapic::SPURIOUS_VECTOR, apic_spurious);
     idt.set(super::smp::WAKE_VECTOR, wake);
     idt.set(crate::drivers::ahci::VECTOR, ahci);
+    idt.set(crate::net::VECTOR, network);
 }
 
 /// Routes a legacy ISA IRQ through the I/O APIC to the current CPU,
@@ -107,6 +108,13 @@ extern "x86-interrupt" fn com1(_frame: InterruptStackFrame) {
 /// AHCI command completion (MSI).
 extern "x86-interrupt" fn ahci(_frame: InterruptStackFrame) {
     crate::drivers::ahci::handle_interrupt();
+    lapic::eoi();
+    crate::task::preempt_idle();
+}
+
+/// e1000 (level-triggered INTx through the I/O APIC, see `net::probe_irq`).
+extern "x86-interrupt" fn network(_frame: InterruptStackFrame) {
+    crate::net::handle_interrupt();
     lapic::eoi();
     crate::task::preempt_idle();
 }

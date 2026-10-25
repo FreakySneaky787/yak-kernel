@@ -4,7 +4,7 @@
 //!   -> (FinWait1 -> FinWait2 | Closing) -> TimeWait, or CloseWait -> LastAck,
 //!   -> Closed. RST closes at once.
 //! - Sending: bytes wait in `send_buf` until acknowledged. At most
-//!   min(peer window, 8 segments) are in flight. If the oldest unacknowledged
+//!   min(peer window, 128 segments) are in flight. If the oldest unacknowledged
 //!   segment is not acknowledged within the retransmission timeout (RTO),
 //!   everything from there is sent again (go-back-N) and the RTO doubles;
 //!   the RTO follows the measured round trip time (one sample at a time,
@@ -12,8 +12,13 @@
 //! - Receiving: only in-order data is accepted (out-of-order segments are
 //!   dropped and answered with a duplicate ACK; the sender retransmits).
 //!   The advertised window is the free space in `recv_buf`.
-//! - Not implemented: window scaling, SACK, Nagle, delayed ACKs, urgent data,
-//!   the zero-window persist timer, simultaneous open.
+//! - Window scaling (RFC 7323): our SYN offers a shift of `WSCALE_SHIFT`;
+//!   if the peer's SYN (or SYN-ACK) carries the option too, windows in all
+//!   later segments are scaled - ours by our shift, the peer's by its shift.
+//!   Windows in SYN segments themselves are never scaled. So the receive
+//!   buffer can be larger than 64 KiB.
+//! - Not implemented: SACK, Nagle, delayed ACKs, urgent data, the
+//!   zero-window persist timer, simultaneous open.
 //!
 //! All state lives in one table behind one lock, taken with interrupts off
 //! (it is read by `wait_for` conditions). Segments are collected while the
@@ -56,9 +61,12 @@ pub enum TcpError {
 }
 
 const DEFAULT_MSS: usize = 536;
-const RECV_CAP: usize = 32 * 1024;
-const SEND_CAP: usize = 64 * 1024;
-const MAX_IN_FLIGHT_SEGMENTS: usize = 8;
+const RECV_CAP: usize = 256 * 1024;
+const SEND_CAP: usize = 256 * 1024;
+const MAX_IN_FLIGHT_SEGMENTS: usize = 128;
+/// Our window scale: advertised windows count in units of 2^3 bytes.
+const WSCALE_SHIFT: u8 = 3;
+const _: () = assert!(RECV_CAP >> WSCALE_SHIFT <= u16::MAX as usize);
 const MAX_RETRIES: u32 = 8;
 const RTO_INITIAL_US: u64 = 1_000_000;
 const RTO_MIN_US: u64 = 200_000;
@@ -76,6 +84,11 @@ struct Conn {
     snd_nxt: u32,
     snd_wnd: u32,
     peer_mss: usize,
+    /// Window scaling: our SYN offers it (active open) or the peer's SYN did.
+    offer_wscale: bool,
+    /// Shift for the peer's advertised windows / for ours (0 = no scaling).
+    snd_shift: u8,
+    rcv_shift: u8,
     /// Sequence number of `send_buf[0]`.
     buf_seq: u32,
     send_buf: VecDeque<u8>,
@@ -156,6 +169,9 @@ impl Conn {
             snd_nxt: iss,
             snd_wnd: 0,
             peer_mss: DEFAULT_MSS,
+            offer_wscale: true,
+            snd_shift: 0,
+            rcv_shift: 0,
             buf_seq: iss.wrapping_add(1),
             send_buf: VecDeque::new(),
             fin_queued: false,
@@ -175,13 +191,36 @@ impl Conn {
         }
     }
 
-    fn window(&self) -> u16 {
-        (RECV_CAP - self.recv_buf.len()) as u16
+    /// The window to advertise: free space, scaled (never in SYN segments).
+    fn window(&self, flags: u8) -> u16 {
+        let free = RECV_CAP - self.recv_buf.len();
+        let scaled = if flags & TCP_SYN != 0 {
+            free
+        } else {
+            free >> self.rcv_shift
+        };
+        scaled.min(u16::MAX as usize) as u16
+    }
+
+    /// The peer's SYN (or SYN-ACK) told us whether it scales windows.
+    fn agree_on_scaling(&mut self, peer: Option<u8>) {
+        match peer {
+            Some(shift) if self.offer_wscale => {
+                self.snd_shift = shift;
+                self.rcv_shift = WSCALE_SHIFT;
+            }
+            _ => {
+                self.offer_wscale = false;
+                self.snd_shift = 0;
+                self.rcv_shift = 0;
+            }
+        }
     }
 
     fn segment(&self, flags: u8, seq: u32, payload: &[u8], out: &mut Vec<Out>) {
         let Some(cfg) = config() else { return };
         let ack = if flags & TCP_ACK != 0 { self.rcv_nxt } else { 0 };
+        let wscale = self.offer_wscale.then_some(WSCALE_SHIFT);
         out.push(Out {
             dst: self.remote_ip,
             segment: build_tcp(
@@ -192,7 +231,8 @@ impl Conn {
                 seq,
                 ack,
                 flags,
-                self.window(),
+                self.window(flags),
+                wscale,
                 payload,
             ),
         });
@@ -323,7 +363,7 @@ impl Conn {
             }
         }
         if seq_le(self.snd_una, ack) {
-            self.snd_wnd = window as u32;
+            self.snd_wnd = (window as u32) << self.snd_shift;
         }
     }
 
@@ -398,7 +438,8 @@ pub fn input(src: Ipv4Addr, seg: &TcpSegment) {
                 if seg.flags & (TCP_SYN | TCP_ACK) == TCP_SYN | TCP_ACK && seg.ack == c.snd_nxt {
                     c.rcv_nxt = seg.seq.wrapping_add(1);
                     c.peer_mss = seg.mss.map_or(DEFAULT_MSS, |m| m as usize).min(1460);
-                    c.on_ack(seg.ack, seg.window);
+                    c.on_ack(seg.ack, seg.window); // the SYN-ACK's window is not scaled
+                    c.agree_on_scaling(seg.wscale);
                     c.state = State::Established;
                     c.ack_now(&mut out);
                     c.output(&mut out);
@@ -439,8 +480,9 @@ fn no_connection(tcp: &mut Tcp, src: Ipv4Addr, seg: &TcpSegment, out: &mut Vec<O
     if seg.flags & (TCP_SYN | TCP_ACK) == TCP_SYN && tcp.listeners.contains_key(&seg.dst_port) {
         let mut c = Conn::new(State::SynReceived, seg.dst_port, src, seg.src_port);
         c.rcv_nxt = seg.seq.wrapping_add(1);
-        c.snd_wnd = seg.window as u32;
+        c.snd_wnd = seg.window as u32; // not scaled in a SYN
         c.peer_mss = seg.mss.map_or(DEFAULT_MSS, |m| m as usize).min(1460);
+        c.agree_on_scaling(seg.wscale); // our SYN-ACK only offers scaling if the SYN did
         c.listener = Some(seg.dst_port);
         c.orphan = true; // until accepted
         c.output(out);
@@ -458,7 +500,7 @@ fn no_connection(tcp: &mut Tcp, src: Ipv4Addr, seg: &TcpSegment, out: &mut Vec<O
     };
     out.push(Out {
         dst: src,
-        segment: build_tcp(cfg.ip, src, seg.dst_port, seg.src_port, seq, ack, flags, 0, &[]),
+        segment: build_tcp(cfg.ip, src, seg.dst_port, seg.src_port, seq, ack, flags, 0, None, &[]),
     });
 }
 
@@ -627,7 +669,7 @@ pub fn recv(id: ConnId, max: usize, abort: impl Fn() -> bool) -> Result<Vec<u8>,
         let r = locked(|tcp| {
             let c = tcp.conns.get_mut(&id).ok_or(TcpError::NotConnected)?;
             if !c.recv_buf.is_empty() {
-                let was_small = (c.window() as usize) < 2 * c.peer_mss;
+                let was_small = RECV_CAP - c.recv_buf.len() < 2 * c.peer_mss;
                 let n = max.min(c.recv_buf.len());
                 let data: Vec<u8> = c.recv_buf.drain(..n).collect();
                 if was_small && c.state != State::Closed {
@@ -711,6 +753,11 @@ fn abort_conn(id: ConnId) {
 }
 
 /// (state, local port, remote ip, remote port) of every connection, for `netstat`.
+/// (peer's window in bytes, our receive window shift) of a connection.
+pub fn windows(id: ConnId) -> Option<(u32, u8)> {
+    locked(|tcp| tcp.conns.get(&id).map(|c| (c.snd_wnd, c.rcv_shift)))
+}
+
 pub fn connections() -> Vec<(State, u16, Ipv4Addr, u16)> {
     locked(|tcp| {
         tcp.conns
@@ -735,6 +782,47 @@ mod tests {
     #[test_case]
     fn connect_to_a_closed_port_is_refused() {
         assert_eq!(connect(ME, 7999, 2000, || false), Err(TcpError::Refused));
+    }
+
+    #[test_case]
+    fn windows_beyond_64k_with_scaling() {
+        listen(7201).unwrap();
+        let server = task::spawn("tcp-sink", || {
+            let (id, _, _) = accept(7201, || false).unwrap();
+            let mut total = 0usize;
+            let mut sum = 0u64;
+            loop {
+                let data = recv(id, 65536, || false).unwrap();
+                if data.is_empty() {
+                    break;
+                }
+                total += data.len();
+                sum += data.iter().map(|&b| b as u64).sum::<u64>();
+            }
+            send(id, alloc::format!("{} {}", total, sum).as_bytes(), || false).unwrap();
+            close(id);
+        });
+        let id = connect(ME, 7201, 3000, || false).expect("connect over loopback");
+        assert_eq!(windows(id).map(|w| w.1), Some(WSCALE_SHIFT), "scaling not agreed");
+        let data: Vec<u8> = (0..1_000_000u32).map(|i| (i % 251) as u8).collect();
+        assert_eq!(send(id, &data, || false), Ok(data.len()));
+        shutdown(id);
+        let mut reply = Vec::new();
+        loop {
+            let chunk = recv(id, 100, || false).unwrap();
+            if chunk.is_empty() {
+                break;
+            }
+            reply.extend_from_slice(&chunk);
+        }
+        // the window in the server's last segments counts in units of 2^3
+        let (peer_window, _) = windows(id).unwrap();
+        assert!(peer_window > 65535, "peer window {} not scaled", peer_window);
+        task::join(server);
+        close(id);
+        unlisten(7201);
+        let sum: u64 = data.iter().map(|&b| b as u64).sum();
+        assert_eq!(core::str::from_utf8(&reply).unwrap(), alloc::format!("1000000 {}", sum));
     }
 
     #[test_case]

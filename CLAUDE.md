@@ -71,7 +71,8 @@ Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.s
 - `kernel/src/drivers/pci.rs` – PCI enumeration; `drivers/ahci.rs` – SATA driver; `drivers/block.rs` – `BlockDevice`, `RamDisk`;
   `drivers/mod.rs` – global `DISK`; `drivers/rtc.rs` – CMOS real-time clock
 - `kernel/src/fs/` – `mod.rs` (root mount `fs::ROOT`, `SystemDisk`, path `normalize`), `fat32.rs` (FAT32 read/write, LFN, `format`)
-- `kernel/src/drivers/e1000.rs` – network card; `kernel/src/net/` – `packet.rs` (Ethernet/ARP/IPv4/ICMP/UDP), `mod.rs` (stack, net thread, sockets)
+- `kernel/src/drivers/e1000.rs` – network card; `kernel/src/net/` – `packet.rs` (Ethernet/ARP/IPv4/ICMP/UDP/TCP/DHCP formats),
+  `mod.rs` (stack, net thread, IRQ probing, sockets), `tcp.rs`, `dhcp.rs` (lease + renewal)
 - `rootfs/` – initial contents of the FAT32 disk image; `scripts/mkdisk.sh` – builds the image;
   `scripts/check-test-disks.sh` – `fsck.fat` + mtools validation of the test disks (run by `make test`);
   `scripts/install-user.sh` – copies `build/user/bin/*` into `/bin` of a disk image

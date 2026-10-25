@@ -5,13 +5,14 @@
 //! virtual gateway 10.0.2.2 (it answers pings, and traffic to it reaches the
 //! host's 127.0.0.1), DNS 10.0.2.3.
 //!
-//! - A kernel thread ("net") polls the card every 10 ms, handles ARP
+//! - A kernel thread ("net") reads the card when its interrupt arrives (see
+//!   `probe_irq`; at least every 10 ms anyway), handles ARP
 //!   (answers requests for our address, learns replies), answers ICMP echo
 //!   requests, records echo replies and queues UDP datagrams for sockets.
 //! - Sending resolves the next hop (the destination on our subnet, else the
 //!   gateway) through the ARP cache, asking with ARP requests if needed.
 //! - Waiting (ARP, ping replies, UDP receive) uses `task::wait_for` with
-//!   `Wait::Net`; the net thread notifies after every poll, so timeouts are
+//!   `Wait::Net`; the net thread notifies after every round, so timeouts are
 //!   checked at least every 10 ms.
 //! - Packets to our own address do not go to the card: they are queued and
 //!   handled by the net thread like received ones (loopback).
@@ -31,7 +32,7 @@ use crate::time;
 use alloc::collections::{BTreeMap, VecDeque};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicU16, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU64, Ordering};
 use packet::*;
 use spin::Mutex;
 
@@ -94,6 +95,63 @@ static NEXT_IP_ID: AtomicU16 = AtomicU16::new(1);
 static NEXT_EPHEMERAL: AtomicU16 = AtomicU16::new(49152);
 /// IPv4 packets sent to ourselves, waiting for the net thread.
 static LOOPBACK: Mutex<VecDeque<Vec<u8>>> = Mutex::new(VecDeque::new());
+/// The net thread, the card's I/O APIC input (0 = polling) and interrupt bookkeeping.
+static NET_THREAD: AtomicU64 = AtomicU64::new(0);
+static IRQ_GSI: AtomicU32 = AtomicU32::new(0);
+static IRQ_COUNT: AtomicU64 = AtomicU64::new(0);
+static RX_PENDING: AtomicBool = AtomicBool::new(false);
+/// Interrupt vector of the card.
+pub const VECTOR: u8 = 0x51;
+
+fn in_net_thread() -> bool {
+    task::current_id() == NET_THREAD.load(Ordering::Relaxed)
+}
+
+/// Called from the interrupt handler of `VECTOR`.
+pub fn handle_interrupt() {
+    if crate::drivers::e1000::take_interrupt_causes() != 0 {
+        IRQ_COUNT.fetch_add(1, Ordering::Relaxed);
+        RX_PENDING.store(true, Ordering::SeqCst);
+        let net = NET_THREAD.load(Ordering::Relaxed);
+        if net != 0 {
+            task::wake(net);
+        }
+    }
+}
+
+/// (I/O APIC input of the card if interrupts work, interrupts so far).
+pub fn interrupt_stats() -> (Option<u32>, u64) {
+    let gsi = IRQ_GSI.load(Ordering::Relaxed);
+    ((gsi != 0).then_some(gsi), IRQ_COUNT.load(Ordering::Relaxed))
+}
+
+/// Finds the I/O APIC input the card's interrupt pin is wired to (see the
+/// e1000 module docs): tries every free PCI input (GSI 16-23) in turn.
+fn probe_irq(nic: &E1000) -> Option<u32> {
+    use crate::arch::x86_64::{ioapic, lapic};
+    let cpu = lapic::id();
+    nic.enable_interrupts(Some(crate::drivers::e1000::ICR_LSC));
+    let found = (16..ioapic::input_count().min(24)).find(|&gsi| {
+        if !ioapic::is_masked(gsi) {
+            return false; // somebody else's
+        }
+        let before = IRQ_COUNT.load(Ordering::Relaxed);
+        ioapic::route(gsi, VECTOR, cpu, true, true);
+        nic.trigger_interrupt(crate::drivers::e1000::ICR_LSC);
+        let deadline = time::uptime_ms() + 5;
+        while IRQ_COUNT.load(Ordering::Relaxed) == before && time::uptime_ms() < deadline {
+            core::hint::spin_loop();
+        }
+        let hit = IRQ_COUNT.load(Ordering::Relaxed) != before;
+        if !hit {
+            ioapic::mask(gsi);
+            crate::drivers::e1000::take_interrupt_causes(); // release the line
+        }
+        hit
+    });
+    nic.disable_interrupts();
+    found
+}
 
 pub fn config() -> Option<Config> {
     without_interrupts(|| *CONFIG.lock())
@@ -123,30 +181,47 @@ pub fn init() {
         dns: [0; 4],
         dhcp: false,
     });
+    match probe_irq(&nic) {
+        Some(gsi) => {
+            nic.enable_interrupts(None);
+            IRQ_GSI.store(gsi, Ordering::Relaxed);
+        }
+        None => crate::serial_println!("net: no interrupt from the card, polling"),
+    }
     *NIC.lock() = Some(nic);
-    task::spawn("net", poll_loop);
-    let cfg = match dhcp::request_lease(mac, 3000) {
-        Ok(lease) => Config {
-            mac,
-            ip: lease.your_ip,
-            netmask: lease.netmask,
-            gateway: lease.router,
-            dns: lease.dns,
-            dhcp: true,
-        },
+    NET_THREAD.store(task::spawn("net", poll_loop), Ordering::Relaxed);
+    match dhcp::request_lease(mac, 3000) {
+        Ok(lease) => {
+            set_config(Config {
+                mac,
+                ip: lease.your_ip,
+                netmask: lease.netmask,
+                gateway: lease.router,
+                dns: lease.dns,
+                dhcp: true,
+            });
+            let start = time::uptime_ms();
+            task::spawn("dhcp", move || {
+                dhcp::maintain(mac, lease.your_ip, lease.server_id, lease.lease_secs, start)
+            });
+        }
         Err(e) => {
             crate::serial_println!("net: no DHCP answer ({:?}), using the static QEMU configuration", e);
-            Config {
-                mac,
-                ip: [10, 0, 2, 15],
-                netmask: [255, 255, 255, 0],
-                gateway: [10, 0, 2, 2],
-                dns: [10, 0, 2, 3],
-                dhcp: false,
-            }
+            use_static_config(mac);
         }
-    };
-    set_config(cfg);
+    }
+}
+
+/// QEMU's user-mode network defaults (no DHCP answer, or the lease ran out).
+pub fn use_static_config(mac: Mac) {
+    set_config(Config {
+        mac,
+        ip: [10, 0, 2, 15],
+        netmask: [255, 255, 255, 0],
+        gateway: [10, 0, 2, 2],
+        dns: [10, 0, 2, 3],
+        dhcp: false,
+    });
 }
 
 fn set_config(cfg: Config) {
@@ -171,7 +246,10 @@ fn poll_loop() {
         }
         tcp::on_timer();
         task::notify(Wait::Net); // also lets waiters check their timeouts
-        time::sleep_ms(10);
+        // until the card interrupts (or a packet was looped back), at most 10 ms
+        if !RX_PENDING.swap(false, Ordering::SeqCst) {
+            time::sleep_ms_or_abort(10, || RX_PENDING.load(Ordering::SeqCst));
+        }
     }
 }
 
@@ -318,6 +396,11 @@ pub fn send_ipv4(dst: Ipv4Addr, protocol: u8, payload: &[u8]) -> Result<(), NetE
         let id = NEXT_IP_ID.fetch_add(1, Ordering::Relaxed);
         let packet = build_ipv4(cfg.ip, cfg.ip, protocol, id, payload);
         without_interrupts(|| LOOPBACK.lock().push_back(packet));
+        // the net thread handles it right away, not at its next 10 ms round
+        if !in_net_thread() {
+            RX_PENDING.store(true, Ordering::SeqCst);
+            task::wake(NET_THREAD.load(Ordering::Relaxed));
+        }
         return Ok(());
     }
     let hop = if on_subnet(&cfg, dst) || dst == [255; 4] {
@@ -417,6 +500,23 @@ mod tests {
         assert_ne!(mac, [0; 6]);
         let rtt = ping([10, 0, 2, 2], 1, 2000).expect("gateway did not answer the ping");
         assert!(rtt < 2_000_000);
+    }
+
+    #[test_case]
+    fn received_frames_arrive_by_interrupt() {
+        let (gsi, before) = interrupt_stats();
+        let gsi = gsi.expect("the card's interrupt was not found");
+        assert!((16..24).contains(&gsi), "PCI interrupts are GSI 16-23, got {}", gsi);
+        // pings: answered within far less than the 10 ms polling period
+        let mut rtts: Vec<u64> = (10..17).filter_map(|seq| ping([10, 0, 2, 2], seq, 2000).ok()).collect();
+        assert_eq!(rtts.len(), 7, "pings lost");
+        rtts.sort();
+        assert!(
+            rtts[3] < 3000,
+            "median round trip {} µs: polled, not interrupt driven?",
+            rtts[3]
+        );
+        assert!(interrupt_stats().1 > before, "no interrupts counted");
     }
 
     #[test_case]
