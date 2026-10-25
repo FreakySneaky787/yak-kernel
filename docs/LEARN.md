@@ -306,6 +306,14 @@ Short explanations of every subsystem: what it is and why we need it.
 - **MSI** (message signaled interrupts): instead of an interrupt wire, a PCI device writes a small message to a special
   address – the local APIC – which turns it into an interrupt. No routing tables needed.
 
+## M33 – Getting memory back
+- The bootloader's memory (its stack, page tables, the answers to our requests) is marked *reclaimable*: free once we no
+  longer need it. The tricky part is the page tables – the CPU is using them right now. So we build copies elsewhere,
+  switch every CPU over (writing CR3), and only then release the old frames.
+- **Demand paging**: asking for heap memory with `brk` only reserves addresses. The first access to a page causes a page
+  fault; the handler sees "page not present, inside the heap", maps a fresh zeroed page and returns – the CPU repeats the
+  instruction, which now works. A program that reserves 32 MiB but touches three pages costs three frames.
+
 ## Tooling – GNU ld and binutils
 - rustc compiles our code into object files; a **linker** combines them into the final ELF according to `kernel/linker.ld`
   (load address, section order, segments). We use **GNU ld** (`ld.bfd`) for that.

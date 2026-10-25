@@ -28,6 +28,10 @@ harness = false
 name = "userspace"
 harness = false
 
+[[test]]
+name = "reclaim"
+harness = false
+
 [profile.dev]
 panic = "abort"
 

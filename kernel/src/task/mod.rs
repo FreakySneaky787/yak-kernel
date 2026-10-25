@@ -558,6 +558,16 @@ pub fn set_current_cr3(cr3: PhysAddr) {
     });
 }
 
+/// Every thread that runs in the address space `old` runs in `new` from
+/// now on (used when the kernel moves to new page tables).
+pub fn retarget_cr3(old: PhysAddr, new: PhysAddr) {
+    with_scheduler(|s| {
+        for t in s.threads.values_mut().filter(|t| t.cr3 == old) {
+            t.cr3 = new;
+        }
+    });
+}
+
 pub fn current_id() -> Tid {
     with_scheduler(|s| s.current[smp::cpu_index()]).map_or(0, |id| if id == NO_THREAD { 0 } else { id })
 }

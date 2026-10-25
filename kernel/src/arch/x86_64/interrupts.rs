@@ -98,6 +98,9 @@ extern "x86-interrupt" fn double_fault(frame: InterruptStackFrame, error_code: u
 
 extern "x86-interrupt" fn page_fault(frame: InterruptStackFrame, error_code: u64) {
     if from_user(&frame) {
+        if crate::process::handle_page_fault(read_cr2(), error_code) {
+            return; // demand paging: retry the instruction
+        }
         crate::process::kill_current(format!(
             "page fault at {:#x} ({}), rip={:#x}",
             read_cr2(),

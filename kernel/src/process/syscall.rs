@@ -319,7 +319,14 @@ pub extern "C" fn dispatch(frame: &mut SyscallFrame) {
 
 /// Whether the current process may access `[addr, addr + len)`.
 fn accessible(addr: u64, len: u64, writable: bool) -> bool {
-    with_current(|p| p.space.as_ref().is_some_and(|s| s.is_accessible(addr, len, writable))).unwrap_or(false)
+    with_current(|p| {
+        // heap pages the program has not touched yet are mapped now (demand paging)
+        if !p.populate_heap(addr, len) {
+            return false;
+        }
+        p.space.as_ref().is_some_and(|s| s.is_accessible(addr, len, writable))
+    })
+    .unwrap_or(false)
 }
 
 /// Copies a user buffer into the kernel (after checking it).
@@ -681,7 +688,7 @@ fn sys_mkdir(path: u64, path_len: u64) -> SysResult {
 /// them). Fails with ENOMEM outside `[heap_start, heap_start + HEAP_MAX]`
 /// or when memory runs out.
 fn sys_brk(new_end: u64) -> SysResult {
-    use crate::mem::{PAGE_SIZE, VirtAddr, align_up, paging::Flags};
+    use crate::mem::{PAGE_SIZE, VirtAddr, align_up};
     let (start, end) = with_current(|p| (p.heap_start, p.heap_end)).ok_or(errno::EBADF)?;
     if new_end == 0 {
         return Ok(end);
@@ -690,25 +697,18 @@ fn sys_brk(new_end: u64) -> SysResult {
         return Err(errno::ENOMEM);
     }
     let (old_top, new_top) = (align_up(end, PAGE_SIZE), align_up(new_end, PAGE_SIZE));
-    // Map/unmap without holding the process table lock (zeroing many pages
-    // takes a while): borrow the address space. Only this thread uses it.
-    let mut space = with_current(|p| p.space.take()).flatten().ok_or(errno::EBADF)?;
-    let result = if new_top > old_top {
-        let pages = ((new_top - old_top) / PAGE_SIZE) as usize;
-        space
-            .map_fresh(VirtAddr(old_top), pages, Flags::WRITABLE | Flags::NO_EXECUTE)
-            .map_err(|_| errno::ENOMEM)
-    } else {
-        space.unmap(VirtAddr(new_top), ((old_top - new_top) / PAGE_SIZE) as usize);
-        Ok(())
-    };
+    // Growing only moves the end: pages are mapped on first use (demand
+    // paging, see `process::handle_page_fault`). Shrinking frees the pages
+    // that were used (unmapped ones are skipped).
     with_current(|p| {
-        p.space = Some(space);
-        if result.is_ok() {
-            p.heap_end = new_end;
+        if new_top < old_top {
+            if let Some(space) = p.space.as_mut() {
+                space.unmap(VirtAddr(new_top), ((old_top - new_top) / PAGE_SIZE) as usize);
+            }
         }
+        p.heap_end = new_end;
     });
-    result.map(|_| new_end)
+    Ok(new_end)
 }
 
 fn sys_spawn(path: u64, path_len: u64, args: u64, args_len: u64) -> SysResult {

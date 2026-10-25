@@ -78,6 +78,36 @@ pub fn hhdm_offset() -> u64 {
     HHDM_OFFSET.load(Ordering::Relaxed)
 }
 
+/// Gives the bootloader's memory to the frame allocator: moves the kernel off
+/// Limine's page tables (copies of the tables that live there), switches
+/// every CPU and thread to the copy, then frees the regions. Afterwards no
+/// Limine response may be used (they lived there too). Must run on a kernel
+/// stack of our own, before user processes exist. Returns the bytes gained.
+pub fn reclaim_bootloader_memory() -> u64 {
+    let regions = pmm::bootloader_regions();
+    let inside = |f: PhysAddr| regions.iter().any(|r| f.0 >= r.base && f.0 < r.base + r.length);
+    let old = paging::kernel_root();
+    let new = match paging::copy_kernel_tables(&inside) {
+        Ok(root) => root,
+        Err(e) => {
+            crate::serial_println!(
+                "mem: cannot copy the page tables ({:?}), bootloader memory stays reserved",
+                e
+            );
+            return 0;
+        }
+    };
+    paging::set_kernel_root(new);
+    crate::task::retarget_cr3(old, new);
+    use crate::arch::x86_64::smp;
+    for cpu in 0..smp::online_count() {
+        smp::run_on(cpu, move || unsafe { paging::write_cr3(new) });
+    }
+    // every CPU and thread is on the new tables now: nothing uses the old memory
+    let frames: usize = regions.into_iter().map(pmm::release_region).sum();
+    frames as u64 * PAGE_SIZE
+}
+
 /// Reads the HHDM offset from Limine, sets up the frame allocator and the kernel heap.
 pub fn init() {
     let hhdm = crate::boot::HHDM.response().expect("Limine provided no HHDM response");

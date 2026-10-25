@@ -202,6 +202,51 @@ pub fn init() {
     unsafe { write_cr3(root) }; // flush cached translations
 }
 
+/// Builds a new kernel PML4 in which every page table that lies in memory
+/// for which `moving(frame)` is true is replaced by a copy in a fresh frame
+/// (the mappings stay exactly the same). Tables elsewhere are kept and only
+/// get their entries pointed at the copies of their children - that is safe
+/// while they are live, because old and new children map the same thing.
+/// Used to get the kernel off the bootloader's page tables.
+pub fn copy_kernel_tables(moving: &dyn Fn(PhysAddr) -> bool) -> Result<PhysAddr, MapError> {
+    fn copy(
+        table: PhysAddr,
+        level: usize,
+        force: bool,
+        moving: &dyn Fn(PhysAddr) -> bool,
+    ) -> Result<PhysAddr, MapError> {
+        let target = if force || moving(table) {
+            let frame = alloc_frame_zeroed().ok_or(MapError::OutOfMemory)?;
+            table_at(frame).entries = table_at(table).entries;
+            frame
+        } else {
+            table
+        };
+        if level < 3 {
+            for i in 0..512 {
+                let entry = table_at(target).entries[i];
+                if !entry.is_present() || (level > 0 && entry.is_huge()) {
+                    continue;
+                }
+                let child = copy(entry.addr(), level + 1, false, moving)?;
+                if child != entry.addr() {
+                    table_at(target).entries[i] = Entry::new(child, entry.flags());
+                }
+            }
+        }
+        Ok(target)
+    }
+    without_interrupts(|| {
+        let _guard = PAGING_LOCK.lock();
+        copy(kernel_root(), 0, true, moving)
+    })
+}
+
+/// Makes `root` the kernel's PML4 (it must map exactly what the old one maps).
+pub fn set_kernel_root(root: PhysAddr) {
+    KERNEL_ROOT.store(root.0, Ordering::Relaxed);
+}
+
 /// Copies the kernel half of the kernel PML4 into the (zeroed) table at `root`.
 pub fn share_kernel_half(root: PhysAddr) {
     let src = table_at(kernel_root());

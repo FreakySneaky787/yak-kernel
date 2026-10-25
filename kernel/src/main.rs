@@ -20,6 +20,8 @@ const INIT: &str = "/bin/sh";
 
 /// Runs on the guarded kernel stack.
 extern "C" fn kernel_main() -> ! {
+    // Limine's stack, page tables and responses are no longer needed
+    let reclaimed = kernel::mem::reclaim_bootloader_memory();
     let mem = pmm::stats();
     let heap = heap::stats();
     println!(
@@ -33,7 +35,10 @@ extern "C" fn kernel_main() -> ! {
         kernel::drivers::keyboard::layout(),
         kernel::time::uptime_ms()
     );
-    println!("Type 'help' for a list of commands.\n");
+    println!(
+        "Reclaimed {} KiB of bootloader memory. Type 'help' for a list of commands.\n",
+        reclaimed / 1024
+    );
     // The first user process is the shell; the kernel shell is the fallback
     match kernel::process::run_init(INIT) {
         Ok(status) => println!("\n{} {} - falling back to the kernel shell", INIT, status),

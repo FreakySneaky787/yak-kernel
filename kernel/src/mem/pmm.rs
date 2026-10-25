@@ -12,7 +12,7 @@
 use super::{PAGE_SIZE, PhysAddr, align_down, align_up};
 use crate::arch::x86_64::without_interrupts;
 use core::sync::atomic::{AtomicU64, Ordering};
-use limine::memmap::MEMMAP_USABLE;
+use limine::memmap::{MEMMAP_BOOTLOADER_RECLAIMABLE, MEMMAP_USABLE};
 use spin::Mutex;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -148,6 +148,27 @@ impl FrameBitmap {
         self.free_frames
     }
 
+    /// Marks every used frame fully inside `region` as free and usable
+    /// (memory that becomes available later, e.g. the bootloader's).
+    /// Returns how many frames were added.
+    pub fn release_region(&mut self, region: Region) -> usize {
+        let start = align_up(region.base, PAGE_SIZE) / PAGE_SIZE;
+        let end = align_down(region.base + region.length, PAGE_SIZE) / PAGE_SIZE;
+        let mut added = 0;
+        for frame in start.max(1)..end.min(self.frame_count as u64) {
+            if self.is_used(frame as usize) {
+                self.set_free(frame as usize);
+                self.free_frames += 1;
+                self.usable_frames += 1;
+                added += 1;
+            }
+        }
+        if start / 64 < self.next_word as u64 {
+            self.next_word = (start / 64) as usize;
+        }
+        added
+    }
+
     /// Frames that were usable at boot (including the ones holding the bitmap).
     pub fn usable_frames(&self) -> usize {
         self.usable_frames
@@ -164,16 +185,26 @@ pub(super) fn init() {
     let mut usable = [Region { base: 0, length: 0 }; 64];
     let mut count = 0;
     let mut highest = 0;
+    let mut copy = BOOT_MEMMAP.lock();
     for entry in memmap.entries() {
+        if copy.1 < copy.0.len() {
+            let i = copy.1;
+            copy.0[i] = (entry.base, entry.length, entry.type_);
+            copy.1 += 1;
+        }
+        // the bitmap also covers bootloader memory, so it can be added later
+        if entry.type_ == MEMMAP_USABLE || entry.type_ == MEMMAP_BOOTLOADER_RECLAIMABLE {
+            highest = highest.max(entry.base + entry.length);
+        }
         if entry.type_ == MEMMAP_USABLE && count < usable.len() {
             usable[count] = Region {
                 base: entry.base,
                 length: entry.length,
             };
             count += 1;
-            highest = highest.max(entry.base + entry.length);
         }
     }
+    drop(copy);
     let usable = &usable[..count];
     let frame_count = (align_up(highest, PAGE_SIZE) / PAGE_SIZE) as usize;
     let bitmap_bytes = align_up(FrameBitmap::words_needed(frame_count) as u64 * 8, PAGE_SIZE);
@@ -213,6 +244,29 @@ pub fn frames_lost(f: impl Fn()) -> usize {
         }
     }
     lost
+}
+
+/// A copy of the bootloader's memory map (base, length, type), taken at
+/// boot: the original lives in bootloader memory, which may be reclaimed.
+static BOOT_MEMMAP: Mutex<([(u64, u64, u64); 64], usize)> = Mutex::new(([(0, 0, 0); 64], 0));
+
+pub fn boot_memmap() -> alloc::vec::Vec<(u64, u64, u64)> {
+    let copy = BOOT_MEMMAP.lock();
+    copy.0[..copy.1].to_vec()
+}
+
+/// The regions the bootloader may still use until we reclaim them.
+pub fn bootloader_regions() -> alloc::vec::Vec<Region> {
+    boot_memmap()
+        .into_iter()
+        .filter(|&(_, _, t)| t == MEMMAP_BOOTLOADER_RECLAIMABLE)
+        .map(|(base, length, _)| Region { base, length })
+        .collect()
+}
+
+/// Hands `region` to the allocator; returns the number of frames added.
+pub fn release_region(region: Region) -> usize {
+    with_pmm(|p| p.release_region(region))
 }
 
 /// The frame below 1 MiB reserved at boot (for the SMP trampoline), if any.

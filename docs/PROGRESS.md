@@ -58,7 +58,7 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 | 30 | DHCP and a DNS client; HTTP client (`wget`) and server (`httpd`) | ✅ | DHCP packet test, `card_is_configured` checks the DHCP lease, `host --selftest` (7 DNS checks), httpd + wget over loopback (200/404), E2E: fake DNS on the host, wget from a host HTTP server, the host fetches from httpd via hostfwd |
 | 31 | Shell: scripts, environment variables, `2>`, background jobs (`&`, `jobs`, `wait`) | ✅ | scripted sh session (expansion, inheritance, `$?`, `2>`, job + `wait`, `#!` script) and a `set -e` script in the integration test, 8 E2E steps |
 | 32 | Storage speed: sector cache for FAT32, AHCI completion interrupts (MSI) | ✅ | BlockCache unit test (hits, runs, write-through, eviction), lookup-cache invalidation test, MSI test (≥ 1 interrupt per command), benchmark line in the integration test; suite green with 1 and 4 CPUs |
-| 33 | Memory: reclaim bootloader memory, demand paging for user heaps | ⬜ | |
+| 33 | Memory: reclaim bootloader memory, demand paging for user heaps | ✅ | `tests/reclaim.rs` (≥ 1 MiB gained, former bootloader frames are handed out and survive being overwritten, threads + a program afterwards), demand-paging unit test (32 MiB heap, 3 touched pages, < 100 frames), existing brk/heaptest checks; suite green with 1 and 4 CPUs |
 
 ## Log
 - **2026-10-24** – Setup: Rust nightly 1.101 (rustup), target `x86_64-unknown-none`, Limine v11.x-binary.
@@ -256,14 +256,20 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   waiting thread blocks on `Wait::Disk` instead of spinning (single commands get slower, ~2×, but the CPU is free);
   polling remains for early boot. Bug #7 (an idle CPU only noticed threads woken by its own interrupts at the next tick)
   found with `KERNEL_SMP=1` and fixed (`task::preempt_idle` at the end of waking interrupt handlers).
+- **2026-10-25** – M33: `mem::reclaim_bootloader_memory` (first thing in `kernel_main`, on our own stack): copies every page
+  table that lives in bootloader memory (`paging::copy_kernel_tables`, the mappings stay identical), points every thread
+  (`task::retarget_cr3`) and every CPU (`smp::run_on` + CR3 reload) at the new PML4, then frees the regions
+  (`pmm::release_region`; the bitmap now covers them from the start). The memory map is copied at boot (`pmm::boot_memmap`)
+  because Limine's lives in that memory. QEMU with 256 MiB: ~11.7 MiB gained. Demand paging: `brk` only moves the heap
+  end; a not-present user fault inside the heap maps a zeroed page and retries (`process::handle_page_fault`), syscalls
+  populate heap pages before checking user buffers. **Stage 6 is complete.**
 
 ## Open items / later
 - Thread-level sleeping mutex (today all shared state uses spin locks with interrupts disabled).
 - `ps` CPU percentages only cover threads that still exist (dead threads are reaped with their counters).
-- Reclaim `BOOTLOADER_RECLAIMABLE` memory once we no longer use Limine's stack, page tables and responses.
 - Shell lines longer than one console row are not handled by the line editor (input is capped at 120 characters).
 - `gcc` is installed now → `make limine-tool` (bios-install for USB/HDD images) could be used (not tried yet).
-- User space: no AVX (XSAVE not enabled, AVX instructions kill the program), no SMAP/SMEP, heap is mapped eagerly (no demand paging),
+- User space: no AVX (XSAVE not enabled, AVX instructions kill the program), no SMAP/SMEP, only the heap is demand-paged (stack and image are mapped eagerly),
   only a single CPU, no signals beyond "kill", no pipes (a child always writes to its parent's output).
 - Network: no fragmentation, no TCP window scaling/SACK/persist timer, DHCP lease not renewed, DNS only A records;
   polled driver (10 ms latency).
@@ -274,8 +280,6 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   write, append, echo, sleep, clear, help. Without `/bin` on the disk, the kernel shell has no `ls`/`cat`.
 
 ## Next step
-**M33 – memory:** reclaim `BOOTLOADER_RECLAIMABLE` memory once nothing of Limine is used any more (its stack is left in
-`kmain`, but the page tables are still Limine's and the responses are read at boot – copy what is needed first, or keep
-the page-table frames reserved), and demand paging for user heaps (`brk` only reserves the range; the page-fault handler
-maps a zeroed page on the first touch, the kill path stays for real faults). Tests: free memory grows after the reclaim,
-a program that grows its heap by 32 MiB but touches only a few pages uses only a few frames.
+Stage 6 (M28–M33) is done. Agree on stage 7 with the user before starting – candidates from "Open items": signals
+(`kill -TERM`, handlers), `if`/`while` in `/bin/sh`, a sleeping mutex, XSAVE/AVX, SMAP/SMEP, TCP window scaling,
+multi-threaded user processes.

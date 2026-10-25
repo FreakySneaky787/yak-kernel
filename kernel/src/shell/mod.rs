@@ -19,7 +19,7 @@ use crate::drivers::scancode::Layout;
 use crate::fs::{self, fat32::FsError};
 use crate::mem::{heap, pmm};
 use crate::process::{self, ExitStatus};
-use crate::{boot, input, task, time};
+use crate::{input, task, time};
 use alloc::format;
 use alloc::string::String;
 use alloc::sync::Arc;
@@ -471,15 +471,15 @@ fn memmap_type_name(t: u64) -> &'static str {
 }
 
 fn cmd_memmap(_: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), String> {
-    let memmap = boot::MEMMAP.response().ok_or("no memory map from the bootloader")?;
-    for e in memmap.entries() {
+    // a copy: the bootloader's own map lives in memory that is reclaimed after boot
+    for (base, length, type_) in pmm::boot_memmap() {
         writeln!(
             out,
             "  {:#014x} - {:#014x}  {:>9} KiB  {}",
-            e.base,
-            e.base + e.length,
-            e.length / 1024,
-            memmap_type_name(e.type_)
+            base,
+            base + length,
+            length / 1024,
+            memmap_type_name(type_)
         )
         .ok();
     }

@@ -22,7 +22,12 @@
 ## Physical memory
 - `mem::pmm` is a bitmap allocator: one bit per 4 KiB frame (1 = used), covering physical memory up to the end of the highest usable region.
 - The bitmap lives in the first usable region big enough for it and is reserved in itself. Frame 0 is never handed out.
-- Only `USABLE` memory is managed for now. `BOOTLOADER_RECLAIMABLE` still holds Limine's stack/page tables/responses.
+- The bitmap covers `USABLE` and `BOOTLOADER_RECLAIMABLE` memory; the latter starts as used (it holds Limine's stack, page
+  tables and responses) and is handed over by `mem::reclaim_bootloader_memory` (M33) at the start of `kernel_main`:
+  page tables living there are copied (`paging::copy_kernel_tables` – tables elsewhere are kept and only repointed), every
+  thread's saved CR3 and every CPU's CR3 move to the new PML4, then `pmm::release_region` frees the frames. Limine
+  responses must not be read afterwards – `pmm::init` keeps a copy of the memory map (`pmm::boot_memmap`).
+  Test kernels other than `tests/reclaim.rs` do not reclaim (they still run on Limine's stack).
 - All access to physical memory goes through the HHDM (`PhysAddr::to_virt`). Allocator calls run with interrupts disabled.
 - `free_frame` panics on double free / invalid addresses – that is always a kernel bug.
 
@@ -145,7 +150,7 @@
   | 11 | `getcwd(buf, len)` | `-ERANGE` if too small |
   | 12 | `unlink(path, len)` | files and empty directories |
   | 13 | `mkdir(path, len)` | |
-  | 14 | `brk(new_end)` | 0 = query; maps zeroed RW/NX pages when growing, frees them when shrinking; `-ENOMEM` outside the range |
+  | 14 | `brk(new_end)` | 0 = query; growing only moves the end (pages come on first touch), shrinking frees used pages; `-ENOMEM` outside the range |
   | 15 | `spawn(path, len, args, args_len)` | 4th argument in R10; child inherits cwd and output; `-ENOENT`, `-ENOEXEC`, `-E2BIG` |
   | 16 | `wait(pid, *WaitStatus)` | children only (`-ECHILD`); 128-byte status: kind (1 exited, 2 killed), code, kill reason |
   | 17 | `kill(pid)` | children only (`-ESRCH`) |
@@ -210,8 +215,11 @@
   linked by GNU ld at `0x40_0000` (`user/linker.ld`). `make user` copies them to `build/user/bin`; `scripts/mkdisk.sh`
   and (for the persistent disk) `run-qemu.sh` install them into `/bin` via `scripts/install-user.sh`.
 - **User heap** (`ulib::heap`): first-fit allocator, free list sorted by address with coalescing, 16-byte units, grows the
-  break by ≥ 64 KiB at a time. No lock (programs are single-threaded). `sys_brk` takes the `AddressSpace` out of the process
-  table while it maps/unmaps, so zeroing megabytes does not run with the table lock held (interrupts off).
+  break by ≥ 64 KiB at a time. No lock (programs are single-threaded).
+- **Demand paging** (M33): the heap `[heap_start, align_up(heap_end))` is only a reserved range. A user page fault with the
+  present bit clear inside it maps one zeroed RW/NX page (`process::handle_page_fault`, called first in the page-fault
+  handler) and returns, so the instruction is retried; any other fault, or no free frame, kills the program as before.
+  Syscalls call `Process::populate_heap` for user buffers before `is_accessible`, so the kernel never faults on them.
 - **Environment** (M31): `Process::env` (BTreeMap), copied into children by `spawn`; syscalls `setenv`/`getenv`/`environ`.
   `/bin/sh` keeps no variables of its own – shell variables *are* environment variables.
 - **Shell**: a word that is not a built-in is a program path or a name in `/bin`; `run <path> [args]` does the same explicitly.

@@ -212,6 +212,43 @@ impl Process {
     pub fn set_ignore_interrupt(&mut self, on: bool) {
         self.ignore_interrupt = on;
     }
+
+    /// Whether `addr` lies in the heap (below the end rounded up to a page).
+    fn in_heap(&self, addr: u64) -> bool {
+        addr >= self.heap_start && addr < crate::mem::align_up(self.heap_end, PAGE_SIZE)
+    }
+
+    /// Maps zeroed pages for every not yet used heap page in
+    /// `[addr, addr + len)` (demand paging). False if memory ran out.
+    pub fn populate_heap(&mut self, addr: u64, len: u64) -> bool {
+        let Some(end) = addr.checked_add(len) else { return true };
+        let mut page = align_down(addr, PAGE_SIZE);
+        while page < end {
+            if self.in_heap(page) {
+                let Some(space) = self.space.as_mut() else { return false };
+                if space.page_flags(VirtAddr(page)).is_none()
+                    && space
+                        .page_frame(VirtAddr(page), Flags::WRITABLE | Flags::NO_EXECUTE)
+                        .is_err()
+                {
+                    return false;
+                }
+            }
+            page += PAGE_SIZE;
+        }
+        true
+    }
+}
+
+/// Page fault in user mode: a not-present page inside the heap gets a fresh
+/// zeroed page and the instruction is retried. Returns false for every
+/// other fault (the caller kills the process). Runs in the exception handler.
+pub fn handle_page_fault(addr: u64, error_code: u64) -> bool {
+    const PRESENT: u64 = 1;
+    if error_code & PRESENT != 0 {
+        return false; // a protection violation, not a missing page
+    }
+    with_current(|p| p.in_heap(addr) && p.populate_heap(addr, 1)).unwrap_or(false)
 }
 
 /// How to start a process (see `spawn_with`).
@@ -825,6 +862,36 @@ mod tests {
         assert!(!interrupt_foreground());
         assert!(kill(pid));
         assert_eq!(wait(pid), Some(ExitStatus::Killed(String::from("killed"))));
+    }
+
+    #[test_case]
+    fn heap_pages_are_mapped_on_first_use() {
+        // brk(start + 32 MiB), touch three bytes, sleep 300 ms (we measure meanwhile), exit
+        let code = [
+            &heap_start_to_rbx()[..],
+            &[0x48, 0x8D, 0xBB, 0x00, 0x00, 0x00, 0x02], // lea rdi, [rbx + 0x2000000]
+            &mov_eax(syscall::nr::BRK),
+            &SYSCALL,
+            &[0xC6, 0x03, 1],                         // mov byte [rbx], 1
+            &[0xC6, 0x83, 0x00, 0x00, 0x00, 0x01, 1], // mov byte [rbx + 0x1000000], 1
+            &[0xC6, 0x83, 0xFF, 0xFF, 0xFF, 0x01, 1], // mov byte [rbx + 0x1FFFFFF], 1
+            &mov_eax(syscall::nr::SLEEP_MS),
+            &mov_edi(300),
+            &SYSCALL,
+            &mov_eax(syscall::nr::EXIT),
+            &[0x31, 0xFF],
+            &SYSCALL,
+        ]
+        .concat();
+        let elf = elf::build_test_elf(&code, 64);
+        let free = || crate::mem::pmm::stats().free_frames;
+        let before = free();
+        let pid = spawn("demand", &elf, "", Output::Console).unwrap();
+        time::sleep_ms(150); // the program is asleep now
+        let used = before.saturating_sub(free());
+        assert_eq!(wait(pid), Some(ExitStatus::Exited(0)));
+        // stack + image + page tables + 3 heap pages, nowhere near 8192 heap pages
+        assert!(used < 100, "a 32 MiB heap with 3 touched pages used {} frames", used);
     }
 
     #[test_case]
