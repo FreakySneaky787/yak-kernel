@@ -17,7 +17,7 @@
 //!
 //! Keywords count only at the start of a command (`echo fi` prints "fi").
 //! `;`, newlines and `#` comments work anywhere outside quotes; `&`, `&&`,
-//! `||` and `|` must be separate words.
+//! `||` and `|` must be separate words. `$((...))` is always one word.
 
 use alloc::rc::Rc;
 use alloc::string::String;
@@ -114,6 +114,32 @@ pub fn tokenize(text: &str) -> Result<Vec<Token>, SyntaxError> {
                         }
                         Some(&other) => word.push(other),
                     }
+                }
+            }
+            '$' if chars.get(i + 1) == Some(&'(') && chars.get(i + 2) == Some(&'(') => {
+                // `$((...))` is one word, spaces and operators included
+                let mut depth = 0;
+                in_word = true;
+                word.push_str("$((");
+                i += 3;
+                loop {
+                    match chars.get(i) {
+                        None => return Err(SyntaxError::Incomplete),
+                        Some(')') if depth == 0 && chars.get(i + 1) == Some(&')') => {
+                            word.push_str("))");
+                            i += 1;
+                            break;
+                        }
+                        Some(&p) => {
+                            match p {
+                                '(' => depth += 1,
+                                ')' => depth -= 1,
+                                _ => {}
+                            }
+                            word.push(p);
+                        }
+                    }
+                    i += 1;
                 }
             }
             _ => {

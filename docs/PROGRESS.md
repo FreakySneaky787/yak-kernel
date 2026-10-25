@@ -64,7 +64,7 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 | # | Milestone | Status | Tests |
 |---|---|---|---|
 | 34 | Signals: handlers in user space, `kill -SIG`, Ctrl+C as SIGINT, interrupted blocking calls | ✅ | 2 signal unit tests (dispositions, pending order, blocking during a handler, reasons ↔ numbers), `sigtest` (23 checks incl. all GPRs + XMM0–15 kept when a handler interrupts a loop without syscalls, EINTR from sleep, no nesting, SIG_IGN inherited), sh `kill` session, E2E: Ctrl+C caught by a handler, `kill -USR1 %1` |
-| 35 | Shell programming: `if`/`while`/`until`/`for`, functions, `&&`/`\|\|`, `;`, `test`, `$((...))`, `read`, multi-line input, Ctrl+C stops loops | ⬜ | |
+| 35 | Shell programming: `if`/`while`/`until`/`for`, functions, `&&`/`\|\|`, `;`, `test`, `$((...))`, `read`, wildcards, multi-line input, Ctrl+C stops loops | ✅ | `/m35.sh` in the integration test (39 output lines compared exactly: all constructs, break/continue n, functions + recursion, read from pipes and files, globbing, `set -e`), interactive session (continuation prompt, syntax error, exit in a function), stack growth unit test, 6 E2E steps incl. Ctrl+C ending a loop |
 | 36 | Threads in user processes (spawn/join, futex-style wait/wake) and a sleeping mutex in the kernel | ⬜ | |
 | 37 | CPU protection and AVX: SMEP/SMAP, XSAVE with AVX state per thread | ⬜ | |
 | 38 | Network polish: e1000 interrupts (MSI), TCP window scaling, DHCP lease renewal | ⬜ | |
@@ -280,21 +280,32 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   handler); `sleep` is interruptible; `$?` of a signalled child is 128 + signal; sh built-in `kill [-SIG] pid|%job`, `kill -l`.
   Bug #8 (MSI test assumed one interrupt per command – MSIs coalesce in the APIC) found while running with 2 CPUs.
 
+- **2026-10-25** – M35: `/bin/sh` became a small POSIX-like language: tokenizer + recursive-descent parser
+  (`syntax.rs`) into lists / and-or / pipelines / compound commands / functions, executed with a `Flow` result;
+  `$((...))` (`arith.rs`), `test`/`[` (`testcmd.rs`), `read`, `shift`, `:`, wildcards (`glob.rs`), continuation prompt,
+  compound commands with redirections and in pipelines (`cat f | while read l; do ...; done`), background compound
+  commands via `sh -c`. Ctrl+C stops loops (SIGINT handler + children killed by SIGINT). Kernel: file offsets are now shared
+  between `dup`-ed descriptors (the shell's fd save/restore re-read the same line forever otherwise), user stacks grow on
+  demand up to 1 MiB (4 pages mapped at start). Bug #9 (`run_on` priority inversion between idle thread and waiter) fixed.
+
 ## Open items / later
 - Thread-level sleeping mutex (today all shared state uses spin locks with interrupts disabled).
 - `ps` CPU percentages only cover threads that still exist (dead threads are reaped with their counters).
 - Shell lines longer than one console row are not handled by the line editor (input is capped at 120 characters).
 - `gcc` is installed now → `make limine-tool` (bios-install for USB/HDD images) could be used (not tried yet).
-- User space: no AVX (XSAVE not enabled, AVX instructions kill the program), no SMAP/SMEP, only the heap is demand-paged (stack and image are mapped eagerly),
-  only a single CPU, no signals beyond "kill", no pipes (a child always writes to its parent's output).
+- User space: no AVX (XSAVE not enabled, AVX instructions kill the program), no SMAP/SMEP, the image is mapped eagerly
+  (heap and stack on demand), one thread per process, no SIGCHLD/SIGSTOP/alarm, no signal masks.
 - Network: no fragmentation, no TCP window scaling/SACK/persist timer, DHCP lease not renewed, DNS only A records;
   polled driver (10 ms latency).
-- `kshell`/`kcommands` are a bridge for the remaining kernel commands. `/bin/sh`: no `if`/`while`/functions, operators must be
-  separate words, built-in output in a pipeline must fit into one pipe (64 KiB), background jobs share the keyboard with the shell.
+- `kshell`/`kcommands` are a bridge for the remaining kernel commands. `/bin/sh`: no `$(...)` command substitution, `case`,
+  `local`, here-documents or `"$@"`; `&&`/`||`/`|`/`&` must be separate words; functions are not inherited by `sh -c`
+  background shells; in-shell stages of a pipeline (built-ins, functions, loops) must fit their output into one pipe
+  (64 KiB); background jobs share the keyboard with the shell.
 - File syscalls: `read`/`write_at` re-walk the cluster chain per call; directory handles are snapshots; no truncate-to-length.
 - Still behind `kshell`: cpu, acpi, lspci, disk, hexdump, memmap, layout, demo, colors, version, int3, panic, reboot, poweroff,
   write, append, echo, sleep, clear, help. Without `/bin` on the disk, the kernel shell has no `ls`/`cat`.
 
 ## Next step
-**M35 – shell programming** (stage 7, M34–M38, see the table). Before that: one hang of
-`smp::tests::jobs_for_every_cpu_from_every_cpu` was seen with `KERNEL_SMP=2` (not reproduced in 40 runs yet).
+**M36 – threads in user processes** (stage 7, M34–M38, see the table): `thread_spawn(entry, stack, arg)` /
+`thread_join`, futex-style `wait(addr, expected)` / `wake(addr, n)`, process exit kills all its threads, signals go to
+the main thread; plus a sleeping mutex in the kernel (blocks instead of spinning).

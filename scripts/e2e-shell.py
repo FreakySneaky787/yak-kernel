@@ -208,7 +208,7 @@ STEPS = [
     ("date\r", ["20"], []),
     ("cat /nope\r", ["no such file or directory"], []),
     ("does-not-exist\r", ["unknown command 'does-not-exist'"], []),
-    ('echo "unterminated\r', ["unterminated"], []),
+    ('echo "unterminated\rstill open"\r', ["> still open", "unterminated\r\nstill open"], ["error"]),  # the quote continues
     ("echo Grüße äöü\r", ["Grüße äöü"], []),
     # user space: programs from /bin on the disk, running in ring 3
     ("ls /bin\r", ["hello", "fault", "upper", "cat", "cp", "ls", "fstest", "sh"], []),
@@ -258,6 +258,12 @@ STEPS = [
     ("echo hello $WHO, status $?\r", ["hello world, status 0"], ["error"]),
     ("env WHO\r", ["world"], ["error"]),
     ("ls /nothing 2>&1 | wc\r", ["      1       7"], []),  # "ls: /nothing: no such file or directory"
+    # M35: shell programming
+    ("for i in 1 2\rdo echo round $i\rdone\r", ["> do echo round", "round 1\r\nround 2"], ["error"]),
+    ("n=0; while true; do n=$((n + 1)); sleep 20; done\r" + PAUSE + CTRL_C, [], ["error"]),  # Ctrl+C ends the loop
+    ("echo stopped after $n rounds\r", ["stopped after"], ["stopped after 0 rounds"]),
+    ("count() { echo \"$# args: $1\"; return 4; }; count a b || echo returned $?\r", ["2 args: a", "returned 4"], ["error"]),
+    ("for f in /docs/*.txt; do [ -f $f ] && echo file $f; done\r", ["file /docs/hello.txt"], ["error"]),
     ("hello job &\r", ["[2] "], ["error"]),
     ("wait\r", ["[2] Done     hello job"], ["error"]),
     ("write /s.sh 'echo from a script: $1'\r", [], ["error"]),  # quoted: the interactive shell must not expand it

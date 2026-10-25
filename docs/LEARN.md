@@ -324,6 +324,14 @@ Short explanations of every subsystem: what it is and why we need it.
 - Signals are why a shell can stop its own loop on Ctrl+C, and why `kill -TERM` lets a program clean up first, while
   `kill -KILL` cannot be caught.
 
+## M35 – A shell that is a programming language
+- Until now every line was one command. A real shell first **parses** the text into a tree: lists of commands, `&&`/`||`
+  chains, pipelines, and compound commands like `if`, `while` and `for` that contain lists themselves. Only when a command
+  is about to run are its words **expanded** (`$x`, `$((1 + 2))`, `*.txt`), so a loop sees the new value of `$i` each round.
+- `break`, `continue`, `return` and `exit` travel up the tree as a small "flow" value until the loop, function or shell
+  that handles them.
+- When a line is not finished (an open quote, an `if` without `fi`), the shell asks for more with the prompt `> `.
+
 ## Tooling – GNU ld and binutils
 - rustc compiles our code into object files; a **linker** combines them into the final ELF according to `kernel/linker.ld`
   (load address, section order, segments). We use **GNU ld** (`ld.bfd`) for that.

@@ -19,8 +19,10 @@ use crate::mem::address_space::USER_END;
 use crate::net::{self, NetError, tcp};
 use crate::{input, task, time};
 use alloc::string::String;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::mem::size_of;
+use core::sync::atomic::{AtomicU64, Ordering};
 
 pub mod nr {
     /// exit(code) -> never returns
@@ -332,8 +334,8 @@ pub extern "C" fn dispatch(frame: &mut SyscallFrame) {
 /// Whether the current process may access `[addr, addr + len)`.
 fn accessible(addr: u64, len: u64, writable: bool) -> bool {
     with_current(|p| {
-        // heap pages the program has not touched yet are mapped now (demand paging)
-        if !p.populate_heap(addr, len) {
+        // heap/stack pages the program has not touched yet are mapped now (demand paging)
+        if !p.populate(addr, len) {
             return false;
         }
         p.space.as_ref().is_some_and(|s| s.is_accessible(addr, len, writable))
@@ -414,7 +416,7 @@ fn target(fd: u64) -> Result<Target, i64> {
                 append,
             } => Target::File {
                 path: path.clone(),
-                offset: *offset,
+                offset: offset.load(Ordering::Relaxed),
                 readable: *readable,
                 writable: *writable,
                 append: *append,
@@ -449,8 +451,8 @@ fn sys_write(fd: u64, buf: u64, len: u64) -> SysResult {
 
 fn set_offset(fd: u64, new: u64) {
     with_current(|p| {
-        if let Some(Some(Handle::File { offset, .. })) = p.files.get_mut(fd as usize) {
-            *offset = new;
+        if let Some(Some(Handle::File { offset, .. })) = p.files.get(fd as usize) {
+            offset.store(new, Ordering::Relaxed);
         }
     });
 }
@@ -624,7 +626,7 @@ fn sys_open(path: u64, path_len: u64, flags: u64) -> SysResult {
             }
             Ok(Handle::File {
                 path: path.clone(),
-                offset: 0,
+                offset: Arc::new(AtomicU64::new(0)),
                 readable: read,
                 writable: write,
                 append: flags & APPEND != 0,

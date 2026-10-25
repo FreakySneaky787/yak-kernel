@@ -77,6 +77,19 @@ Format: number · date · title, then symptom → cause → fix → test.
 - **Remember:** interrupts with the same vector coalesce while pending – never count interrupts to count events; the
   handler must look at the device's status registers (ours does).
 
+### #9 · 2026-10-25 · `run_on` test hung once with 2 CPUs
+- **Symptom:** `smp::tests::jobs_for_every_cpu_from_every_cpu` hung once in `KERNEL_SMP=2 make test` (not again in 160
+  hunted runs).
+- **Cause (by analysis):** a priority inversion. The idle thread ran jobs with interrupts *enabled*, so it could be
+  preempted while the job held the result lock (`*slot.lock() = ...`). An idle thread only runs when nothing else is
+  ready – but the thread waiting for the result spun on that very lock, stayed ready and occupied the CPU forever. The
+  waiter could likewise be preempted holding the lock while the job spun on it.
+- **Fix:** jobs run with interrupts disabled; the waiter takes the result lock with interrupts disabled too. A spin lock
+  that an idle thread shares with normal threads must never be held across a preemption point.
+- **Test:** `jobs_for_every_cpu_from_every_cpu` with `KERNEL_SMP=2` and `4` (rare – the race needs a timer tick inside
+  a few instructions).
+- **Remember:** idle threads have the lowest priority by construction; anything they hold can starve.
+
 ## Known pitfalls (not bugs, but worth remembering)
 - **The Limine host utility (`limine bios-install`) needs a C compiler** (`gcc`). It is not required for booting the ISO
   in QEMU with `-cdrom`; it is only needed to make the ISO bootable as a hard disk / USB image.

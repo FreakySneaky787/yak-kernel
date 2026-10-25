@@ -53,10 +53,10 @@ extern "C" fn kmain() -> ! {
         "protection violation, read, user mode"
     ));
     assert!(killed_by(&run("fault", "cli").0, "general protection fault"));
-    // the stack overflow runs into the unmapped area below the user stack
+    // the stack overflow grows the stack to its limit and runs into the unmapped area below
     let below_stack = alloc::format!(
         "page fault at {:#x}",
-        process::USER_STACK_TOP - process::USER_STACK_PAGES as u64 * 4096 - 8
+        process::USER_STACK_TOP - process::USER_STACK_MAX - 8
     );
     let (status, _) = run("fault", "stack");
     assert!(
@@ -322,6 +322,24 @@ extern "C" fn kmain() -> ! {
     assert!(out.contains("killed: user signal 1"), "{}", out);
     assert!(out.contains("kill: unknown signal 'NOPE'"), "{}", out);
 
+    // M35: shell programming (control flow, functions, $((...)), read, set -e)
+    fs::with_root(|fs| fs.write_file("/m35.sh", SCRIPT_M35.as_bytes())).unwrap();
+    let (status, out) = run("sh", "/m35.sh");
+    assert_eq!(
+        status,
+        ExitStatus::Exited(1),
+        "set -e ends the script at 'false': {}",
+        out
+    );
+    assert_eq!(out, EXPECTED_M35);
+    // multi-line input at the prompt, syntax errors, an exit inside a function
+    kernel::serial::inject_rx(b"for i in 1 2\rdo echo n$i\rdone\rfi\recho $((2 * 21))\rbye() { exit 5; }\rbye\r");
+    let (status, out) = run("sh", "");
+    assert_eq!(status, ExitStatus::Exited(5), "{}", out);
+    for expected in ["\n> do echo n$i\n> done\nn1\nn2\n", "syntax error near 'fi'", "\n42\n"] {
+        assert!(out.contains(expected), "missing {:?} in:\n{}", expected, out);
+    }
+
     // M32: disk speed (informational: prints the time; checks the result)
     let data: Vec<u8> = (0..300_000u32).map(|i| b"abcdefghij\n"[(i % 11) as usize]).collect();
     fs::with_root(|fs| fs.write_file("/bench.txt", &data)).unwrap();
@@ -354,3 +372,92 @@ extern "C" fn kmain() -> ! {
 fn panic(info: &core::panic::PanicInfo) -> ! {
     kernel::testing::test_panic_handler(info)
 }
+
+const SCRIPT_M35: &str = r#"#!/bin/sh
+# M35: control flow, functions, arithmetic
+x=3
+if [ $x -gt 2 ]; then echo big; elif [ $x -eq 2 ]; then echo two; else echo small; fi
+if test -d /docs && ! test -f /docs; then echo "docs is a directory"; fi
+i=0
+while [ $i -lt 5 ]; do
+  i=$((i + 1))
+  if [ $i -eq 2 ]; then continue; fi
+  if [ $i -eq 4 ]; then break; fi
+  echo "round $i"
+done
+until [ $i -eq 0 ]; do i=$((i - 1)); done; echo "down to $i"
+for f in apple "big banana" cherry; do echo "fruit: $f"; done
+greet() {
+  echo "hello $1 ($# args)"
+  return 3
+}
+greet world two
+echo "greet returned $?"
+sum() { echo $(( $1 + $2 * 2 )); }
+sum 1 4
+false || echo "or works"
+true && echo "and works"
+false && echo "not printed"
+echo a; echo b
+for n in 1 2 3; do echo "n$n"; done | sort -r
+echo "x y z" | { read a b; echo "a=$a b=$b"; }
+cat /docs/hello.txt | while read first rest; do echo "first word: $first"; done
+for a in 1 2; do for b in 1 2 3; do if [ $b -eq 2 ]; then continue 2; fi; echo "$a.$b"; done; done
+for a in 1 2; do for b in 1 2; do break 2; done; echo never; done; echo "after break 2"
+echo $((7 / 2)) $((7 % 3)) $((-(2 + 3) * 2)) $((1 < 2)) $((2 == 3 || 1))
+{ echo grouped; echo output; } > /grp.txt
+cat /grp.txt
+show() { shift; echo "rest: $1"; }
+show a b
+x=outer; change() { x=inner; }; change; echo "x is $x"
+deep() { if [ $1 -gt 0 ]; then deep $(($1 - 1)); else echo "bottom reached"; fi; }
+deep 20
+while read word; do echo "read: $word"; done < /grp.txt
+[ abc = abc ] && [ abc != abd ] && [ -n abc ] && [ -z "" ] && echo "tests ok"
+for f in /docs/*.txt /nothing/*; do echo "glob: $f"; done
+echo "*" \*
+set -e
+if false; then echo no; fi
+false || true
+echo "set -e spares conditions"
+false
+echo "not reached"
+"#;
+
+const EXPECTED_M35: &str = "big\n\
+docs is a directory\n\
+round 1\n\
+round 3\n\
+down to 0\n\
+fruit: apple\n\
+fruit: big banana\n\
+fruit: cherry\n\
+hello world (2 args)\n\
+greet returned 3\n\
+9\n\
+or works\n\
+and works\n\
+a\n\
+b\n\
+n3\n\
+n2\n\
+n1\n\
+a=x b=y z\n\
+first word: Hello\n\
+1.1\n\
+2.1\n\
+after break 2\n\
+3 1 -10 1 1\n\
+grouped\n\
+output\n\
+rest: b\n\
+x is inner\n\
+bottom reached\n\
+read: grouped\n\
+read: output\n\
+tests ok\n\
+glob: /docs/hello.txt\n\
+glob: /nothing/*\n\
+* *\n\
+set -e spares conditions\n\
+";

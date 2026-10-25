@@ -113,8 +113,9 @@
   HHDM, so loading never switches CR3. `Drop` frees every user frame and page table (`paging::free_user_half`); all user
   mappings own their frames. It must not be the active address space when dropped.
 - **User layout**: ELF segments between `USER_IMAGE_START` (64 KiB, null page area stays unmapped) and `USER_IMAGE_END`;
-  our programs link at `0x40_0000`. The heap starts at the first page after the image and is moved with `brk` (max 64 MiB). Stack: 16 pages below `USER_STACK_TOP = 0x7FFF_FFFF_0000`, nothing mapped below it
-  (overflow → page fault → process killed). The argument block is copied to the stack top; `_start` gets pointer and length
+  our programs link at `0x40_0000`. The heap starts at the first page after the image and is moved with `brk` (max 64 MiB). Stack: up to 1 MiB
+  (`USER_STACK_MAX`) below `USER_STACK_TOP = 0x7FFF_FFFF_0000`, the top 4 pages mapped at start, the rest on demand (M35);
+  nothing is mapped below it (overflow → page fault → process killed). The argument block is copied to the stack top; `_start` gets pointer and length
   in RDI/RSI. Arguments inside the block are separated by NUL bytes (`ulib::Args`); the shell joins its words that way.
 - **ELF loader** (`process::elf`): static `ET_EXEC` x86_64 only, `PT_LOAD` segments with R/W/X → USER, WRITABLE, NO_EXECUTE.
   Every header field is bounds-checked; segments outside the user image area or an entry point outside an X segment are refused.
@@ -215,10 +216,21 @@
   file), stdout = new pipe (or `>`/`>>` file), then the stage runs (built-in inline, program spawned); all children are waited
   for in order, only the last exit code is reported, kills always; an "interrupted" stage kills the rest. `read(0)` delivers keys as terminal bytes (VT100 sequences
   for arrows, Home/End, Delete, PageUp/Down, Insert); `keys::Decoder` turns them back into `KeyEvent`s. Order of lookup:
-  sh built-ins, kernel built-ins (`kshell`), program path / `/bin/<name>`.
+  sh built-ins, functions, kernel built-ins (`kshell`), program path / `$PATH`.
+- **sh grammar** (M35, `syntax.rs`): the text is tokenized into *raw* words (quotes kept, `$((...))` one word) and
+  separators, then parsed into `List` → `AndOr` → `Pipeline` → `Command` (simple / compound + redirections / function
+  definition). Words are expanded only when a command runs (`expand_words`: variables, arithmetic, wildcards, then the
+  kernel's `parser::split`), so loops see new values. Interactive input that parses as `Incomplete` (open quote,
+  missing `fi`/`done`/`}`) continues with the prompt `> `; scripts and `sh -c` are parsed as a whole first.
+  Execution returns a `Flow` (`Next`, `Exit`, `Break(n)`, `Continue(n)`, `Return`, `Interrupted`) up the call chain.
+  Compound commands and functions in a pipeline run inside the shell like built-ins. `set -e` is ignored inside
+  `if`/`while` conditions and for all but the last pipeline of `&&`/`||`. Ctrl+C: the shell's SIGINT handler (and a
+  child killed by SIGINT) sets `INTERRUPTED`, which every list and loop checks; at the prompt the line is cancelled.
+  Wildcards: the expander marks unquoted `*`/`?` with private-use characters, `glob.rs` matches them per path component.
 - **Files**: each process has a cwd (inherited from the spawner, paths are normalized against it) and up to 32 file descriptors
-  (`process::Handle`): 0 stdin, 1/2 the process's `Output`, then files (path + one offset for reads and writes; writes use
-  `FatFs::write_at`, or `append_file` with the APPEND flag)
+  (`process::Handle`): 0 stdin, 1/2 the process's `Output`, then files (path + one offset for reads and writes, shared
+  with `dup`-ed and inherited copies like a POSIX open file description – the shell's save/restore of fds 0-2 depends
+  on it; writes use `FatFs::write_at`, or `append_file` with the APPEND flag)
   and directories (snapshot of the entries at `open`). Handlers copy what they need out of the table, do the disk I/O
   without holding `PROCESSES` (only `fs::ROOT`), then update the descriptor. `read` of a file uses `FatFs::read_at`, ≤ 64 KiB per call.
   FS errors map to Linux errno values (`ENOENT`, `EISDIR`, ...).
@@ -231,10 +243,10 @@
   and (for the persistent disk) `run-qemu.sh` install them into `/bin` via `scripts/install-user.sh`.
 - **User heap** (`ulib::heap`): first-fit allocator, free list sorted by address with coalescing, 16-byte units, grows the
   break by ≥ 64 KiB at a time. No lock (programs are single-threaded).
-- **Demand paging** (M33): the heap `[heap_start, align_up(heap_end))` is only a reserved range. A user page fault with the
+- **Demand paging** (M33, stack since M35): the heap `[heap_start, align_up(heap_end))` and the stack area are only reserved ranges. A user page fault with the
   present bit clear inside it maps one zeroed RW/NX page (`process::handle_page_fault`, called first in the page-fault
   handler) and returns, so the instruction is retried; any other fault, or no free frame, kills the program as before.
-  Syscalls call `Process::populate_heap` for user buffers before `is_accessible`, so the kernel never faults on them.
+  Syscalls call `Process::populate` for user buffers before `is_accessible`, so the kernel never faults on them.
 - **Environment** (M31): `Process::env` (BTreeMap), copied into children by `spawn`; syscalls `setenv`/`getenv`/`environ`.
   `/bin/sh` keeps no variables of its own – shell variables *are* environment variables.
 - **Shell**: a word that is not a built-in is a program path or a name in `/bin`; `run <path> [args]` does the same explicitly.

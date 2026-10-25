@@ -10,8 +10,9 @@
 //! User memory layout:
 //! - `USER_IMAGE_START ..`: the ELF segments (our programs link at 0x40_0000)
 //! - right after the image: the heap, grown and shrunk with `brk` (max `HEAP_MAX`)
-//! - `USER_STACK_TOP - USER_STACK_PAGES * 4 KiB .. USER_STACK_TOP`: the stack,
-//!   with nothing mapped below it (an overflow faults and kills the process)
+//! - `USER_STACK_TOP - USER_STACK_MAX .. USER_STACK_TOP`: the stack. The top
+//!   `USER_STACK_PAGES` are mapped at start, the rest on first use (like the
+//!   heap); below it nothing is mapped (an overflow faults and kills the process)
 //! - the argument string sits at the top of the stack; `_start` receives a
 //!   pointer to it in RDI and its length in RSI (our own minimal ABI).
 //!
@@ -63,9 +64,12 @@ pub type Pid = Tid;
 /// so null pointer accesses always fault).
 pub const USER_IMAGE_START: u64 = 0x1_0000;
 pub const USER_STACK_TOP: u64 = 0x0000_7FFF_FFFF_0000;
-pub const USER_STACK_PAGES: usize = 16;
+/// Stack pages mapped when a program starts.
+pub const USER_STACK_PAGES: usize = 4;
+/// Largest stack: pages below the initial ones are mapped on first use.
+pub const USER_STACK_MAX: u64 = 1024 * 1024;
 /// ELF segments must end below the stack and its unmapped guard gap.
-pub const USER_IMAGE_END: u64 = USER_STACK_TOP - (USER_STACK_PAGES as u64 + 16) * PAGE_SIZE;
+pub const USER_IMAGE_END: u64 = USER_STACK_TOP - USER_STACK_MAX - 16 * PAGE_SIZE;
 pub const MAX_ARGS_LEN: usize = 4096;
 /// Largest heap a process may have.
 pub const HEAP_MAX: u64 = 64 * 1024 * 1024;
@@ -137,10 +141,11 @@ pub enum Handle {
     /// The process's `Output` (stdout and stderr).
     Stdout,
     /// A file; reads and writes happen at `offset` (writes with `append`
-    /// always go to the end).
+    /// always go to the end). The offset is shared by every descriptor
+    /// made from this one by `dup` or inheritance (like POSIX).
     File {
         path: String,
-        offset: u64,
+        offset: Arc<AtomicU64>,
         readable: bool,
         writable: bool,
         append: bool,
@@ -220,18 +225,20 @@ impl Process {
         self.ignore_interrupt = on;
     }
 
-    /// Whether `addr` lies in the heap (below the end rounded up to a page).
-    fn in_heap(&self, addr: u64) -> bool {
-        addr >= self.heap_start && addr < crate::mem::align_up(self.heap_end, PAGE_SIZE)
+    /// Whether `addr` lies in a demand-paged range: the heap (below its end
+    /// rounded up to a page) or the stack area.
+    fn on_demand(&self, addr: u64) -> bool {
+        let heap = addr >= self.heap_start && addr < crate::mem::align_up(self.heap_end, PAGE_SIZE);
+        heap || (USER_STACK_TOP - USER_STACK_MAX..USER_STACK_TOP).contains(&addr)
     }
 
-    /// Maps zeroed pages for every not yet used heap page in
+    /// Maps zeroed pages for every not yet used heap or stack page in
     /// `[addr, addr + len)` (demand paging). False if memory ran out.
-    pub fn populate_heap(&mut self, addr: u64, len: u64) -> bool {
+    pub fn populate(&mut self, addr: u64, len: u64) -> bool {
         let Some(end) = addr.checked_add(len) else { return true };
         let mut page = align_down(addr, PAGE_SIZE);
         while page < end {
-            if self.in_heap(page) {
+            if self.on_demand(page) {
                 let Some(space) = self.space.as_mut() else { return false };
                 if space.page_flags(VirtAddr(page)).is_none()
                     && space
@@ -247,7 +254,7 @@ impl Process {
     }
 }
 
-/// Page fault in user mode: a not-present page inside the heap gets a fresh
+/// Page fault in user mode: a not-present page inside the heap or the stack area gets a fresh
 /// zeroed page and the instruction is retried. Returns false for every
 /// other fault (the caller kills the process). Runs in the exception handler.
 pub fn handle_page_fault(addr: u64, error_code: u64) -> bool {
@@ -255,7 +262,7 @@ pub fn handle_page_fault(addr: u64, error_code: u64) -> bool {
     if error_code & PRESENT != 0 {
         return false; // a protection violation, not a missing page
     }
-    with_current(|p| p.in_heap(addr) && p.populate_heap(addr, 1)).unwrap_or(false)
+    with_current(|p| p.on_demand(addr) && p.populate(addr, 1)).unwrap_or(false)
 }
 
 /// How to start a process (see `spawn_with`).
@@ -902,6 +909,28 @@ mod tests {
         assert!(!interrupt_foreground());
         assert!(kill(pid));
         assert_eq!(wait(pid), Some(ExitStatus::Killed(String::from("killed"))));
+    }
+
+    #[test_case]
+    fn stack_grows_on_demand_up_to_its_limit() {
+        // sub rsp, n; mov byte [rsp], 1; add rsp, n; exit(0)
+        let touch_below = |n: u32| {
+            let b = n.to_le_bytes();
+            [
+                &[0x48, 0x81, 0xEC, b[0], b[1], b[2], b[3]][..],
+                &[0xC6, 0x04, 0x24, 1],
+                &[0x48, 0x81, 0xC4, b[0], b[1], b[2], b[3]],
+                &mov_eax(syscall::nr::EXIT),
+                &[0x31, 0xFF],
+                &SYSCALL,
+            ]
+            .concat()
+        };
+        assert_eq!(run_code(&touch_below(768 * 1024), "").0, ExitStatus::Exited(0));
+        match run_code(&touch_below(2 * 1024 * 1024), "").0 {
+            ExitStatus::Killed(reason) => assert!(reason.contains("page fault"), "{}", reason),
+            other => panic!("overflow beyond USER_STACK_MAX not caught: {:?}", other),
+        }
     }
 
     #[test_case]

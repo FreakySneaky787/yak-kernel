@@ -217,10 +217,9 @@ pub fn idle_loop(cpu: usize) -> ! {
         super::disable_interrupts();
         let job = JOBS[cpu].lock().take();
         match job {
-            Some(job) => {
-                super::enable_interrupts();
-                job();
-            }
+            // with interrupts off: an idle thread preempted inside a job (holding
+            // the result lock) could starve behind the very thread waiting for it (bug #9)
+            Some(job) => job(),
             // `sti; hlt` is atomic: a wake-up IPI right after the check still ends the `hlt`
             None => unsafe { core::arch::asm!("sti; hlt", options(nomem, nostack)) },
         }
@@ -228,7 +227,7 @@ pub fn idle_loop(cpu: usize) -> ! {
 }
 
 /// Runs `f` on CPU `cpu` and waits for its result. `None` if that CPU is not
-/// online. `f` must not block (the AP has no scheduler yet).
+/// online. `f` runs with interrupts disabled and must not block.
 pub fn run_on<R: Send + 'static>(cpu: usize, f: impl FnOnce() -> R + Send + 'static) -> Option<R> {
     if cpu >= MAX_CPUS || !ONLINE[cpu].load(Ordering::Acquire) {
         return None;
@@ -272,7 +271,8 @@ pub fn run_on<R: Send + 'static>(cpu: usize, f: impl FnOnce() -> R + Send + 'sta
     }
     wake_cpu(cpu);
     loop {
-        if let Some(r) = result.lock().take() {
+        // interrupts off while holding the lock: the job takes it with interrupts off
+        if let Some(r) = super::without_interrupts(|| result.lock().take()) {
             return Some(r);
         }
         // Block, don't just yield: if we landed on the target CPU ourselves, a

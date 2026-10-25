@@ -1,54 +1,78 @@
 //! /bin/sh: the shell as a user program. The kernel starts it as the first
-//! process (init); it is immune to Ctrl+C, its children are not.
+//! process (init).
 //!
 //! - Line editing and word splitting reuse the kernel shell's code
 //!   (`line_editor.rs`, `parser.rs` are compiled into this program).
+//! - Grammar (`syntax.rs`): `;` and newlines separate commands, `a && b`,
+//!   `a || b`, `! a`, pipelines, `if/elif/else/fi`, `while`/`until ... do
+//!   ... done`, `for NAME in words; do ... done`, `{ ...; }`, functions
+//!   `name() { ...; }` with `$1`.. and `return`. An unfinished command
+//!   continues on the next line (prompt `> `); scripts are parsed as a whole.
 //! - Built-ins: cd, pwd, echo, run, history, help, exit, export, unset, set,
-//!   source (`.`), jobs, wait, fg, kill, true, false.
-//! - Other words: a kernel built-in (lspci, acpi, ...) runs through the
-//!   `kshell` system call; otherwise a program path or a name found in
-//!   `$PATH` (default `/bin`) is started as a child. A file starting with
-//!   `#!` runs as a shell script.
+//!   source (`.`), jobs, wait, fg, kill, true, false, `:`, test (`[`), read,
+//!   break, continue, return, shift.
+//! - Other words: a function, a kernel built-in (lspci, acpi, ...) run
+//!   through the `kshell` system call, or a program path / a name found in
+//!   `$PATH` (default `/bin`), started as a child. A file starting with `#!`
+//!   runs as a shell script.
 //! - Variables: `NAME=value`, `export NAME=value`, `unset NAME`; they live in
 //!   the kernel's per-process environment, so children inherit them.
-//!   `$NAME`, `${NAME}`, `$?` (last status), `$$`, `$#`, `$0`..`$9` (script
-//!   arguments) are expanded before the line is split into words - not inside
-//!   '...'; `\$` keeps a dollar. `#` at the start of a word begins a comment.
+//!   `$NAME`, `${NAME}`, `$?` (last status), `$$`, `$#`, `$0`..`$9`, and
+//!   `$((expression))` (`arith.rs`) are expanded when a command runs - not
+//!   inside '...'; `\$` keeps a dollar. `#` at the start of a word begins a
+//!   comment. Unquoted `*` and `?` match file names (`glob.rs`); without a
+//!   match the word stays as it is.
 //! - Pipelines and redirections: `a | b`, `> f`, `>> f`, `< f`, `2> f`,
-//!   `2>> f`, `2>&1`. Operators must be separate words. Before each stage,
-//!   fds 0-2 are pointed at pipes/files with `dup2` (children inherit them),
-//!   afterwards the shell's own are restored. Built-ins in a pipeline run
-//!   inside the shell, so their output must fit into a pipe (64 KiB).
-//! - Jobs: a line ending in `&` runs in the background (`[n] pid`); `jobs`
-//!   lists them, `wait [%n]` waits, `fg [%n]` waits in the foreground (Ctrl+C
-//!   then reaches it). Finished jobs are reported before the next prompt.
-//! - Scripts: `sh file [args]`, `sh -c "command line"`, `source file`; one
-//!   command per line, `set -e` stops at the first failing command.
+//!   `2>> f`, `2>&1`, also after compound commands (`done < file`).
+//!   Operators must be separate words. Before each stage, fds 0-2 are
+//!   pointed at pipes/files with `dup2` (children inherit them), afterwards
+//!   the shell's own are restored. Built-ins, functions and compound
+//!   commands in a pipeline run inside the shell, one after the other, so
+//!   what they write into a pipe must fit into it (64 KiB).
+//! - Jobs: a command ending in `&` runs in the background (`[n] pid`); a
+//!   compound or `&&`/`||` command does so in a shell of its own (`sh -c`).
+//!   `jobs` lists them, `wait [%n]` waits, `fg [%n]` waits in the foreground
+//!   (Ctrl+C then reaches it). Finished jobs are reported before the prompt.
+//! - Ctrl+C: SIGINT (the shell has a handler). At the prompt it discards the
+//!   line; while the shell runs a loop - or a child ended by Ctrl+C - the
+//!   running command list stops (scripts exit with 130).
+//! - Scripts: `sh file [args]`, `sh -c "commands"`, `source file`;
+//!   `set -e` stops at the first failing command (not in conditions).
 
 #![no_std]
 #![no_main]
 
 extern crate alloc;
 
+mod arith;
+mod glob;
 mod keys;
 #[allow(dead_code)]
 #[path = "../../../../kernel/src/shell/line_editor.rs"]
 mod line_editor;
 #[path = "../../../../kernel/src/shell/parser.rs"]
 mod parser;
+mod syntax;
+mod testcmd;
 
+use alloc::collections::BTreeMap;
+use alloc::rc::Rc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use core::sync::atomic::{AtomicBool, Ordering};
 use line_editor::{EditResult, LineEditor};
+use syntax::{AndOr, Command, Compound, List, Pipeline, SyntaxError, is_name};
 use ulib::fs::{self, Dir, File};
 use ulib::io::Stdout;
 use ulib::process::{self, ExitStatus};
-use ulib::{env, eprintln, io, print, println, sys};
+use ulib::{env, eprintln, io, print, println, signal, sys};
 
 ulib::entry!(main);
 
 const DEFAULT_PATH: &str = "/bin";
 const ENOEXEC: i64 = 8;
+/// Function calls nested deeper than this fail (the stack is limited).
+const MAX_CALL_DEPTH: usize = 64;
 
 /// name, usage, help
 const BUILTINS: &[(&str, &str, &str)] = &[
@@ -83,9 +107,42 @@ const BUILTINS: &[(&str, &str, &str)] = &[
         "kill [-SIG] pid|%job... | kill -l",
         "send a signal (default TERM); -l lists the signals",
     ),
-    ("true", "true", "do nothing, successfully"),
+    (
+        "test",
+        "test expr (or [ expr ])",
+        "compare strings/numbers, check files",
+    ),
+    ("read", "read [NAME...]", "read a line into variables (default REPLY)"),
+    ("break", "break [n]", "leave the innermost (n-th) loop"),
+    ("continue", "continue [n]", "next round of the innermost (n-th) loop"),
+    ("return", "return [code]", "leave a function"),
+    ("shift", "shift [n]", "drop the first n arguments ($1 ...)"),
+    ("true", "true (or :)", "do nothing, successfully"),
     ("false", "false", "do nothing, unsuccessfully"),
 ];
+
+/// Set by the SIGINT handler (Ctrl+C while the shell itself runs) and when a
+/// foreground child was ended by Ctrl+C: the running command list stops.
+static INTERRUPTED: AtomicBool = AtomicBool::new(false);
+
+extern "C" fn on_interrupt(_sig: u32) {
+    INTERRUPTED.store(true, Ordering::SeqCst);
+}
+
+fn interrupted() -> bool {
+    INTERRUPTED.load(Ordering::SeqCst)
+}
+
+/// How a command list ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Flow {
+    Next,
+    Exit(i32),
+    Break(u32),
+    Continue(u32),
+    Return(i32),
+    Interrupted,
+}
 
 struct Job {
     id: usize,
@@ -96,15 +153,20 @@ struct Job {
 
 struct Shell {
     editor: LineEditor,
+    decoder: keys::Decoder,
     /// Commands the kernel runs for us (`kshell`).
     kernel_commands: Vec<String>,
     /// Exit status of the last command (`$?`).
     status: i32,
-    /// `$0`, `$1`, ... (script name and arguments)
+    /// `$0`, `$1`, ... (script or function name and arguments)
     positional: Vec<String>,
     jobs: Vec<Job>,
     next_job: usize,
     exit_on_error: bool,
+    functions: BTreeMap<String, Rc<List>>,
+    /// > 0 while an `if`/`while` condition runs (`set -e` does not apply).
+    condition_depth: usize,
+    call_depth: usize,
 }
 
 /// Errors go to stderr: they must not end up in a pipe or file.
@@ -155,12 +217,6 @@ fn completions(kernel_commands: &[String], prefix: &str) -> Vec<String> {
     names
 }
 
-fn is_name(s: &str) -> bool {
-    let mut chars = s.chars();
-    chars.next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
-}
-
 /// `NAME=value` with a valid name.
 fn assignment(word: &str) -> Option<(&str, &str)> {
     word.split_once('=').filter(|(n, _)| is_name(n))
@@ -171,67 +227,123 @@ fn status_code(status: &ExitStatus) -> i32 {
     status.code()
 }
 
+/// `n` for break/continue/shift: a positive number, default 1.
+fn count_arg(args: &[String]) -> Result<u32, String> {
+    match args.first() {
+        None => Ok(1),
+        Some(a) => a
+            .parse::<u32>()
+            .ok()
+            .filter(|&n| n >= 1)
+            .ok_or_else(|| alloc::format!("'{}' is not a positive number", a)),
+    }
+}
+
 impl Shell {
     fn new(positional: Vec<String>) -> Shell {
+        // Ctrl+C reaches us as SIGINT (instead of the raw byte or our end)
+        let _ = signal::set_handler(signal::SIGINT, on_interrupt);
         Shell {
             editor: LineEditor::new(),
+            decoder: keys::Decoder::new(),
             kernel_commands: kernel_commands(),
             status: 0,
             positional,
             jobs: Vec::new(),
             next_job: 1,
             exit_on_error: false,
+            functions: BTreeMap::new(),
+            condition_depth: 0,
+            call_depth: 0,
         }
     }
 
-    /// Reads and runs lines until `exit`; returns the exit code.
+    /// Reads one line with the line editor; `None` if it was cancelled (Ctrl+C).
+    fn read_line(&mut self, prompt: &str) -> Option<String> {
+        self.editor.start(prompt, &mut Stdout);
+        loop {
+            let mut buf = [0u8; 16];
+            let n = if INTERRUPTED.swap(false, Ordering::SeqCst) {
+                buf[0] = 0x03; // Ctrl+C arrived as a signal: the editor cancels the line
+                1
+            } else {
+                sys::read(sys::STDIN, &mut buf)
+            };
+            if n <= 0 {
+                continue;
+            }
+            for &byte in &buf[..n as usize] {
+                let Some(event) = self.decoder.feed(byte) else { continue };
+                let commands = &self.kernel_commands;
+                let complete = |prefix: &str| completions(commands, prefix);
+                match self.editor.handle(event, &mut Stdout, &complete) {
+                    EditResult::Pending => {}
+                    EditResult::Cancelled => return None,
+                    EditResult::Line(line) => return Some(line),
+                }
+            }
+        }
+    }
+
+    /// Reads and runs commands until `exit`; returns the exit code.
     fn interactive(&mut self) -> i32 {
-        let mut decoder = keys::Decoder::new();
         loop {
             self.report_finished_jobs();
             let prompt = alloc::format!("\x1b[92msh\x1b[0m:\x1b[94m{}\x1b[0m> ", cwd());
-            self.editor.start(&prompt, &mut Stdout);
-            'line: loop {
-                let mut buf = [0u8; 16];
-                let n = sys::read(sys::STDIN, &mut buf);
-                if n <= 0 {
-                    continue;
-                }
-                for &byte in &buf[..n as usize] {
-                    let Some(event) = decoder.feed(byte) else { continue };
-                    let commands = &self.kernel_commands;
-                    let complete = |prefix: &str| completions(commands, prefix);
-                    match self.editor.handle(event, &mut Stdout, &complete) {
-                        EditResult::Pending => {}
-                        EditResult::Cancelled => break 'line,
-                        EditResult::Line(line) => {
-                            if let Some(code) = self.execute(&line) {
-                                return code;
-                            }
-                            break 'line;
-                        }
+            let mut text = String::new();
+            let list = loop {
+                let Some(line) = self.read_line(if text.is_empty() { &prompt } else { "> " }) else {
+                    break None;
+                };
+                text.push_str(&line);
+                text.push('\n');
+                match syntax::parse(&text) {
+                    Err(SyntaxError::Incomplete) => continue, // more lines
+                    Err(e) => {
+                        error(&e.to_string());
+                        self.status = 2;
+                        break None;
                     }
+                    Ok(list) => break Some(list),
+                }
+            };
+            if let Some(list) = list {
+                let flow = self.run_list(&list);
+                INTERRUPTED.store(false, Ordering::SeqCst);
+                if let Flow::Exit(code) = flow {
+                    return code;
                 }
             }
         }
     }
 
-    /// Runs every line of `text`; `Some(code)` if the script asked to exit
-    /// (or `set -e` stopped it).
-    fn run_lines(&mut self, text: &str) -> Option<i32> {
-        for line in text.lines() {
-            if let Some(code) = self.execute(line) {
-                return Some(code);
+    /// Parses and runs a whole script.
+    fn run_text(&mut self, text: &str) -> Flow {
+        match syntax::parse(text) {
+            Ok(list) => self.run_list(&list),
+            Err(e) => {
+                error(&e.to_string());
+                self.status = 2;
+                Flow::Exit(2)
             }
         }
-        None
+    }
+
+    /// The exit code of a script or `sh -c` that ended with `flow`.
+    fn exit_code(&self, flow: Flow) -> i32 {
+        match flow {
+            Flow::Exit(code) => code,
+            Flow::Interrupted => 130,
+            _ => self.status,
+        }
     }
 
     fn script(&mut self, path: &str) -> i32 {
         match io::read_input(Some(path)) {
             Ok(data) => {
                 let text = String::from_utf8_lossy(&data).into_owned();
-                self.run_lines(&text).unwrap_or(self.status)
+                let flow = self.run_text(&text);
+                self.exit_code(flow)
             }
             Err(e) => {
                 error(&alloc::format!("{}: {}", path, e));
@@ -240,8 +352,331 @@ impl Shell {
         }
     }
 
-    /// Replaces `$...` outside single quotes and drops `#` comments.
-    fn expand(&self, line: &str) -> String {
+    fn run_list(&mut self, list: &List) -> Flow {
+        for and_or in list {
+            if interrupted() {
+                return Flow::Interrupted;
+            }
+            let flow = self.run_and_or(and_or);
+            if flow != Flow::Next {
+                return flow;
+            }
+        }
+        Flow::Next
+    }
+
+    fn run_and_or(&mut self, and_or: &AndOr) -> Flow {
+        if and_or.background {
+            return self.run_background(and_or);
+        }
+        // all but the last pipeline are conditions (no `set -e` for them)
+        let mut flow = self.run_pipeline(&and_or.first, None);
+        let mut last_ran = and_or.rest.is_empty();
+        for (i, (and, pipeline)) in and_or.rest.iter().enumerate() {
+            if flow != Flow::Next {
+                return flow;
+            }
+            if *and == (self.status == 0) {
+                flow = self.run_pipeline(pipeline, None);
+                last_ran = i + 1 == and_or.rest.len();
+            }
+        }
+        let negated = and_or.rest.last().map_or(&and_or.first, |r| &r.1).negate;
+        if flow == Flow::Next
+            && last_ran
+            && !negated
+            && self.status != 0
+            && self.exit_on_error
+            && self.condition_depth == 0
+        {
+            return Flow::Exit(self.status);
+        }
+        flow
+    }
+
+    /// `command &`: a plain pipeline runs its programs as a job; anything
+    /// else (compound commands, `&&`) runs in a shell of its own.
+    fn run_background(&mut self, and_or: &AndOr) -> Flow {
+        let plain = and_or.rest.is_empty()
+            && !and_or.first.negate
+            && and_or.first.commands.iter().all(|c| matches!(c, Command::Simple(_)));
+        if plain {
+            return self.run_pipeline(&and_or.first, Some(&and_or.text));
+        }
+        match process::spawn("/bin/sh", ["-c", and_or.text.as_str()]) {
+            Ok(pid) => self.add_job(&and_or.text, alloc::vec![(String::from("sh"), pid)]),
+            Err(e) => {
+                error(&alloc::format!("/bin/sh: {}", e));
+                self.status = 1;
+            }
+        }
+        Flow::Next
+    }
+
+    fn add_job(&mut self, text: &str, children: Vec<(String, u64)>) {
+        let id = self.next_job;
+        self.next_job += 1;
+        let pids: Vec<String> = children.iter().map(|(_, p)| alloc::format!("{}", p)).collect();
+        println!("[{}] {}", id, pids.join(" "));
+        self.jobs.push(Job {
+            id,
+            command: String::from(text),
+            procs: children.into_iter().map(|(n, p)| (n, p, None)).collect(),
+        });
+        self.status = 0;
+    }
+
+    /// Runs the stages of a pipeline; with `background` (the job's text) the
+    /// started programs become a job instead of being waited for.
+    fn run_pipeline(&mut self, pipeline: &Pipeline, background: Option<&str>) -> Flow {
+        let stages = &pipeline.commands;
+        let saved = [0, 1, 2].map(|fd| sys::dup(fd) as u64);
+        let mut prev_read: Option<u64> = None;
+        let mut children: Vec<(String, u64)> = Vec::new();
+        let mut flow = Flow::Next;
+        let mut status = 0;
+        let mut last_is_child = false;
+        for (i, stage) in stages.iter().enumerate() {
+            // stdin: the previous pipe, or the shell's own; stdout: a new pipe or the shell's own
+            match prev_read.take() {
+                Some(r) => {
+                    sys::dup2(r, sys::STDIN);
+                    sys::close(r);
+                }
+                None => {
+                    sys::dup2(saved[0], sys::STDIN);
+                }
+            }
+            sys::dup2(saved[2], sys::STDERR);
+            if i + 1 < stages.len() {
+                let mut fds = [0u32; 2];
+                if sys::pipe(&mut fds) < 0 {
+                    restore(&saved);
+                    error("cannot create a pipe");
+                    status = 1;
+                    break;
+                }
+                sys::dup2(fds[1] as u64, sys::STDOUT);
+                sys::close(fds[1] as u64);
+                prev_read = Some(fds[0] as u64);
+            } else {
+                sys::dup2(saved[1], sys::STDOUT);
+            }
+            last_is_child = false;
+            match self.run_command(stage) {
+                Stage::Done(code) => status = code,
+                Stage::Flow(f) => {
+                    status = self.status;
+                    if flow == Flow::Next {
+                        flow = f;
+                    }
+                }
+                Stage::Spawned(name, pid) => {
+                    children.push((name, pid));
+                    last_is_child = true;
+                }
+                Stage::Failed(e) => {
+                    restore(&saved);
+                    error(&e);
+                    status = 1;
+                }
+            }
+        }
+        restore(&saved);
+        if let Some(r) = prev_read {
+            sys::close(r);
+        }
+        for fd in saved {
+            sys::close(fd);
+        }
+        if let Some(text) = background {
+            if !children.is_empty() {
+                self.add_job(text, children);
+                return flow;
+            }
+        }
+        if !children.is_empty() {
+            let code = wait_all(&children);
+            if last_is_child {
+                status = code;
+            }
+        }
+        if pipeline.negate {
+            status = (status == 0) as i32;
+        }
+        self.status = status;
+        flow
+    }
+
+    /// Expands raw words (variables, arithmetic), splits the result and
+    /// replaces words with wildcards by the matching file names.
+    fn expand_words(&self, raw: &[String]) -> Result<Vec<String>, String> {
+        let expanded = self.expand(&raw.join(" "), true)?;
+        let words = parser::split(&expanded).map_err(|e| e.to_string())?;
+        let mut out = Vec::new();
+        for word in words {
+            if glob::has_wildcards(&word) {
+                let matches = glob::expand(&word, &cwd());
+                if matches.is_empty() {
+                    out.push(glob::literal(&word));
+                } else {
+                    out.extend(matches);
+                }
+            } else {
+                out.push(word);
+            }
+        }
+        Ok(out)
+    }
+
+    /// Runs one stage with the already prepared fds 0-2.
+    fn run_command(&mut self, command: &Command) -> Stage {
+        match command {
+            Command::Simple(raw) => {
+                let words = match self.expand_words(raw) {
+                    Ok(w) => w,
+                    Err(e) => return Stage::Failed(e),
+                };
+                if !words.is_empty() && words.iter().all(|w| assignment(w).is_some()) {
+                    for (name, value) in words.iter().filter_map(|w| assignment(w)) {
+                        env::set_var(name, value);
+                    }
+                    return Stage::Done(0);
+                }
+                let cmd = match parse_redirections(&words) {
+                    Ok(c) => c,
+                    Err(e) => return Stage::Failed(e),
+                };
+                if let Err(e) = cmd.redirect() {
+                    return Stage::Failed(e);
+                }
+                if cmd.words.is_empty() {
+                    return Stage::Done(0); // only redirections (`> file` empties it), or an empty `$VAR`
+                }
+                self.run_stage(&cmd.words)
+            }
+            Command::Compound(compound, raw) => {
+                let redirections = match self.expand_words(raw).and_then(|w| parse_redirections(&w)) {
+                    Ok(c) => c,
+                    Err(e) => return Stage::Failed(e),
+                };
+                if let Some(w) = redirections.words.first() {
+                    return Stage::Failed(alloc::format!("unexpected '{}' after a compound command", w));
+                }
+                if let Err(e) = redirections.redirect() {
+                    return Stage::Failed(e);
+                }
+                match self.run_compound(compound) {
+                    Flow::Next => Stage::Done(self.status),
+                    flow => Stage::Flow(flow),
+                }
+            }
+            Command::Function(name, body) => {
+                self.functions.insert(name.clone(), body.clone());
+                Stage::Done(0)
+            }
+        }
+    }
+
+    fn run_compound(&mut self, compound: &Compound) -> Flow {
+        match compound {
+            Compound::If { branches, otherwise } => {
+                for (condition, body) in branches {
+                    let flow = self.run_condition(condition);
+                    if flow != Flow::Next {
+                        return flow;
+                    }
+                    if self.status == 0 {
+                        return self.run_list(body);
+                    }
+                }
+                match otherwise {
+                    Some(list) => self.run_list(list),
+                    None => {
+                        self.status = 0;
+                        Flow::Next
+                    }
+                }
+            }
+            Compound::Loop { until, condition, body } => {
+                let mut status = 0;
+                loop {
+                    if interrupted() {
+                        return Flow::Interrupted;
+                    }
+                    let flow = self.run_condition(condition);
+                    if flow != Flow::Next {
+                        return flow;
+                    }
+                    if (self.status == 0) == *until {
+                        break;
+                    }
+                    match self.loop_body(body) {
+                        Ok(true) => status = self.status,
+                        Ok(false) => break,
+                        Err(flow) => return flow,
+                    }
+                }
+                self.status = status;
+                Flow::Next
+            }
+            Compound::For { var, items, body } => {
+                let items = match items {
+                    Some(raw) => match self.expand_words(raw) {
+                        Ok(w) => w,
+                        Err(e) => {
+                            error(&e);
+                            self.status = 1;
+                            return Flow::Next;
+                        }
+                    },
+                    None => self.positional.iter().skip(1).cloned().collect(),
+                };
+                let mut status = 0;
+                for item in items {
+                    if interrupted() {
+                        return Flow::Interrupted;
+                    }
+                    env::set_var(var, &item);
+                    match self.loop_body(body) {
+                        Ok(true) => status = self.status,
+                        Ok(false) => break,
+                        Err(flow) => return flow,
+                    }
+                }
+                self.status = status;
+                Flow::Next
+            }
+            Compound::Group(list) => self.run_list(list),
+        }
+    }
+
+    /// The condition of `if`/`while`: `set -e` does not apply inside.
+    fn run_condition(&mut self, condition: &List) -> Flow {
+        self.condition_depth += 1;
+        let flow = self.run_list(condition);
+        self.condition_depth -= 1;
+        flow
+    }
+
+    /// One round of a loop: `Ok(true)` = go on, `Ok(false)` = `break`,
+    /// `Err(flow)` = leave the loop with `flow` (outer break/continue, exit, ...).
+    fn loop_body(&mut self, body: &List) -> Result<bool, Flow> {
+        match self.run_list(body) {
+            Flow::Next | Flow::Continue(1) => Ok(true),
+            Flow::Break(1) => {
+                self.status = 0;
+                Ok(false)
+            }
+            Flow::Break(n) => Err(Flow::Break(n - 1)),
+            Flow::Continue(n) => Err(Flow::Continue(n - 1)),
+            flow => Err(flow),
+        }
+    }
+
+    /// Replaces `$...` outside single quotes and drops `#` comments. With
+    /// `glob`, unquoted `*` and `?` become `glob::STAR` / `glob::ANY`.
+    fn expand(&self, line: &str, glob: bool) -> Result<String, String> {
         let chars: Vec<char> = line.chars().collect();
         let mut out = String::new();
         let (mut single, mut double) = (false, false);
@@ -272,6 +707,13 @@ impl Shell {
                     out.push(c);
                 }
                 '#' if !double && word_start => break,
+                '$' if chars.get(i + 1) == Some(&'(') && chars.get(i + 2) == Some(&'(') => {
+                    let end = arith_end(&chars, i + 3).ok_or("missing '))' after '$(('")?;
+                    let inner: String = chars[i + 3..end].iter().collect();
+                    let value = arith::eval(&self.expand(&inner, false)?, &|name| self.value(name))?;
+                    out.push_str(&alloc::format!("{}", value));
+                    i = end + 1; // the second ')'
+                }
                 '$' => {
                     let (name, used) = match chars.get(i + 1) {
                         Some('{') => {
@@ -298,12 +740,14 @@ impl Shell {
                         i += used;
                     }
                 }
+                '*' if glob && !double => out.push(glob::STAR),
+                '?' if glob && !double => out.push(glob::ANY),
                 _ => out.push(c),
             }
             word_start = !single && !double && (c.is_whitespace() || (word_start && c == '#'));
             i += 1;
         }
-        out
+        Ok(out)
     }
 
     fn value(&self, name: &str) -> String {
@@ -320,121 +764,7 @@ impl Shell {
         }
     }
 
-    /// Runs one line. `Some(code)` = the shell should exit.
-    fn execute(&mut self, line: &str) -> Option<i32> {
-        let expanded = self.expand(line);
-        let mut words = match parser::split(&expanded) {
-            Ok(w) => w,
-            Err(e) => {
-                error(&e.to_string());
-                self.status = 2;
-                return self.check_exit_on_error();
-            }
-        };
-        if words.is_empty() {
-            return None;
-        }
-        let background = words.last().is_some_and(|w| w == "&");
-        if background {
-            words.pop();
-            if words.is_empty() {
-                return None;
-            }
-        }
-        if words.len() == 1 {
-            if let Some((name, value)) = assignment(&words[0]) {
-                env::set_var(name, value);
-                self.status = 0;
-                return None;
-            }
-        }
-        let stages = match parse_pipeline(&words) {
-            Ok(s) => s,
-            Err(e) => {
-                error(&e);
-                self.status = 2;
-                return self.check_exit_on_error();
-            }
-        };
-        let saved = [0, 1, 2].map(|fd| sys::dup(fd) as u64);
-        let mut prev_read: Option<u64> = None;
-        let mut children: Vec<(String, u64)> = Vec::new();
-        let mut exit = None;
-        let mut status = 0;
-        for (i, stage) in stages.iter().enumerate() {
-            // stdin: the previous pipe, or the shell's own; stdout: a new pipe or the shell's own
-            match prev_read.take() {
-                Some(r) => {
-                    sys::dup2(r, sys::STDIN);
-                    sys::close(r);
-                }
-                None => {
-                    sys::dup2(saved[0], sys::STDIN);
-                }
-            }
-            sys::dup2(saved[2], sys::STDERR);
-            if i + 1 < stages.len() {
-                let mut fds = [0u32; 2];
-                if sys::pipe(&mut fds) < 0 {
-                    restore(&saved);
-                    error("cannot create a pipe");
-                    status = 1;
-                    break;
-                }
-                sys::dup2(fds[1] as u64, sys::STDOUT);
-                sys::close(fds[1] as u64);
-                prev_read = Some(fds[0] as u64);
-            } else {
-                sys::dup2(saved[1], sys::STDOUT);
-            }
-            if let Err(e) = stage.redirect() {
-                restore(&saved);
-                error(&e);
-                status = 1;
-                break;
-            }
-            match self.run_stage(&stage.words) {
-                Stage::Done(code) => status = code,
-                Stage::Exit(code) => exit = Some(code),
-                Stage::Spawned(name, pid) => children.push((name, pid)),
-                Stage::Failed(e) => {
-                    error(&e);
-                    status = 1;
-                }
-            }
-        }
-        restore(&saved);
-        if let Some(r) = prev_read {
-            sys::close(r);
-        }
-        for fd in saved {
-            sys::close(fd);
-        }
-        if background && !children.is_empty() {
-            let id = self.next_job;
-            self.next_job += 1;
-            let pids: Vec<String> = children.iter().map(|(_, p)| alloc::format!("{}", p)).collect();
-            println!("[{}] {}", id, pids.join(" "));
-            self.jobs.push(Job {
-                id,
-                command: words.join(" "),
-                procs: children.into_iter().map(|(n, p)| (n, p, None)).collect(),
-            });
-            self.status = 0;
-            return exit;
-        }
-        if !children.is_empty() {
-            status = wait_all(&children);
-        }
-        self.status = status;
-        exit.or_else(|| self.check_exit_on_error())
-    }
-
-    fn check_exit_on_error(&self) -> Option<i32> {
-        (self.exit_on_error && self.status != 0).then_some(self.status)
-    }
-
-    /// Runs one stage with the already redirected fds.
+    /// Runs one simple command with the already redirected fds.
     fn run_stage(&mut self, words: &[String]) -> Stage {
         let name = words[0].as_str();
         let args = &words[1..];
@@ -451,7 +781,7 @@ impl Shell {
             }
             "pwd" => println!("{}", cwd()),
             "echo" => println!("{}", args.join(" ")),
-            "true" => {}
+            "true" | ":" => {}
             "false" => return Stage::Done(1),
             "history" => {
                 for (i, l) in self.editor.history().iter().enumerate() {
@@ -459,7 +789,10 @@ impl Shell {
                 }
             }
             "help" => self.help(),
-            "exit" => return Stage::Exit(args.first().and_then(|c| c.parse().ok()).unwrap_or(self.status)),
+            "exit" => {
+                let code = args.first().and_then(|c| c.parse().ok()).unwrap_or(self.status);
+                return Stage::Flow(Flow::Exit(code));
+            }
             "export" => {
                 for a in args {
                     if let Some((n, v)) = assignment(a) {
@@ -483,10 +816,11 @@ impl Shell {
                 Some(path) => match io::read_input(Some(path)) {
                     Ok(data) => {
                         let text = String::from_utf8_lossy(&data).into_owned();
-                        if let Some(code) = self.run_lines(&text) {
-                            return Stage::Exit(code);
-                        }
-                        return Stage::Done(self.status);
+                        return match self.run_text(&text) {
+                            Flow::Next | Flow::Break(_) | Flow::Continue(_) => Stage::Done(self.status),
+                            Flow::Return(code) => Stage::Done(code),
+                            flow => Stage::Flow(flow),
+                        };
                     }
                     Err(e) => return Stage::Failed(alloc::format!("{}: {}", path, e)),
                 },
@@ -506,10 +840,40 @@ impl Shell {
             }
             "wait" | "fg" => return self.wait_jobs(args.first().map(|s| s.as_str())),
             "kill" => return self.kill(args),
+            "test" | "[" => {
+                return match testcmd::run(name, args) {
+                    Ok(code) => Stage::Done(code),
+                    Err(e) => {
+                        error(&e);
+                        Stage::Done(2)
+                    }
+                };
+            }
+            "read" => return Stage::Done(self.read(args)),
+            "break" | "continue" => {
+                return match count_arg(args) {
+                    Ok(n) if name == "break" => Stage::Flow(Flow::Break(n)),
+                    Ok(n) => Stage::Flow(Flow::Continue(n)),
+                    Err(e) => Stage::Failed(alloc::format!("{}: {}", name, e)),
+                };
+            }
+            "return" => {
+                let code = args.first().and_then(|c| c.parse().ok()).unwrap_or(self.status);
+                self.status = code;
+                return Stage::Flow(Flow::Return(code));
+            }
+            "shift" => match count_arg(args) {
+                Ok(n) if (n as usize) < self.positional.len() => {
+                    self.positional.drain(1..1 + n as usize);
+                }
+                Ok(_) => return Stage::Done(1),
+                Err(e) => return Stage::Failed(alloc::format!("shift: {}", e)),
+            },
             "run" => match args.first() {
                 Some(path) => return spawn_program(path, &args[1..]),
                 None => return Stage::Failed(String::from("usage: run <program> [args...]")),
             },
+            _ if self.functions.contains_key(name) => return self.call(name, args),
             _ if self.kernel_commands.iter().any(|c| c == name) => {
                 return Stage::Done(sys::kshell(&quote_line(words)) as i32); // the kernel prints its own errors
             }
@@ -521,6 +885,58 @@ impl Shell {
             }
         }
         Stage::Done(0)
+    }
+
+    /// Calls a shell function: `$0` = its name, `$1`... = `args`.
+    fn call(&mut self, name: &str, args: &[String]) -> Stage {
+        if self.call_depth >= MAX_CALL_DEPTH {
+            return Stage::Failed(alloc::format!("{}: functions nested too deeply", name));
+        }
+        let body = self.functions[name].clone();
+        let positional = core::iter::once(name)
+            .chain(args.iter().map(String::as_str))
+            .map(String::from)
+            .collect();
+        let saved = core::mem::replace(&mut self.positional, positional);
+        self.call_depth += 1;
+        let flow = self.run_list(&body);
+        self.call_depth -= 1;
+        self.positional = saved;
+        match flow {
+            Flow::Return(code) => Stage::Done(code),
+            Flow::Exit(_) | Flow::Interrupted => Stage::Flow(flow),
+            _ => Stage::Done(self.status),
+        }
+    }
+
+    /// `read [NAME...]`: one line from stdin, split at whitespace; the last
+    /// name gets the rest of the line. Status 1 at the end of the input.
+    fn read(&mut self, names: &[String]) -> i32 {
+        let mut buf = [0u8; 4096];
+        let line = match io::read_line(&mut buf) {
+            Some(line) => String::from(line),
+            None if interrupted() => return 130,
+            None => return 1,
+        };
+        let reply = [String::from("REPLY")];
+        let names = if names.is_empty() { &reply[..] } else { names };
+        let mut rest = line.trim_start();
+        for (i, name) in names.iter().enumerate() {
+            if !is_name(name) {
+                error(&alloc::format!("read: '{}' is not a valid name", name));
+                return 2;
+            }
+            let value = if i + 1 == names.len() {
+                core::mem::take(&mut rest).trim_end()
+            } else {
+                let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+                let (word, tail) = rest.split_at(end);
+                rest = tail.trim_start();
+                word
+            };
+            env::set_var(name, value);
+        }
+        if interrupted() { 130 } else { 0 }
     }
 
     /// Collects statuses of finished background processes (without blocking).
@@ -580,7 +996,6 @@ impl Shell {
 
     /// `kill [-SIG | -s SIG] pid|%job...`, `kill -l`.
     fn kill(&mut self, args: &[String]) -> Stage {
-        use ulib::signal;
         let mut args = args;
         if args.first().is_some_and(|a| a == "-l") {
             for (name, num) in signal::NAMES {
@@ -640,8 +1055,10 @@ impl Shell {
     fn help(&self) {
         println!("Shell built-ins (/bin/sh):");
         for (_, usage, help) in BUILTINS {
-            println!("  \x1b[96m{:<28}\x1b[0m {}", usage, help);
+            println!("  \x1b[96m{:<34}\x1b[0m {}", usage, help);
         }
+        println!("Shell syntax: a; b   a && b   a || b   ! a   a | b   a &   if/elif/else/fi");
+        println!("  while/until ... do ... done   for x in ...; do ... done   f() {{ ...; }}   $((1 + 2))");
         println!("Kernel commands:");
         sys::kshell("help");
         print!("Programs in $PATH:");
@@ -650,6 +1067,23 @@ impl Shell {
         }
         println!();
     }
+}
+
+/// Index of the first ')' of the "))" that closes a `$((` whose contents
+/// start at `start`.
+fn arith_end(chars: &[char], start: usize) -> Option<usize> {
+    let mut depth = 0;
+    let mut i = start;
+    while i < chars.len() {
+        match chars[i] {
+            '(' => depth += 1,
+            ')' if depth > 0 => depth -= 1,
+            ')' if chars.get(i + 1) == Some(&')') => return Some(i),
+            _ => {}
+        }
+        i += 1;
+    }
+    None
 }
 
 /// A path (contains '/') or a name found in `$PATH`.
@@ -670,13 +1104,14 @@ fn find_program(name: &str) -> Option<String> {
 enum Stage {
     /// A built-in ran, with this status.
     Done(i32),
-    Exit(i32),
+    /// A built-in changes the control flow (exit, break, return, ...).
+    Flow(Flow),
     Spawned(String, u64),
     Failed(String),
 }
 
-/// One command of a pipeline with its redirections.
-struct Command {
+/// The words of one command with its redirections taken out.
+struct Redirected {
     words: Vec<String>,
     input: Option<String>,
     /// file, append?
@@ -694,7 +1129,7 @@ fn open_for_writing(path: &str, append: bool) -> Result<u64, String> {
     Ok(fd as u64)
 }
 
-impl Command {
+impl Redirected {
     /// Points fds 0-2 at the redirection files (after the pipes are set up).
     fn redirect(&self) -> Result<(), String> {
         if let Some(path) = &self.input {
@@ -722,41 +1157,34 @@ impl Command {
     }
 }
 
-/// Splits words at `|` and pulls out the redirection operators.
-fn parse_pipeline(words: &[String]) -> Result<Vec<Command>, String> {
-    let mut commands = Vec::new();
-    for part in words.split(|w| w == "|") {
-        let mut cmd = Command {
-            words: Vec::new(),
-            input: None,
-            output: None,
-            errors: None,
-            errors_to_output: false,
-        };
-        let mut it = part.iter();
-        while let Some(w) = it.next() {
-            match w.as_str() {
-                "2>&1" => cmd.errors_to_output = true,
-                "<" | ">" | ">>" | "2>" | "2>>" => {
-                    let file = it
-                        .next()
-                        .ok_or_else(|| alloc::format!("missing file name after '{}'", w))?
-                        .clone();
-                    match w.as_str() {
-                        "<" => cmd.input = Some(file),
-                        ">" | ">>" => cmd.output = Some((file, w == ">>")),
-                        _ => cmd.errors = Some((file, w == "2>>")),
-                    }
+/// Pulls the redirection operators (and their files) out of `words`.
+fn parse_redirections(words: &[String]) -> Result<Redirected, String> {
+    let mut cmd = Redirected {
+        words: Vec::new(),
+        input: None,
+        output: None,
+        errors: None,
+        errors_to_output: false,
+    };
+    let mut it = words.iter();
+    while let Some(w) = it.next() {
+        match w.as_str() {
+            "2>&1" => cmd.errors_to_output = true,
+            "<" | ">" | ">>" | "2>" | "2>>" => {
+                let file = it
+                    .next()
+                    .ok_or_else(|| alloc::format!("missing file name after '{}'", w))?
+                    .clone();
+                match w.as_str() {
+                    "<" => cmd.input = Some(file),
+                    ">" | ">>" => cmd.output = Some((file, w == ">>")),
+                    _ => cmd.errors = Some((file, w == "2>>")),
                 }
-                _ => cmd.words.push(w.clone()),
             }
+            _ => cmd.words.push(w.clone()),
         }
-        if cmd.words.is_empty() {
-            return Err(String::from("missing command in pipeline"));
-        }
-        commands.push(cmd);
     }
-    Ok(commands)
+    Ok(cmd)
 }
 
 /// Puts the shell's own fds 0-2 back.
@@ -808,8 +1236,9 @@ fn spawn_program(path: &str, args: &[String]) -> Stage {
 }
 
 /// Waits for all children of a pipeline (first to last). The last one's exit
-/// code and every kill are reported; after a Ctrl+C the rest is killed too.
-/// Returns the status of the last one.
+/// code and every kill are reported; after a Ctrl+C the rest is killed too
+/// and the shell stops what it is running (`INTERRUPTED`). Returns the
+/// status of the last one.
 fn wait_all(children: &[(String, u64)]) -> i32 {
     let mut interrupted = false;
     let mut status = 0;
@@ -827,8 +1256,8 @@ fn wait_all(children: &[(String, u64)]) -> i32 {
                     ExitStatus::Exited(0) => {}
                     ExitStatus::Exited(code) if last => error(&alloc::format!("{} exited with code {}", name, code)),
                     ExitStatus::Exited(_) => {}
-                    ExitStatus::Killed(reason, _) => {
-                        if reason == "interrupted" {
+                    ExitStatus::Killed(reason, sig) => {
+                        if sig == signal::SIGINT {
                             interrupted = true;
                         }
                         error(&alloc::format!("{} was killed: {}", name, reason))
@@ -838,6 +1267,9 @@ fn wait_all(children: &[(String, u64)]) -> i32 {
             Err(e) => error(&alloc::format!("wait for {}: {}", name, e)),
         }
     }
+    if interrupted {
+        INTERRUPTED.store(true, Ordering::SeqCst);
+    }
     status
 }
 
@@ -845,9 +1277,10 @@ fn main(mut args: ulib::Args) -> i32 {
     match args.next() {
         None => Shell::new(alloc::vec![String::from("sh")]).interactive(),
         Some("-c") => {
-            let line = args.next().unwrap_or("");
+            let text = args.next().unwrap_or("");
             let mut shell = Shell::new(core::iter::once("sh").chain(args).map(String::from).collect());
-            shell.execute(line).unwrap_or(shell.status)
+            let flow = shell.run_text(text);
+            shell.exit_code(flow)
         }
         Some(script) => {
             let positional: Vec<String> = core::iter::once(script).chain(args).map(String::from).collect();
