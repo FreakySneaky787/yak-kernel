@@ -55,7 +55,7 @@ pub mod nr {
     pub const BRK: u32 = 14;
     /// spawn(path, path_len, args, args_len) -> pid of the new child
     pub const SPAWN: u32 = 15;
-    /// wait(pid, *mut WaitStatus or 0) -> pid (children only)
+    /// wait(pid, *mut WaitStatus or 0, flags) -> pid, or 0 with flags & WNOHANG while it runs (children only)
     pub const WAIT: u32 = 16;
     /// kill(pid) -> 0 (children only)
     pub const KILL: u32 = 17;
@@ -107,6 +107,12 @@ pub mod nr {
     pub const TCP_ACCEPT: u32 = 39;
     /// shutdown(fd) -> 0: no more writing (sends FIN), reading goes on
     pub const SHUTDOWN: u32 = 40;
+    /// setenv(name, name_len, value, value_len) -> 0; value 0 removes the variable
+    pub const SETENV: u32 = 41;
+    /// getenv(name, name_len, buf, len) -> length of the value
+    pub const GETENV: u32 = 42;
+    /// environ(buf, len) -> length of "NAME=value" entries separated by NUL bytes
+    pub const ENVIRON: u32 = 43;
 }
 
 pub mod errno {
@@ -268,7 +274,7 @@ pub extern "C" fn dispatch(frame: &mut SyscallFrame) {
         nr::MKDIR => sys_mkdir(a0, a1),
         nr::BRK => sys_brk(a0),
         nr::SPAWN => sys_spawn(a0, a1, a2, a3),
-        nr::WAIT => sys_wait(a0, a1),
+        nr::WAIT => sys_wait(a0, a1, a2),
         nr::KILL => sys_kill(a0),
         nr::CHDIR => sys_chdir(a0, a1),
         nr::KSHELL => sys_kshell(a0, a1),
@@ -291,6 +297,9 @@ pub extern "C" fn dispatch(frame: &mut SyscallFrame) {
         nr::TCP_LISTEN => sys_tcp_listen(a0),
         nr::TCP_ACCEPT => sys_tcp_accept(a0, a1),
         nr::SHUTDOWN => sys_shutdown(a0),
+        nr::SETENV => sys_setenv(a0, a1, a2, a3),
+        nr::GETENV => sys_getenv(a0, a1, a2, a3),
+        nr::ENVIRON => sys_environ(a0, a1),
         nr::PING => net::ping((a0 as u32).to_be_bytes(), a1 as u16, a2.min(10_000)).map_err(net_errno),
         nr::UDP_SOCKET => sys_udp_socket(a0),
         nr::SENDTO => sys_sendto(a0, a1, a2, a3, a4),
@@ -712,9 +721,9 @@ fn sys_spawn(path: u64, path_len: u64, args: u64, args_len: u64) -> SysResult {
     let args = core::str::from_utf8(&args).map_err(|_| errno::EINVAL)?;
     let image = fs::with_root(|fs| fs.read_file(&path)).map_err(fs_errno)?;
     let me = task::current_id();
-    let (cwd, stdout, std_files) = with_current(|p| {
+    let (cwd, stdout, std_files, env) = with_current(|p| {
         let fd = |i: usize| p.files.get(i).cloned().flatten();
-        (p.cwd.clone(), p.stdout.clone(), [fd(0), fd(1), fd(2)])
+        (p.cwd.clone(), p.stdout.clone(), [fd(0), fd(1), fd(2)], p.env.clone())
     })
     .ok_or(errno::ESRCH)?;
     let name = path.rsplit('/').next().unwrap_or(&path);
@@ -725,6 +734,7 @@ fn sys_spawn(path: u64, path_len: u64, args: u64, args_len: u64) -> SysResult {
         foreground: false, // the console is lent to a child only while we wait for it
         ignore_interrupt: false,
         std_files: Some(std_files), // the child inherits stdin/stdout/stderr (pipes, redirections)
+        env: Some(env),
     };
     super::spawn_with(name, &image, args, opts).map_err(|e| match e {
         ExecError::Elf(_) => errno::ENOEXEC,
@@ -733,15 +743,20 @@ fn sys_spawn(path: u64, path_len: u64, args: u64, args_len: u64) -> SysResult {
     })
 }
 
-fn sys_wait(pid: u64, status_addr: u64) -> SysResult {
+pub const WNOHANG: u64 = 1;
+
+fn sys_wait(pid: u64, status_addr: u64, flags: u64) -> SysResult {
     use super::WaitError;
     if status_addr != 0 && !accessible(status_addr, size_of::<WaitStatus>() as u64, true) {
         return Err(errno::EFAULT);
     }
-    let status = super::wait_child(pid).map_err(|e| match e {
+    let status = super::wait_child(pid, flags & WNOHANG != 0).map_err(|e| match e {
         WaitError::NotAChild => errno::ECHILD,
         WaitError::Interrupted => errno::EINTR,
     })?;
+    let Some(status) = status else {
+        return Ok(0); // still running
+    };
     if status_addr != 0 {
         let mut out = WaitStatus {
             kind: WAIT_EXITED,
@@ -1149,6 +1164,75 @@ fn sys_recvfrom(fd: u64, buf: u64, len: u64, from: u64, timeout_ms: u64) -> SysR
         )?;
     }
     Ok(n as u64)
+}
+
+/// Reads a variable name: non-empty UTF-8 without '=' or NUL.
+fn env_name(addr: u64, len: u64) -> Result<String, i64> {
+    if len == 0 || len > 256 {
+        return Err(errno::EINVAL);
+    }
+    let bytes = copy_from_user(addr, len)?;
+    let name = String::from_utf8(bytes).map_err(|_| errno::EINVAL)?;
+    if name.contains('=') || name.contains('\0') {
+        return Err(errno::EINVAL);
+    }
+    Ok(name)
+}
+
+fn sys_setenv(name: u64, name_len: u64, value: u64, value_len: u64) -> SysResult {
+    let name = env_name(name, name_len)?;
+    let value = if value == 0 {
+        None
+    } else {
+        if value_len > 4096 {
+            return Err(errno::E2BIG);
+        }
+        let v = String::from_utf8(copy_from_user(value, value_len)?).map_err(|_| errno::EINVAL)?;
+        if v.contains('\0') {
+            return Err(errno::EINVAL);
+        }
+        Some(v)
+    };
+    with_current(|p| {
+        let too_many = p.env.len() >= 256 && !p.env.contains_key(&name);
+        match value {
+            Some(_) if too_many => Err(errno::E2BIG),
+            Some(v) => {
+                p.env.insert(name, v);
+                Ok(0)
+            }
+            None => {
+                p.env.remove(&name);
+                Ok(0)
+            }
+        }
+    })
+    .unwrap_or(Err(errno::ESRCH))
+}
+
+fn sys_getenv(name: u64, name_len: u64, buf: u64, len: u64) -> SysResult {
+    let name = env_name(name, name_len)?;
+    let value = with_current(|p| p.env.get(&name).cloned())
+        .flatten()
+        .ok_or(errno::ENOENT)?;
+    if value.len() as u64 > len {
+        return Err(errno::ERANGE);
+    }
+    copy_to_user(buf, value.as_bytes())?;
+    Ok(value.len() as u64)
+}
+
+fn sys_environ(buf: u64, len: u64) -> SysResult {
+    let all = with_current(|p| {
+        let entries: Vec<String> = p.env.iter().map(|(k, v)| alloc::format!("{}={}", k, v)).collect();
+        entries.join("\0")
+    })
+    .unwrap_or_default();
+    if all.len() as u64 > len {
+        return Err(errno::ERANGE);
+    }
+    copy_to_user(buf, all.as_bytes())?;
+    Ok(all.len() as u64)
 }
 
 fn sys_getcwd(buf: u64, len: u64) -> SysResult {

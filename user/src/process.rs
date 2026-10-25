@@ -56,6 +56,25 @@ pub fn wait(pid: u64) -> Result<ExitStatus, Error> {
     })
 }
 
+/// `Some(status)` if child `pid` has ended (and is collected), `None` while it runs.
+pub fn try_wait(pid: u64) -> Result<Option<ExitStatus>, Error> {
+    let mut st = WaitStatus {
+        kind: 0,
+        reason_len: 0,
+        code: 0,
+        reason: [0; 112],
+    };
+    if check(sys::wait_nohang(pid, &mut st))? == 0 {
+        return Ok(None);
+    }
+    Ok(Some(if st.kind == sys::WAIT_KILLED {
+        let reason = &st.reason[..st.reason_len as usize];
+        ExitStatus::Killed(String::from(core::str::from_utf8(reason).unwrap_or("?")))
+    } else {
+        ExitStatus::Exited(st.code)
+    }))
+}
+
 /// Asks child `pid` to end (it is woken up if it is blocked).
 pub fn kill(pid: u64) -> Result<(), Error> {
     check(sys::kill(pid)).map(|_| ())

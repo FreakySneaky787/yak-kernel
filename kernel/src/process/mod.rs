@@ -196,6 +196,16 @@ pub struct Process {
     orphan: bool,
     /// Ctrl+C is delivered as a byte instead of killing the process.
     ignore_interrupt: bool,
+    /// Environment variables (inherited by children at `spawn`).
+    pub env: BTreeMap<String, String>,
+}
+
+/// The environment of processes started by the kernel.
+pub fn default_env() -> BTreeMap<String, String> {
+    let mut env = BTreeMap::new();
+    env.insert(String::from("PATH"), String::from("/bin"));
+    env.insert(String::from("HOME"), String::from("/"));
+    env
 }
 
 impl Process {
@@ -215,6 +225,8 @@ pub struct Options<'a> {
     pub ignore_interrupt: bool,
     /// Descriptors 0..2 for the new process (default: console in/out).
     pub std_files: Option<[Option<Handle>; 3]>,
+    /// Environment (default: `default_env`).
+    pub env: Option<BTreeMap<String, String>>,
 }
 
 impl<'a> Options<'a> {
@@ -226,6 +238,7 @@ impl<'a> Options<'a> {
             foreground: false,
             ignore_interrupt: false,
             std_files: None,
+            env: None,
         }
     }
 }
@@ -310,6 +323,7 @@ pub fn spawn_with(name: &str, elf: &[u8], args: &str, opts: Options) -> Result<P
                 parent: opts.parent,
                 orphan: false,
                 ignore_interrupt: opts.ignore_interrupt,
+                env: opts.env.unwrap_or_else(default_env),
             },
         );
         if opts.foreground {
@@ -441,12 +455,21 @@ pub enum WaitError {
 }
 
 /// `wait` for the system call: only for children of the current process,
-/// and aborted when the caller gets killed.
-pub fn wait_child(pid: Pid) -> Result<ExitStatus, WaitError> {
+/// and aborted when the caller gets killed. With `no_hang`, a child that is
+/// still running gives `Ok(None)` at once (for background jobs).
+pub fn wait_child(pid: Pid, no_hang: bool) -> Result<Option<ExitStatus>, WaitError> {
     let me = task::current_id();
-    let is_child = without_interrupts(|| PROCESSES.lock().get(&pid).is_some_and(|p| p.parent == Some(me)));
+    let (is_child, finished) = without_interrupts(|| {
+        PROCESSES
+            .lock()
+            .get(&pid)
+            .map_or((false, false), |p| (p.parent == Some(me), p.status.is_some()))
+    });
     if !is_child {
         return Err(WaitError::NotAChild);
+    }
+    if no_hang && !finished {
+        return Ok(None);
     }
     // Hand the console to the child for the duration of the wait
     let lend = FOREGROUND
@@ -462,6 +485,7 @@ pub fn wait_child(pid: Pid) -> Result<ExitStatus, WaitError> {
     }
     without_interrupts(|| PROCESSES.lock().remove(&pid))
         .and_then(|p| p.status)
+        .map(Some)
         .ok_or(WaitError::NotAChild)
 }
 

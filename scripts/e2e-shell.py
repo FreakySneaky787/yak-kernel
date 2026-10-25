@@ -246,6 +246,15 @@ STEPS = [
     ("cat /fetched.txt\r", ["Hello from the host over HTTP"], ["error"]),
     ("httpd 80 -n 1\r", ["GET /docs/hello.txt -> 200 OK"], ["error"]),  # the host fetches from the guest
     ("echod -n 1\r", ["echod: listening on port 7", "echoed 50000 bytes", "served 1 connection"], ["error"]),
+    # shell features (M31)
+    ("export WHO=world\r", [], ["error"]),
+    ("echo hello $WHO, status $?\r", ["hello world, status 0"], ["error"]),
+    ("env WHO\r", ["world"], ["error"]),
+    ("ls /nothing 2>&1 | wc\r", ["      1       7"], []),  # "ls: /nothing: no such file or directory"
+    ("hello job &\r", ["[1] "], ["error"]),
+    ("wait\r", ["[1] Done     hello job"], ["error"]),
+    ("write /s.sh 'echo from a script: $1'\r", [], ["error"]),  # quoted: the interactive shell must not expand it
+    ("sh /s.sh argument\r", ["from a script: argument"], ["error"]),
     ("fputest\r", ["fputest: all checks passed"], ["registers changed", "MXCSR changed", "is wrong", "error"]),  # SSE registers per thread (M24)
     # file operations as programs (M22)
     ("touch /t1.txt\r", [], ["error"]),

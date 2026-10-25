@@ -136,7 +136,7 @@ extern "C" fn kmain() -> ! {
     assert_eq!(status, ExitStatus::Exited(0), "{}", out);
     kernel::serial::inject_rx(
         b"ls /bin | sort -r | grep e\recho hello > /r.txt\recho more >> /r.txt\rcat < /r.txt | wc\r\
-          mem > /mem.txt\rcat /mem.txt | grep Physical | wc\rgrep nothing /r.txt | wc\recho > \rexit\r",
+          mem > /mem.txt\rcat /mem.txt | grep Physical | wc\rgrep nothing /r.txt | wc\recho > \rexit 0\r",
     );
     let (status, out) = run("sh", "");
     assert_eq!(status, ExitStatus::Exited(0), "{}", out);
@@ -275,6 +275,41 @@ extern "C" fn kmain() -> ! {
     assert_eq!(process::wait(server), Some(ExitStatus::Exited(0)));
     let log = String::from_utf8(httpd_out.lock().clone()).unwrap();
     assert!(log.contains("GET /docs/hello.txt -> 200 OK"), "{}", log);
+
+    // M31: variables, stderr redirection, background jobs, scripts
+    fs::with_root(|fs| {
+        fs.write_file(
+            "/test.sh",
+            b"#!/bin/sh\n# a comment\necho script arg=$1 count=$# # trailing comment\nset -e\ntrue\nfalse\necho not reached\n",
+        )
+    })
+    .unwrap();
+    let (status, out) = run("sh", "/test.sh foo");
+    assert_eq!(status, ExitStatus::Exited(1), "set -e stops at false: {}", out);
+    assert!(
+        out.contains("script arg=foo count=1\n") && !out.contains("not reached"),
+        "{}",
+        out
+    );
+    kernel::serial::inject_rx(
+        b"export GREETING=hello\rOTHER=world\recho $GREETING ${OTHER} '$GREETING' \\$OTHER\renv GREETING\r\
+          false\recho status=$?\rls /nothing 2> /err.txt\rcat /err.txt\rhello in the background &\rwait\r\
+          /test.sh bar\rexit 3\r",
+    );
+    let (status, out) = run("sh", "");
+    assert_eq!(status, ExitStatus::Exited(3), "{}", out);
+    for expected in [
+        "hello world $GREETING $OTHER\n", // expansion, single quotes and \$ keep the dollar
+        "> env GREETING\nhello\n",        // inherited by a child process
+        "status=1\n",
+        "ls: /nothing: no such file or directory", // stderr went to the file
+        "[1] ",                                    // job number and pid
+        "Hello from user space!",
+        "[1] Done     hello in the background",
+        "script arg=bar count=1", // "#!" file started by name
+    ] {
+        assert!(out.contains(expected), "missing {:?} in:\n{}", expected, out);
+    }
 
     assert_eq!(process::count(), 0);
     serial_println!("[ok]");

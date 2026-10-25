@@ -20,20 +20,32 @@ impl fmt::Write for Stderr {
     }
 }
 
+// The macros format into one string and write it with a single system call,
+// so lines of programs running at the same time do not get mixed up.
 #[macro_export]
 macro_rules! print {
-    ($($arg:tt)*) => { { use core::fmt::Write; let _ = write!($crate::io::Stdout, $($arg)*); } };
+    ($($arg:tt)*) => {{
+        let _ = $crate::sys::write($crate::sys::STDOUT, $crate::__format!($($arg)*).as_bytes());
+    }};
 }
 
 #[macro_export]
 macro_rules! println {
     () => { $crate::print!("\n") };
-    ($($arg:tt)*) => { { use core::fmt::Write; let _ = writeln!($crate::io::Stdout, $($arg)*); } };
+    ($($arg:tt)*) => {{
+        let mut line = $crate::__format!($($arg)*);
+        line.push('\n');
+        let _ = $crate::sys::write($crate::sys::STDOUT, line.as_bytes());
+    }};
 }
 
 #[macro_export]
 macro_rules! eprintln {
-    ($($arg:tt)*) => { { use core::fmt::Write; let _ = writeln!($crate::io::Stderr, $($arg)*); } };
+    ($($arg:tt)*) => {{
+        let mut line = $crate::__format!($($arg)*);
+        line.push('\n');
+        let _ = $crate::sys::write($crate::sys::STDERR, line.as_bytes());
+    }};
 }
 
 /// Reads one line into `buf` and returns it without the newline; `None` at

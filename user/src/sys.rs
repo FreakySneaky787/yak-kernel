@@ -45,6 +45,9 @@ pub const TCP_CONNECT: u64 = 37;
 pub const TCP_LISTEN: u64 = 38;
 pub const TCP_ACCEPT: u64 = 39;
 pub const SHUTDOWN: u64 = 40;
+pub const SETENV: u64 = 41;
+pub const GETENV: u64 = 42;
+pub const ENVIRON: u64 = 43;
 
 pub const STDIN: u64 = 0;
 pub const STDOUT: u64 = 1;
@@ -245,6 +248,13 @@ pub fn spawn(path: &str, args: &[u8]) -> i64 {
 /// Waits for child `pid`; returns `pid` or -errno.
 pub fn wait(pid: u64, status: &mut WaitStatus) -> i64 {
     unsafe { syscall3(WAIT, pid, status as *mut WaitStatus as u64, 0) }
+}
+
+pub const WNOHANG: u64 = 1;
+
+/// Like `wait`, but returns 0 at once while the child still runs.
+pub fn wait_nohang(pid: u64, status: &mut WaitStatus) -> i64 {
+    unsafe { syscall3(WAIT, pid, status as *mut WaitStatus as u64, WNOHANG) }
 }
 
 pub fn kill(pid: u64) -> i64 {
@@ -484,4 +494,28 @@ pub fn tcp_accept(fd: u64, from: &mut SockAddr) -> i64 {
 /// No more writing on a TCP connection (the peer sees the end of the stream).
 pub fn shutdown(fd: u64) -> i64 {
     unsafe { syscall3(SHUTDOWN, fd, 0, 0) }
+}
+
+/// Sets (or with `None` removes) an environment variable of this process.
+pub fn setenv(name: &str, value: Option<&str>) -> i64 {
+    let (ptr, len) = value.map_or((0, 0), |v| (v.as_ptr() as u64, v.len() as u64));
+    unsafe { syscall4(SETENV, name.as_ptr() as u64, name.len() as u64, ptr, len) }
+}
+
+/// Copies the value of `name` into `buf`; returns its length or -errno (-ENOENT: not set).
+pub fn getenv(name: &str, buf: &mut [u8]) -> i64 {
+    unsafe {
+        syscall4(
+            GETENV,
+            name.as_ptr() as u64,
+            name.len() as u64,
+            buf.as_mut_ptr() as u64,
+            buf.len() as u64,
+        )
+    }
+}
+
+/// All variables as "NAME=value" entries separated by NUL bytes.
+pub fn environ(buf: &mut [u8]) -> i64 {
+    unsafe { syscall3(ENVIRON, buf.as_mut_ptr() as u64, buf.len() as u64, 0) }
 }

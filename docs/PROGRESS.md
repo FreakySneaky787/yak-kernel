@@ -56,7 +56,7 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 | 28 | Microsecond clock from the TSC, `time` program, ping in µs | ✅ | 2 TSC unit tests (calibration, agreement with the tick clock), `time hello` in integration test + E2E |
 | 29 | TCP: connect/listen/accept, retransmission, flow control; client and server programs | ✅ | TCP packet test, refused + 100 KB loopback echo in the kernel, `nc`/`echod` between processes, E2E: host echo, 100 KB from the host, host → guest 50 KB via hostfwd |
 | 30 | DHCP and a DNS client; HTTP client (`wget`) and server (`httpd`) | ✅ | DHCP packet test, `card_is_configured` checks the DHCP lease, `host --selftest` (7 DNS checks), httpd + wget over loopback (200/404), E2E: fake DNS on the host, wget from a host HTTP server, the host fetches from httpd via hostfwd |
-| 31 | Shell: scripts, environment variables, `2>`, background jobs (`&`, `jobs`, `wait`) | ⬜ | |
+| 31 | Shell: scripts, environment variables, `2>`, background jobs (`&`, `jobs`, `wait`) | ✅ | scripted sh session (expansion, inheritance, `$?`, `2>`, job + `wait`, `#!` script) and a `set -e` script in the integration test, 8 E2E steps |
 | 32 | Storage speed: sector cache for FAT32, AHCI completion interrupts (MSI) | ⬜ | |
 | 33 | Memory: reclaim bootloader memory, demand paging for user heaps | ⬜ | |
 
@@ -240,6 +240,14 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   `net_info`, which now reports DNS and DHCP). Programs `host`, `wget` (HTTP/1.0, `-O file`), `httpd` (files below the cwd,
   directory listings, 403/404/405).
 
+- **2026-10-25** – M31: per-process environment in the kernel (inherited at `spawn`, init gets `PATH=/bin`, `HOME=/`),
+  syscalls 41–43 `setenv`/`getenv`/`environ`, `wait` flag WNOHANG. `/bin/sh` rewritten around it: `$NAME`/`${NAME}`/`$?`/
+  `$$`/`$#`/`$0..$9` expansion (not in '...', `\$` escapes), `#` comments, `NAME=value`/`export`/`unset`, `$PATH` lookup,
+  `2>`/`2>>`/`2>&1`, background jobs (`&`, `jobs`, `wait`, `fg`, "Done" before the prompt), scripts (`sh file args`,
+  `sh -c`, `source`/`.`, `#!` files run through `sh`, `set -e`), `true`/`false`, `exit` defaults to `$?`. New program `env`.
+  Found: lines of concurrent programs were mixed mid-line because `println!` wrote every format piece separately – the
+  `ulib` print macros now format first and write once.
+
 ## Open items / later
 - AHCI uses polling; switching to completion interrupts (MSI or the PCI interrupt line) would free the CPU during I/O.
 - Thread-level sleeping mutex (today all shared state uses spin locks with interrupts disabled).
@@ -251,15 +259,14 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   only a single CPU, no signals beyond "kill", no pipes (a child always writes to its parent's output).
 - Network: no fragmentation, no TCP window scaling/SACK/persist timer, DHCP lease not renewed, DNS only A records;
   polled driver (10 ms latency).
-- `kshell`/`kcommands` are a bridge: the information commands (mem, ps, cpu, acpi, lspci, ...) should become real syscalls
-  and programs. `/bin/sh`: no scripts, no environment variables, no `2>`, operators must be separate words, built-in output
-  in a pipeline must fit into one pipe (64 KiB) because it is written before the next stage starts.
+- `kshell`/`kcommands` are a bridge for the remaining kernel commands. `/bin/sh`: no `if`/`while`/functions, operators must be
+  separate words, built-in output in a pipeline must fit into one pipe (64 KiB), background jobs share the keyboard with the shell.
 - File syscalls: `read`/`write_at` re-walk the cluster chain per call; directory handles are snapshots; no truncate-to-length.
 - Still behind `kshell`: cpu, acpi, lspci, disk, hexdump, memmap, layout, demo, colors, version, int3, panic, reboot, poweroff,
   write, append, echo, sleep, clear, help. Without `/bin` on the disk, the kernel shell has no `ls`/`cat`.
 
 ## Next step
-**M31 – shell:** scripts (`sh file.sh`, `#` comments, one command per line, stop on error with `set -e`?), environment
-variables (`export NAME=value`, `$NAME` / `${NAME}` expansion, `env` program, inherited by children through a new spawn
-argument block), `2>` / `2>&1`, background jobs (`cmd &`, `jobs`, `wait [%n]`, Ctrl+C only for the foreground job).
-Then M32 (FAT32 sector cache, AHCI MSI), M33 (reclaim bootloader memory, demand paging).
+**M32 – storage speed:** a sector/cluster cache between FAT32 and the disk (write-through, LRU, a few hundred KiB; FAT
+sectors and directories benefit most), measured with `time cat` of a large file before/after; then AHCI completion
+interrupts via MSI (PCI capability list, message address/data to the local APIC) so a disk wait blocks the thread instead
+of polling. Then M33 (reclaim bootloader memory, demand paging for user heaps).

@@ -204,6 +204,8 @@
 - **User heap** (`ulib::heap`): first-fit allocator, free list sorted by address with coalescing, 16-byte units, grows the
   break by ≥ 64 KiB at a time. No lock (programs are single-threaded). `sys_brk` takes the `AddressSpace` out of the process
   table while it maps/unmaps, so zeroing megabytes does not run with the table lock held (interrupts off).
+- **Environment** (M31): `Process::env` (BTreeMap), copied into children by `spawn`; syscalls `setenv`/`getenv`/`environ`.
+  `/bin/sh` keeps no variables of its own – shell variables *are* environment variables.
 - **Shell**: a word that is not a built-in is a program path or a name in `/bin`; `run <path> [args]` does the same explicitly.
   Programs run in the shell's cwd. `ls`, `cat` and `cp` are programs (no built-ins any more). Non-zero exit codes and kills
   are reported as errors. `Shell::capture_programs` makes program output go to the command's `out` (unit tests).

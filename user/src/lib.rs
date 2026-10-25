@@ -17,6 +17,7 @@
 extern crate alloc;
 
 pub mod dns;
+pub mod env;
 pub mod fs;
 pub mod heap;
 pub mod io;
@@ -24,6 +25,9 @@ pub mod process;
 pub mod sys;
 
 use core::panic::PanicInfo;
+
+#[doc(hidden)]
+pub use alloc::format as __format;
 
 #[global_allocator]
 static HEAP: heap::Heap = heap::Heap::new();

@@ -289,6 +289,14 @@ Short explanations of every subsystem: what it is and why we need it.
 - **HTTP** is plain text over TCP: `GET /path HTTP/1.0`, an empty line, and the server answers with a status line,
   headers, an empty line and the file.
 
+## M31 – A shell you can program
+- **Environment variables** are name/value pairs every process carries; a child gets a copy of its parent's. `PATH` tells
+  the shell where to look for programs.
+- Before a line is split into words, the shell replaces `$NAME` with the value – except inside single quotes.
+- `2>` redirects the *error* output (fd 2) the same way `>` redirects fd 1; `2>&1` makes fd 2 point where fd 1 points.
+- `cmd &` starts a program without waiting; the shell keeps a job list and reports when the job is done.
+- A **script** is just a file with shell lines; `#!` at the start tells the shell to run it with `sh`.
+
 ## Tooling – GNU ld and binutils
 - rustc compiles our code into object files; a **linker** combines them into the final ELF according to `kernel/linker.ld`
   (load address, section order, segments). We use **GNU ld** (`ld.bfd`) for that.
