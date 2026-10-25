@@ -279,6 +279,16 @@ Short explanations of every subsystem: what it is and why we need it.
   that counts up at a fixed, high rate (GHz). We only have to find out *how* fast: count TSC ticks while the PIT (whose
   frequency is known exactly) measures 50 ms. After that, `TSC difference / frequency` gives microseconds.
 
+## M29/M30 – TCP, DHCP, DNS, HTTP
+- **TCP** turns lost, duplicated or reordered packets into a reliable byte stream: every byte has a sequence number, the
+  receiver acknowledges what it got, and the sender repeats what was not acknowledged in time. A three-way handshake
+  (SYN, SYN-ACK, ACK) opens a connection, FIN packets close each direction.
+- **DHCP**: a new machine shouts "I need an address" (broadcast), a server offers one, the machine requests it, the server
+  confirms – together with gateway and DNS server.
+- **DNS** translates names into addresses: a small UDP question to a name server, which answers with A records.
+- **HTTP** is plain text over TCP: `GET /path HTTP/1.0`, an empty line, and the server answers with a status line,
+  headers, an empty line and the file.
+
 ## Tooling – GNU ld and binutils
 - rustc compiles our code into object files; a **linker** combines them into the final ELF according to `kernel/linker.ld`
   (load address, section order, segments). We use **GNU ld** (`ld.bfd`) for that.

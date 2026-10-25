@@ -366,6 +366,89 @@ pub fn seq_le(a: u32, b: u32) -> bool {
     a == b || seq_lt(a, b)
 }
 
+// ---- DHCP (RFC 2131: BOOTP message + options) ----
+
+pub const DHCP_DISCOVER: u8 = 1;
+pub const DHCP_OFFER: u8 = 2;
+pub const DHCP_REQUEST: u8 = 3;
+pub const DHCP_ACK: u8 = 5;
+pub const DHCP_NAK: u8 = 6;
+const DHCP_MAGIC: u32 = 0x6382_5363;
+const DHCP_OPTIONS: usize = 240; // fixed BOOTP part + magic cookie
+
+/// The parts of a DHCP reply we use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DhcpReply {
+    pub msg_type: u8,
+    pub your_ip: Ipv4Addr,
+    pub server_id: Ipv4Addr,
+    pub netmask: Ipv4Addr,
+    pub router: Ipv4Addr,
+    pub dns: Ipv4Addr,
+    pub lease_secs: u32,
+}
+
+/// A client message (DISCOVER or REQUEST) with the broadcast flag set, so
+/// that the server answers before we have an address.
+pub fn build_dhcp(msg_type: u8, xid: u32, mac: Mac, requested: Option<Ipv4Addr>, server: Option<Ipv4Addr>) -> Vec<u8> {
+    let mut p = alloc::vec![0u8; DHCP_OPTIONS];
+    p[0] = 1; // BOOTREQUEST
+    p[1] = 1; // Ethernet
+    p[2] = 6;
+    p[4..8].copy_from_slice(&xid.to_be_bytes());
+    p[10..12].copy_from_slice(&0x8000u16.to_be_bytes()); // broadcast flag
+    p[28..34].copy_from_slice(&mac);
+    p[236..240].copy_from_slice(&DHCP_MAGIC.to_be_bytes());
+    p.extend_from_slice(&[53, 1, msg_type]);
+    if let Some(ip) = requested {
+        p.extend_from_slice(&[50, 4]);
+        p.extend_from_slice(&ip);
+    }
+    if let Some(ip) = server {
+        p.extend_from_slice(&[54, 4]);
+        p.extend_from_slice(&ip);
+    }
+    p.extend_from_slice(&[55, 3, 1, 3, 6]); // ask for netmask, router, DNS
+    p.push(255);
+    p
+}
+
+/// Parses a server reply for transaction `xid`.
+pub fn parse_dhcp(p: &[u8], xid: u32) -> Option<DhcpReply> {
+    if p.len() < DHCP_OPTIONS || p[0] != 2 || be32(p, 4) != xid || be32(p, 236) != DHCP_MAGIC {
+        return None;
+    }
+    let mut r = DhcpReply {
+        your_ip: p[16..20].try_into().unwrap(),
+        ..DhcpReply::default()
+    };
+    let mut i = DHCP_OPTIONS;
+    while i < p.len() {
+        let code = p[i];
+        if code == 255 {
+            break;
+        }
+        if code == 0 {
+            i += 1;
+            continue;
+        }
+        let len = *p.get(i + 1)? as usize;
+        let v = p.get(i + 2..i + 2 + len)?;
+        let ip = || -> Ipv4Addr { v.get(..4).map_or([0; 4], |b| b.try_into().unwrap()) };
+        match code {
+            53 if len == 1 => r.msg_type = v[0],
+            1 => r.netmask = ip(),
+            3 => r.router = ip(),
+            6 => r.dns = ip(),
+            54 => r.server_id = ip(),
+            51 if len == 4 => r.lease_secs = be32(v, 0),
+            _ => {}
+        }
+        i += 2 + len;
+    }
+    (r.msg_type != 0).then_some(r)
+}
+
 /// "10.0.2.15" -> [10, 0, 2, 15]
 pub fn parse_ipv4_addr(s: &str) -> Option<Ipv4Addr> {
     let mut out = [0u8; 4];
@@ -446,6 +529,35 @@ mod tests {
         // wrap-around
         assert!(seq_lt(0xFFFF_FFF0, 0x10) && !seq_lt(0x10, 0xFFFF_FFF0));
         assert!(seq_le(7, 7) && seq_le(7, 8) && !seq_le(8, 7));
+    }
+
+    #[test_case]
+    fn dhcp_messages() {
+        let mac = [0x52, 0x54, 0, 0x12, 0x34, 0x56];
+        let d = build_dhcp(DHCP_REQUEST, 0xABCD, mac, Some([10, 0, 2, 15]), Some([10, 0, 2, 2]));
+        assert_eq!((d[0], &d[28..34]), (1, &mac[..]));
+        assert!(
+            d.windows(6).any(|w| w == [50, 4, 10, 0, 2, 15]),
+            "requested address missing"
+        );
+        // turn it into a server reply: op 2, yiaddr, options OFFER + netmask + router + DNS + lease
+        let mut r = d[..240].to_vec();
+        r[0] = 2;
+        r[16..20].copy_from_slice(&[10, 0, 2, 15]);
+        r.extend_from_slice(&[
+            53, 1, DHCP_OFFER, 1, 4, 255, 255, 255, 0, 3, 4, 10, 0, 2, 2, 6, 4, 10, 0, 2, 3,
+        ]);
+        r.extend_from_slice(&[54, 4, 10, 0, 2, 2, 51, 4, 0, 0, 0x0E, 0x10, 0, 255]);
+        let p = parse_dhcp(&r, 0xABCD).unwrap();
+        assert_eq!(
+            (p.msg_type, p.your_ip, p.netmask),
+            (DHCP_OFFER, [10, 0, 2, 15], [255, 255, 255, 0])
+        );
+        assert_eq!(
+            (p.router, p.dns, p.server_id, p.lease_secs),
+            ([10, 0, 2, 2], [10, 0, 2, 3], [10, 0, 2, 2], 3600)
+        );
+        assert!(parse_dhcp(&r, 0x1234).is_none(), "wrong transaction id accepted");
     }
 
     #[test_case]

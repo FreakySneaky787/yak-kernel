@@ -982,11 +982,12 @@ fn sys_seek(fd: u64, offset: i64, whence: u64) -> SysResult {
 pub struct NetInfo {
     pub mac: [u8; 6],
     pub link_up: u8,
-    pub _pad: u8,
+    /// 1 = configured by DHCP, 0 = static fallback
+    pub dhcp: u8,
     pub ip: [u8; 4],
     pub netmask: [u8; 4],
     pub gateway: [u8; 4],
-    pub _pad2: u32,
+    pub dns: [u8; 4],
     pub rx_frames: u64,
     pub tx_frames: u64,
 }
@@ -1092,6 +1093,8 @@ fn sys_net_info(addr: u64) -> SysResult {
         ip: cfg.ip,
         netmask: cfg.netmask,
         gateway: cfg.gateway,
+        dns: cfg.dns,
+        dhcp: cfg.dhcp as u8,
         rx_frames: rx,
         tx_frames: tx,
         ..NetInfo::default()

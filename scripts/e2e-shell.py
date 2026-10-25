@@ -88,10 +88,67 @@ def tcp_bulk(conn):
 TCP_ECHO_PORT = start_tcp_server(tcp_echo)
 TCP_BULK_PORT = start_tcp_server(tcp_bulk)
 
-# host -> guest: QEMU forwards this host port to port 7 in the guest (echod)
-with socket.socket() as _s:
-    _s.bind(("127.0.0.1", 0))
-    FWD_PORT = _s.getsockname()[1]
+def free_port():
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+# host -> guest: QEMU forwards these host ports to echod (7) and httpd (80) in the guest
+FWD_PORT = free_port()
+FWD_HTTP_PORT = free_port()
+
+
+def start_fake_dns():
+    """Answers every A query with 10.0.2.2 (the host as seen from the guest)."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind(("127.0.0.1", 0))
+
+    def serve():
+        while True:
+            q, addr = sock.recvfrom(512)
+            end = 12
+            while q[end] != 0:
+                end += q[end] + 1
+            question = q[12:end + 5]
+            answer = b"\xc0\x0c\x00\x01\x00\x01\x00\x00\x00\x3c\x00\x04" + bytes([10, 0, 2, 2])
+            sock.sendto(q[:2] + b"\x81\x80\x00\x01\x00\x01\x00\x00\x00\x00" + question + answer, addr)
+
+    threading.Thread(target=serve, daemon=True).start()
+    return sock.getsockname()[1]
+
+
+DNS_PORT = start_fake_dns()
+HTTP_BODY = b"Hello from the host over HTTP\n"
+
+
+def http_handler(conn):
+    req = b""
+    while b"\r\n\r\n" not in req and (chunk := conn.recv(1024)):
+        req += chunk
+    status = b"200 OK" if req.startswith(b"GET /hello ") else b"404 Not Found"
+    body = HTTP_BODY if status == b"200 OK" else b"not here\n"
+    conn.sendall(b"HTTP/1.0 " + status + b"\r\nContent-Length: " + str(len(body)).encode() + b"\r\n\r\n" + body)
+
+
+HTTP_PORT = start_tcp_server(http_handler)
+GUEST_HTTP = {"ok": False}
+
+
+def fetch_from_guest_httpd():
+    """Retries until httpd in the guest serves /docs/hello.txt (it runs during one step)."""
+    deadline = time.time() + 600
+    while time.time() < deadline and not GUEST_HTTP["ok"]:
+        try:
+            with socket.create_connection(("127.0.0.1", FWD_HTTP_PORT), timeout=5) as s:
+                s.sendall(b"GET /docs/hello.txt HTTP/1.0\r\n\r\n")
+                got = b""
+                while chunk := s.recv(65536):
+                    got += chunk
+                GUEST_HTTP["ok"] = got.startswith(b"HTTP/1.0 200 OK") and b"SATA disk" in got
+        except OSError:
+            pass
+        time.sleep(0.5)
 HOST_TO_GUEST = {"ok": False}
 
 
@@ -176,12 +233,18 @@ STEPS = [
     ("grep sh /ps.txt\r", ["sh"], ["error"]),
     ("fault spin | cat\r" + PAUSE + CTRL_C, ["fault was killed: interrupted"], []),
     ("pipetest\r", ["pipetest: all checks passed"], ["FAIL"]),
-    ("netinfo\r", ["IPv4     10.0.2.15", "link up"], ["error"]),  # network (M27)
+    ("netinfo\r", ["IPv4     10.0.2.15", "link up", "DNS      10.0.2.3", "config   DHCP"], ["error"]),  # M27, M30
     ("time hello\r", ["Hello from user space", "real 0.1"], ["error"]),  # TSC clock (M28)
     ("ping 10.0.2.2 2\r", ["reply from 10.0.2.2: seq=1", "2 packets sent, 2 received"], ["error"]),
     (f"udpecho 10.0.2.2 {UDP_PORT} hello over UDP\r", [f"reply from 10.0.2.2:{UDP_PORT}: hello over UDP"], ["error"]),
     (f"nc 10.0.2.2 {TCP_ECHO_PORT} hello over TCP\r", ["hello over TCP"], ["error"]),  # TCP (M29)
     (f"echo go | nc 10.0.2.2 {TCP_BULK_PORT} | wc\r", ["  100000"], ["error"]),  # 100 KB from the host
+    (f"host www.kerneltry.test 10.0.2.2 {DNS_PORT}\r", ["www.kerneltry.test has address 10.0.2.2"], ["error"]),  # M30
+    ("host --selftest\r", ["host selftest: all checks passed"], ["FAIL"]),
+    (f"wget http://10.0.2.2:{HTTP_PORT}/hello\r", ["Hello from the host over HTTP", "200 OK"], ["error"]),
+    (f"wget -O /fetched.txt http://10.0.2.2:{HTTP_PORT}/hello\r", ["200 OK"], ["error"]),
+    ("cat /fetched.txt\r", ["Hello from the host over HTTP"], ["error"]),
+    ("httpd 80 -n 1\r", ["GET /docs/hello.txt -> 200 OK"], ["error"]),  # the host fetches from the guest
     ("echod -n 1\r", ["echod: listening on port 7", "echoed 50000 bytes", "served 1 connection"], ["error"]),
     ("fputest\r", ["fputest: all checks passed"], ["registers changed", "MXCSR changed", "is wrong", "error"]),  # SSE registers per thread (M24)
     # file operations as programs (M22)
@@ -263,7 +326,7 @@ def run_session(root, elf, extra_args, disk, steps, title):
         [os.path.join(root, "scripts/run-qemu.sh"), elf, "-display", "none", *extra_args],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         env=dict(os.environ, KERNEL_MODE="run", KERNEL_DISK=disk,
-                 KERNEL_NETDEV_OPTS=f"hostfwd=tcp:127.0.0.1:{FWD_PORT}-:7"))
+                 KERNEL_NETDEV_OPTS=f"hostfwd=tcp:127.0.0.1:{FWD_PORT}-:7,hostfwd=tcp:127.0.0.1:{FWD_HTTP_PORT}-:80"))
     reader = Reader(proc.stdout)
     reader.start()
     failures = 0
@@ -319,7 +382,13 @@ def main() -> int:
     subprocess.run([os.path.join(root, "scripts/mkdisk.sh"), disk, "64"], check=True, stderr=subprocess.DEVNULL)
 
     threading.Thread(target=host_to_guest_echo, daemon=True).start()
+    threading.Thread(target=fetch_from_guest_httpd, daemon=True).start()
     failures = run_session(root, elf, extra_args, disk, STEPS, "session 1")
+    if GUEST_HTTP["ok"]:
+        print("ok    host -> guest HTTP: httpd served /docs/hello.txt")
+    else:
+        failures += 1
+        print("FAIL  host -> guest HTTP: no answer from httpd")
     if HOST_TO_GUEST["ok"]:
         print("ok    host -> guest TCP: echod echoed 50000 bytes")
     else:

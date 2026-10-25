@@ -257,6 +257,25 @@ extern "C" fn kmain() -> ! {
     assert_eq!(status, ExitStatus::Exited(1));
     assert!(out.contains("connection refused"), "{}", out);
 
+    // M30: DNS client and HTTP over loopback
+    let (status, out) = run("host", "--selftest");
+    assert_eq!(status, ExitStatus::Exited(0), "{}", out);
+    assert!(run("netinfo", "").1.contains("config   DHCP"));
+    let image = fs::with_root(|fs| fs.read_file("/bin/httpd")).unwrap();
+    let httpd_out = Arc::new(Mutex::new(Vec::new()));
+    let server = process::spawn("httpd", &image, "8080\0-n\02", Output::Capture(httpd_out.clone())).unwrap();
+    kernel::time::sleep_ms(100);
+    let (status, out) = run("wget", "http://10.0.2.15:8080/docs/hello.txt");
+    let file = String::from_utf8(fs::with_root(|fs| fs.read_file("/docs/hello.txt")).unwrap()).unwrap();
+    assert_eq!(status, ExitStatus::Exited(0), "{}", out);
+    assert!(out.contains(&file) && out.contains("HTTP/1.0 200 OK"), "{}", out);
+    let (status, out) = run("wget", "http://10.0.2.15:8080/nothing");
+    assert_eq!(status, ExitStatus::Exited(1));
+    assert!(out.contains("404 Not Found"), "{}", out);
+    assert_eq!(process::wait(server), Some(ExitStatus::Exited(0)));
+    let log = String::from_utf8(httpd_out.lock().clone()).unwrap();
+    assert!(log.contains("GET /docs/hello.txt -> 200 OK"), "{}", log);
+
     assert_eq!(process::count(), 0);
     serial_println!("[ok]");
     exit(ExitCode::Success)

@@ -55,7 +55,7 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 |---|---|---|---|
 | 28 | Microsecond clock from the TSC, `time` program, ping in µs | ✅ | 2 TSC unit tests (calibration, agreement with the tick clock), `time hello` in integration test + E2E |
 | 29 | TCP: connect/listen/accept, retransmission, flow control; client and server programs | ✅ | TCP packet test, refused + 100 KB loopback echo in the kernel, `nc`/`echod` between processes, E2E: host echo, 100 KB from the host, host → guest 50 KB via hostfwd |
-| 30 | DHCP and a DNS client; HTTP client (`wget`) and server (`httpd`) | ⬜ | |
+| 30 | DHCP and a DNS client; HTTP client (`wget`) and server (`httpd`) | ✅ | DHCP packet test, `card_is_configured` checks the DHCP lease, `host --selftest` (7 DNS checks), httpd + wget over loopback (200/404), E2E: fake DNS on the host, wget from a host HTTP server, the host fetches from httpd via hostfwd |
 | 31 | Shell: scripts, environment variables, `2>`, background jobs (`&`, `jobs`, `wait`) | ⬜ | |
 | 32 | Storage speed: sector cache for FAT32, AHCI completion interrupts (MSI) | ⬜ | |
 | 33 | Memory: reclaim bootloader memory, demand paging for user heaps | ⬜ | |
@@ -234,6 +234,12 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   when a thread on another CPU sent a job to CPU 0); one idle loop for all CPUs now, regression test added. IPIs are sent with
   interrupts off; SMP-robust leak tests (`pmm::frames_lost`).
 
+- **2026-10-25** – M30: `net/dhcp.rs` (DISCOVER/OFFER/REQUEST/ACK with the broadcast flag; `net::init` waits up to 3 s per
+  step, static fallback otherwise); the network config is now mutable (`dns`, `dhcp` flag) and accepts all packets to our MAC
+  while unconfigured. DNS client in user space (`ulib::dns`: query building, compressed-name parsing, retries; server from
+  `net_info`, which now reports DNS and DHCP). Programs `host`, `wget` (HTTP/1.0, `-O file`), `httpd` (files below the cwd,
+  directory listings, 403/404/405).
+
 ## Open items / later
 - AHCI uses polling; switching to completion interrupts (MSI or the PCI interrupt line) would free the CPU during I/O.
 - Thread-level sleeping mutex (today all shared state uses spin locks with interrupts disabled).
@@ -243,8 +249,8 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 - `gcc` is installed now → `make limine-tool` (bios-install for USB/HDD images) could be used (not tried yet).
 - User space: no AVX (XSAVE not enabled, AVX instructions kill the program), no SMAP/SMEP, heap is mapped eagerly (no demand paging),
   only a single CPU, no signals beyond "kill", no pipes (a child always writes to its parent's output).
-- Network: static IP (no DHCP), no TCP, no fragmentation, no DNS client; polled driver (10 ms latency); ping resolution
-  10 ms (no fine-grained clock).
+- Network: no fragmentation, no TCP window scaling/SACK/persist timer, DHCP lease not renewed, DNS only A records;
+  polled driver (10 ms latency).
 - `kshell`/`kcommands` are a bridge: the information commands (mem, ps, cpu, acpi, lspci, ...) should become real syscalls
   and programs. `/bin/sh`: no scripts, no environment variables, no `2>`, operators must be separate words, built-in output
   in a pipeline must fit into one pipe (64 KiB) because it is written before the next stage starts.
@@ -253,6 +259,7 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   write, append, echo, sleep, clear, help. Without `/bin` on the disk, the kernel shell has no `ls`/`cat`.
 
 ## Next step
-Continue stage 6 with **M30 – DHCP + DNS client + `wget`/`httpd`** (TCP from M29 is ready), then M31 (shell scripts, env vars,
-`2>`, `&`), M32 (FAT32 sector cache, AHCI MSI), M33 (reclaim bootloader memory, demand paging).
-Note: after M29 the full `make check` was green; `KERNEL_SMP=1 make test` was started but its result was not checked – run it first.
+**M31 – shell:** scripts (`sh file.sh`, `#` comments, one command per line, stop on error with `set -e`?), environment
+variables (`export NAME=value`, `$NAME` / `${NAME}` expansion, `env` program, inherited by children through a new spawn
+argument block), `2>` / `2>&1`, background jobs (`cmd &`, `jobs`, `wait [%n]`, Ctrl+C only for the foreground job).
+Then M32 (FAT32 sector cache, AHCI MSI), M33 (reclaim bootloader memory, demand paging).

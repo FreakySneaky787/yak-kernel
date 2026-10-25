@@ -223,7 +223,9 @@
   RX ring 32 × 16-byte descriptors (one frame), TX ring 8; DMA buffers 2 KiB (two per frame). RCTL: broadcast accepted, CRC
   stripped; TCTL: pad short packets. TX descriptors start with DD set so "DD = slot free". Polled – no MSI on this model and
   INTx routing would need the ACPI `_PRT` (AML), which we do not interpret.
-- **Stack** (`net/`): static config for QEMU's slirp (10.0.2.15/24, gateway and host = 10.0.2.2, DNS 10.0.2.3). The `net`
+- **Stack** (`net/`): configured by DHCP at boot (`net/dhcp.rs`), static fallback = QEMU's slirp defaults (10.0.2.15/24,
+  gateway and host = 10.0.2.2, DNS 10.0.2.3). TCP (`net/tcp.rs`) is described in its module docs; packets to our own address
+  go through a loopback queue handled by the net thread. DNS is a user-space library (`ulib::dns`). The `net`
   kernel thread polls every 10 ms, then `notify(Wait::Net)` – that doubles as the tick for timeouts of everyone waiting on the
   network. ARP: cache learned from requests/replies addressed to us and from IPv4 packets of on-link hosts; `resolve` sends up
   to 3 requests. IPv4: no options sent, fragments dropped, DF set. ICMP: echo requests answered, replies with our id recorded.

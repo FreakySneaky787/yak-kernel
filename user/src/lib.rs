@@ -9,12 +9,14 @@
 //! - `fs`: files and directories (`File`, `Dir`, `stat`, `cwd`).
 //! - `heap`: the `#[global_allocator]` – programs can use `alloc` (`Vec`, `String`, ...).
 //! - `process`: start child programs, wait for them, kill them.
+//! - `dns`: name -> IPv4 address.
 //! - A panic handler that prints the message and exits with code 101.
 
 #![no_std]
 
 extern crate alloc;
 
+pub mod dns;
 pub mod fs;
 pub mod heap;
 pub mod io;

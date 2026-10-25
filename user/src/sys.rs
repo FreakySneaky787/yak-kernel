@@ -388,11 +388,12 @@ pub fn ignore_interrupt(on: bool) {
 pub struct NetInfo {
     pub mac: [u8; 6],
     pub link_up: u8,
-    pub _pad: u8,
+    /// 1 = configured by DHCP, 0 = static fallback
+    pub dhcp: u8,
     pub ip: [u8; 4],
     pub netmask: [u8; 4],
     pub gateway: [u8; 4],
-    pub _pad2: u32,
+    pub dns: [u8; 4],
     pub rx_frames: u64,
     pub tx_frames: u64,
 }

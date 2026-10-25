@@ -1,8 +1,9 @@
 //! A small IPv4 network stack on top of the e1000 driver.
 //!
-//! Configuration is static and matches QEMU's user-mode network ("slirp"):
-//! we are 10.0.2.15/24, the virtual gateway is 10.0.2.2 (it answers pings,
-//! and UDP sent to it reaches the host's 127.0.0.1), DNS would be 10.0.2.3.
+//! The configuration comes from DHCP at boot (`dhcp`); without an answer
+//! we fall back to QEMU's user-mode defaults ("slirp"): 10.0.2.15/24, the
+//! virtual gateway 10.0.2.2 (it answers pings, and traffic to it reaches the
+//! host's 127.0.0.1), DNS 10.0.2.3.
 //!
 //! - A kernel thread ("net") polls the card every 10 ms, handles ARP
 //!   (answers requests for our address, learns replies), answers ICMP echo
@@ -19,6 +20,7 @@
 //! The small state locks below are only taken with interrupts disabled
 //! (they are read from `wait_for` conditions, which run with interrupts off).
 
+pub mod dhcp;
 pub mod packet;
 pub mod tcp;
 
@@ -31,7 +33,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU16, Ordering};
 use packet::*;
-use spin::{Mutex, Once};
+use spin::Mutex;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Config {
@@ -39,6 +41,9 @@ pub struct Config {
     pub ip: Ipv4Addr,
     pub netmask: Ipv4Addr,
     pub gateway: Ipv4Addr,
+    pub dns: Ipv4Addr,
+    /// From a DHCP server (false: the static fallback).
+    pub dhcp: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,7 +84,8 @@ const ARP_TIMEOUT_MS: u64 = 1000;
 const MAX_UDP_PAYLOAD: usize = 1472; // 1500 - IPv4 - UDP header
 
 static NIC: Mutex<Option<E1000>> = Mutex::new(None);
-static CONFIG: Once<Config> = Once::new();
+/// Changes once, when DHCP is done; read with interrupts off (small lock).
+static CONFIG: Mutex<Option<Config>> = Mutex::new(None);
 static ARP_CACHE: Mutex<BTreeMap<Ipv4Addr, Mac>> = Mutex::new(BTreeMap::new());
 /// (id, sequence) of received echo replies -> uptime in µs when they arrived
 static PING_REPLIES: Mutex<BTreeMap<(u16, u16), u64>> = Mutex::new(BTreeMap::new());
@@ -90,7 +96,7 @@ static NEXT_EPHEMERAL: AtomicU16 = AtomicU16::new(49152);
 static LOOPBACK: Mutex<VecDeque<Vec<u8>>> = Mutex::new(VecDeque::new());
 
 pub fn config() -> Option<Config> {
-    CONFIG.get().copied()
+    without_interrupts(|| *CONFIG.lock())
 }
 
 /// (received, sent) frames and whether the link is up.
@@ -107,14 +113,44 @@ pub fn init() {
             return;
         }
     };
-    CONFIG.call_once(|| Config {
-        mac: nic.mac(),
-        ip: [10, 0, 2, 15],
-        netmask: [255, 255, 255, 0],
-        gateway: [10, 0, 2, 2],
+    let mac = nic.mac();
+    // unconfigured until DHCP is done (address 0.0.0.0)
+    set_config(Config {
+        mac,
+        ip: [0; 4],
+        netmask: [0; 4],
+        gateway: [0; 4],
+        dns: [0; 4],
+        dhcp: false,
     });
     *NIC.lock() = Some(nic);
     task::spawn("net", poll_loop);
+    let cfg = match dhcp::request_lease(mac, 3000) {
+        Ok(lease) => Config {
+            mac,
+            ip: lease.your_ip,
+            netmask: lease.netmask,
+            gateway: lease.router,
+            dns: lease.dns,
+            dhcp: true,
+        },
+        Err(e) => {
+            crate::serial_println!("net: no DHCP answer ({:?}), using the static QEMU configuration", e);
+            Config {
+                mac,
+                ip: [10, 0, 2, 15],
+                netmask: [255, 255, 255, 0],
+                gateway: [10, 0, 2, 2],
+                dns: [10, 0, 2, 3],
+                dhcp: false,
+            }
+        }
+    };
+    set_config(cfg);
+}
+
+fn set_config(cfg: Config) {
+    without_interrupts(|| *CONFIG.lock() = Some(cfg));
 }
 
 fn poll_loop() {
@@ -190,7 +226,8 @@ pub fn handle_frame(frame: &[u8]) {
 
 fn handle_ipv4(cfg: &Config, from_mac: Mac, packet: &[u8]) {
     let Some(ip) = parse_ipv4(packet) else { return };
-    if ip.dst != cfg.ip && ip.dst != [255; 4] {
+    // without an address yet (DHCP running) everything for our MAC is ours
+    if ip.dst != cfg.ip && ip.dst != [255; 4] && cfg.ip != [0; 4] {
         return;
     }
     if on_subnet(cfg, ip.src) && ip.src != cfg.ip {
@@ -365,6 +402,11 @@ mod tests {
     fn card_is_configured() {
         let cfg = config().expect("no network card (QEMU runs with -device e1000)");
         assert_eq!(cfg.ip, [10, 0, 2, 15]);
+        assert!(cfg.dhcp, "QEMU's DHCP server did not answer");
+        assert_eq!(
+            (cfg.gateway, cfg.dns, cfg.netmask),
+            ([10, 0, 2, 2], [10, 0, 2, 3], [255, 255, 255, 0])
+        );
         assert_eq!(cfg.mac[0] & 1, 0, "MAC is a multicast address");
         assert!(stats().unwrap().2, "link is down");
     }

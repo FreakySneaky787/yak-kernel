@@ -24,6 +24,9 @@ fn main(_args: ulib::Args) -> i32 {
     );
     println!("  IPv4     {}.{}.{}.{} netmask {}.{}.{}.{}", a, b, c, d, ma, mb, mc, md);
     println!("  gateway  {}.{}.{}.{}", ga, gb, gc, gd);
+    let [da, db, dc, dd] = i.dns;
+    println!("  DNS      {}.{}.{}.{}", da, db, dc, dd);
+    println!("  config   {}", if i.dhcp != 0 { "DHCP" } else { "static" });
     println!("  frames   {} received, {} sent", i.rx_frames, i.tx_frames);
     0
 }
