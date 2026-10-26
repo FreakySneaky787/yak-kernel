@@ -9,7 +9,9 @@ USER_PROGRAMS := $(basename $(notdir $(wildcard user/src/bin/*.rs))) \
                  $(notdir $(patsubst %/,%,$(dir $(wildcard user/src/bin/*/main.rs))))
 USER_OUT   := user/target/x86_64-kerneltry-user/release
 USER_BIN   := build/user/bin
-OVMF       := /usr/share/edk2/ovmf/OVMF_CODE.fd
+# UEFI firmware: Fedora (edk2-ovmf) or Debian/Ubuntu (ovmf) path; override with `make OVMF=<file>`
+OVMF       ?= $(firstword $(wildcard /usr/share/edk2/ovmf/OVMF_CODE.fd /usr/share/OVMF/OVMF_CODE_4M.fd \
+                  /usr/share/OVMF/OVMF_CODE.fd) /usr/share/edk2/ovmf/OVMF_CODE.fd)
 
 .PHONY: all limine limine-tool user build run run-uefi debug gdb test e2e e2e-uefi check fmt \
         disk disk-reset disasm symbols sections addr2line clean distclean

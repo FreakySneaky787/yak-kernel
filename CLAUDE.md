@@ -6,9 +6,10 @@ A kernel written from scratch together with an AI. Runs in QEMU only.
 The conversation with the user happens in German.
 
 ## Read first
-1. `docs/PROGRESS.md` – where we are and what comes next
-2. `docs/DESIGN.md` – architecture and rationale, before changing anything fundamental
-3. `docs/BUGS.md` – known pitfalls, especially for triple faults and boot problems
+1. `docs/GOALS.md` – purpose, audience and release criteria (proposal)
+2. `docs/PROGRESS.md` – where we are and what comes next
+3. `docs/DESIGN.md` – architecture and rationale, before changing anything fundamental
+4. `docs/BUGS.md` – known pitfalls, especially for triple faults and boot problems
 
 ## Commands
 | Command | What |
