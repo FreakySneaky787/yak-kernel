@@ -28,7 +28,7 @@ step at a time. Every chapter ends with a kernel that boots in QEMU and passes i
 | 1 | [Booting with Limine](01-boot.md) | a kernel that boots and prints to the serial port |
 | 2 | [Testing without an operating system](02-tests.md) | `make test` running unit tests inside the kernel |
 | 3 | [Text on the screen](03-console.md) | a framebuffer console with its own font renderer |
-| 4 | *GDT and TSS* (coming soon) | our own segments and a safe stack for double faults |
+| 4 | [GDT and TSS](04-gdt.md) | our own segments and a safe stack for double faults |
 
 The course is being written now; this pilot (chapters 1–4) is followed by a round of feedback before the rest. If
 something is unclear or wrong, please open an issue on GitHub – that is exactly the feedback the pilot is for.

@@ -101,7 +101,7 @@ Still open: N for `make stress` (proposal: 5), whether CI is wanted (M40b), whet
 | C1 | Pilot chapter 1 – Booting with Limine (serial output) | ✅ | `make test`: serial output matches `expected.txt`; fails when the greeting is removed |
 | C2 | Pilot chapter 2 – Testing without an operating system (custom test framework, isa-debug-exit, cargo runner) | ✅ | 3 in-kernel tests; a broken assertion makes `make test` fail with QEMU status 35 |
 | C3 | Pilot chapter 3 – Text on the screen (PSF2 font, framebuffer console, `println!`) | ✅ | 12 in-kernel tests incl. drawing into an in-memory screen with stride ≠ width; screenshot on the page |
-| C4 | Pilot chapter 4 – GDT and TSS | ⬜ | – |
+| C4 | Pilot chapter 4 – GDT and TSS (own GDT, TSS with an IST stack for double faults, far return to reload CS) | ✅ | 4 new in-kernel tests (segments, GDTR, TSS descriptor bits, IST1); without `gdt::init()` the GDTR test fails |
 
 Then: phase C (pilot chapters 1–4 + feedback), phases D/E – see `docs/ROADMAP.md`.
 
@@ -442,5 +442,7 @@ they make KernelTry smaller than a production system, but they do not break the 
   the GPL's "How to Apply" recommends a notice per file; renaming the GitHub repository to KernelTry.
 
 ## Next step
-Pilot chapter 4 (GDT and TSS), then stop for feedback on chapters 1–4 (user + at least one outside reader).
-GitHub Pages still needs "Settings → Pages → Source: GitHub Actions" (user); then re-run the `pages` workflow.
+**Pilot complete – stop here for feedback** (agreed): the user and at least one outside reader go through chapters
+1–4 (website or `docs/course/`) and report what was unclear. Then adjust the chapter format and continue with
+chapter 5 (interrupts and exceptions). GitHub Pages still needs "Settings → Pages → Source: GitHub Actions" (user);
+then re-run the `pages` workflow.
