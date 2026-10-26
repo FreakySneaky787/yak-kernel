@@ -1,0 +1,3 @@
+Hello from KernelTry!
+Console: 160 x 50 characters
+Grüße - umlauts work too: äöü ÄÖÜ ß
