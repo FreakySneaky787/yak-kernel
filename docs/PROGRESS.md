@@ -76,7 +76,7 @@ No new kernel features: this stage makes the existing system meet the release cr
 | 39 | Front door: `README.md` with screenshot and host packages, `docs/GOALS.md`, OVMF path found on Fedora and Debian/Ubuntu | ✅ | `make check` green on Ubuntu 24.04 with the detected OVMF path |
 | 40 | Reproducible setup: toolchain pinned (`rust-toolchain.toml`, nightly-2026-10-26), `make deps` checks host tools and prints the dnf/apt command, `make check` runs it first; LICENSE (ECPL v1.2) | ✅ | `check-deps.sh --selftest` (hidden tool reported, exit 1) in `make check`; manual run with a reduced PATH; `make check` green with the pinned toolchain on Ubuntu 24.04 |
 | 40b | Optional CI (GitHub Actions running `make check` under TCG) – only if the user wants it | ⬜ | a green run on a push |
-| 41 | Reliability gate: `make stress` (`make check` N× with 1/2/4 CPUs and `qemu64`), soak test (shell script mixing pipes, files, threads, network for a fixed time), syscall robustness test (every syscall with bad pointers, bad fds, huge lengths) | ⬜ | the new targets themselves; every failure found → BUGS.md + regression test |
+| 41 | Reliability gate: `/bin/syscheck` (bad pointers/lengths/fds/numbers for every syscall, 20 000 seeded random calls, `race` mode), `make soak` (`rootfs/soak.sh` via `scripts/soak.py`), `make stress` (suite N× with 1/2/4 CPUs, `qemu64`, UEFI, then soak); TLB shootdown by IPI | ✅ | `syscheck` + `syscheck race` in integration test, `syscheck` E2E step, shootdown unit test (old code: hangs), soak negative check (an injected failure is reported); bugs #11–#15 found and fixed |
 | 42 | Known limits: sort "Open items" into fixed / documented limitation; fix the release blockers among them | ⬜ | one test per fix |
 | 43 | Walkthroughs (`docs/walkthrough/`): boot to `/bin/sh`; a key press to a program's `read`; `cat f \| wc` through syscalls, scheduler, FAT32 and the pipe; a user page fault – each with file:line references | ⬜ | a script checks that every referenced file and symbol still exists (run by `make check`) |
 | 44 | Experiments (`docs/EXPERIMENTS.md`): ≥ 3 guided "change X, expect Y" experiments (e.g. drop the FPU save → `fputest` fails, 1 CPU vs 4 with `demo`, cache off → slower `wc`) | ⬜ | each expected result is reproduced once and recorded |
@@ -334,6 +334,14 @@ Still open: N for `make stress` (proposal: 5), whether CI is wanted (M40b), whet
   `scripts/check-deps.sh` / `make deps` (Fedora/Debian package names, OVMF, rustup) is the first step of `make check`.
   `license-file` set in both Cargo manifests.
 
+- **2026-10-26** – M41: `syscheck` found five kernel bugs on its first runs – #11 a huge length froze the machine
+  (`populate` walked every page), #12 an empty buffer with a null pointer panicked the kernel, #13 `readdir` lost an
+  entry on EFAULT, #14 a user copy raced with `brk` in another thread (kernel page fault → panic), #15 TLB shootdowns
+  waited for idle CPUs (seconds, or forever with busy CPUs). Fixes: bounded `populate`, empty copies never touch the
+  pointer, check-before-advance in `readdir`, check + copy under the process table lock in ≤ 64 KiB pieces, a
+  `TLB_VECTOR` IPI. `make soak` (10 rounds ≈ 1–2 min) and `make stress` added. `syscheck race` with 4 CPUs: 4 → ~3500
+  heap shrinks in 5 s. DESIGN.md listed the wake-up IPI as 0x60; it is 0xF0 (fixed).
+
 ## Open items / later
 - `ps` CPU percentages only cover threads that still exist (dead threads are reaped with their counters).
 - Shell lines longer than one console row are not handled by the line editor (input is capped at 120 characters).
@@ -350,4 +358,5 @@ Still open: N for `make stress` (proposal: 5), whether CI is wanted (M40b), whet
   write, append, echo, sleep, clear, help. Without `/bin` on the disk, the kernel shell has no `ls`/`cat`.
 
 ## Next step
-M40 is done. Ask the user about CI (M40b) and N for `make stress`, then continue with M41 (reliability gate).
+M41 is done; run `make stress` (5 passes) and record the result. Then M42 (sort the open items, fix release blockers).
+Still open with the user: CI (M40b), whether experiments may add build switches (M44).

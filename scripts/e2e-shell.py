@@ -241,6 +241,8 @@ STEPS = [
     ("grep sh /ps.txt\r", ["sh"], ["error"]),
     ("fault spin | cat\r" + PAUSE + CTRL_C, ["fault was killed: interrupted"], []),
     ("pipetest\r", ["pipetest: all checks passed"], ["FAIL"]),
+    # M41: every syscall with bad pointers, lengths, descriptors and numbers - the kernel must survive
+    ("syscheck\r", ["syscheck: all checks passed"], ["FAIL", "PANIC", "killed"]),
     ("netinfo\r", ["IPv4     10.0.2.15", "link up", "DNS      10.0.2.3", "config   DHCP"], ["error"]),  # M27, M30
     ("time hello\r", ["Hello from user space", "real 0.1"], ["error"]),  # TSC clock (M28)
     ("ping 10.0.2.2 2\r", ["reply from 10.0.2.2: seq=1", "2 packets sent, 2 received"], ["error"]),

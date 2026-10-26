@@ -18,7 +18,7 @@ running, testing and changing one. It runs in QEMU (BIOS and UEFI).
 | Processes | ring 3, one address space per process, ELF loader, 52 syscalls, signals, pipes, environment variables |
 | Storage | PCI, AHCI SATA driver with MSI, sector cache, FAT32 with long file names – persistent across reboots |
 | Network | e1000, Ethernet/ARP/IPv4/ICMP/UDP/TCP, DHCP, DNS client, `wget` and `httpd` |
-| User space | `/bin/sh` (pipes, redirection, scripts, `if`/`while`/`for`, functions, jobs), a full-screen editor and 35 more programs (tools, network clients/servers, self-tests) |
+| User space | `/bin/sh` (pipes, redirection, scripts, `if`/`while`/`for`, functions, jobs), a full-screen editor and 36 more programs (tools, network clients/servers, self-tests) |
 
 Everything above is our own code. The only crates are `limine` (boot protocol) and `spin` (locks).
 
@@ -66,6 +66,8 @@ Try in the shell: `help`, `ls /bin`, `cat /README.txt | wc`, `ps`, `cpu`, `ping 
 - `make test` – unit tests and integration test kernels, headless in QEMU (each aborts after 30 s).
 - `make e2e` / `make e2e-uefi` – boots the real system and types commands into `/bin/sh` over the serial port.
 - `KERNEL_SMP=1 make test` (1–4 cores) and `KERNEL_CPU=qemu64 make test` (no SMEP/SMAP/AVX) check other machines.
+- `syscheck` (in `/bin`, part of the tests) throws bad pointers, lengths, descriptors and random syscalls at the kernel.
+- `make soak` runs a long mixed workload; `make stress` runs everything many times (the release gate, takes hours).
 
 ## License
 KernelTry is licensed under the **Ethical Copyleft Public License v1.2** – see [LICENSE](LICENSE).

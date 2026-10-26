@@ -360,6 +360,23 @@ Short explanations of every subsystem: what it is and why we need it.
   on a multiplier in their first packets.
 - A DHCP address is only *leased*: half-way through, the client asks the server to extend it.
 
+## M41 – Testing how a kernel fails
+- Normal tests check that the right input gives the right result. A kernel must also survive **every wrong input**:
+  any program may pass any number as a pointer, length, descriptor or syscall number.
+- `syscheck` does that on purpose: null, kernel, non-canonical and unmapped pointers; lengths up to `u64::MAX`; closed
+  and absurd descriptors; unknown syscall numbers – and then 20 000 random mixes with a fixed seed (so a failure can be
+  reproduced). Every call must return an error, and the kernel must still be alive.
+- It found five bugs on the first runs (`docs/BUGS.md` #11–#15): a length that froze the machine, an empty buffer
+  that panicked the kernel, a directory entry lost on an error, a **race** between two threads that crashed the kernel,
+  and a TLB shootdown that could wait forever.
+- **Races** only show up when timing is right. `syscheck race` makes the bad timing likely: one thread shrinks the heap
+  thousands of times a second while another hands exactly that memory to the kernel. With one CPU the timer interrupt
+  switches between them at random points – that is how the bug appeared. Running with 1, 2 and 4 CPUs matters.
+- **Soak test** (`make soak`): the same mix of real work for many rounds (files, pipelines, all self-tests,
+  background jobs, ping, HTTP over loopback). Slow leaks and rare hangs only show up over time.
+- **Stress** (`make stress`): the whole test suite N times with 1, 2 and 4 CPUs, with an old CPU model and under UEFI.
+  A test that fails once in five runs is a bug, not bad luck.
+
 ## Tooling – GNU ld and binutils
 - rustc compiles our code into object files; a **linker** combines them into the final ELF according to `kernel/linker.ld`
   (load address, section order, segments). We use **GNU ld** (`ld.bfd`) for that.

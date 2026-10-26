@@ -23,6 +23,8 @@ The conversation with the user happens in German.
 | `make e2e` | boot the real kernel and drive the shell over serial (`scripts/e2e-shell.py`) |
 | `make e2e-uefi` | same E2E test, booted through OVMF/UEFI |
 | `make check` | `make deps` + `make test` + `make e2e` + `make e2e-uefi` – run this before every commit |
+| `make soak` | long mixed workload on a scratch disk (`SOAK_ROUNDS`, default 10, ~10 s per round) |
+| `make stress` | reliability gate: suite `STRESS_N` (5) times with 1/2/4 CPUs, `qemu64`, UEFI, then soak – takes hours under TCG |
 | `make fmt` | rustfmt over the kernel (commit formatting separately) |
 | `make disk` / `make disk-reset` | create / recreate the persistent FAT32 disk `build/disk.img` from `rootfs/` |
 | `make debug` + `make gdb` | QEMU waits for gdb on :1234 |
@@ -75,13 +77,13 @@ Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.s
 - `kernel/src/fs/` – `mod.rs` (root mount `fs::ROOT`, `SystemDisk`, path `normalize`), `fat32.rs` (FAT32 read/write, LFN, `format`)
 - `kernel/src/drivers/e1000.rs` – network card; `kernel/src/net/` – `packet.rs` (Ethernet/ARP/IPv4/ICMP/UDP/TCP/DHCP formats),
   `mod.rs` (stack, net thread, IRQ probing, sockets), `tcp.rs`, `dhcp.rs` (lease + renewal)
-- `rootfs/` – initial contents of the FAT32 disk image; `scripts/mkdisk.sh` – builds the image;
+- `rootfs/` – initial contents of the FAT32 disk image (`soak.sh` = soak workload, run by `scripts/soak.py`); `scripts/mkdisk.sh` – builds the image;
   `scripts/check-test-disks.sh` – `fsck.fat` + mtools validation of the test disks (run by `make test`);
   `scripts/install-user.sh` – copies `build/user/bin/*` into `/bin` of a disk image
 - `user/` – user programs: `src/lib.rs` (`ulib`: `_start`, `Args`), `sys.rs` (syscalls), `io.rs` (`print!`, `read_line`),
   `fs.rs` (`File`, `Dir`, `stat`), `heap.rs` (allocator on `brk`), `dns.rs` (DNS client), `env.rs` (environment), `signal.rs` (handlers + trampoline), `thread.rs` (spawn/join), `sync.rs` (futex `Mutex`),
   `process.rs` (`spawn`/`wait`/`kill`), `src/bin/*.rs` (one program each: tools cat, ls, cp, mv, rm, mkdir, touch, stat,
-  sort, wc, grep, ps, mem, uptime, df, date, upper, hello, ping, netinfo, udpecho, time, nc, echod, host, wget, httpd, env; self-tests fault, fstest, heaptest, spawntest, pipetest, sigtest, threadtest),
+  sort, wc, grep, ps, mem, uptime, df, date, upper, hello, ping, netinfo, udpecho, time, nc, echod, host, wget, httpd, env; self-tests fault, fstest, heaptest, spawntest, pipetest, sigtest, threadtest, syscheck),
   `src/bin/sh/` (the shell, started as init: `main.rs` executor + built-ins, `syntax.rs` tokenizer/parser, `arith.rs`,
   `glob.rs`, `testcmd.rs`), `src/bin/edit/` (full-screen editor), `linker.ld`
 - `kernel/src/time.rs` – ticks, `uptime_ms`, `sleep_ms`; `kernel/src/sync.rs` – sleeping `Mutex` (blocks instead of spinning)

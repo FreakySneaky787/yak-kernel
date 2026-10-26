@@ -361,7 +361,8 @@ One GDT and TSS per CPU (`gdt::init_cpu`), same layout everywhere. The user data
 | 39 / 47 | spurious IRQ 7 / 15 of the masked 8259 (ignored, no EOI) |
 | 0x50 | AHCI command completion (MSI, M32) |
 | 0x51 | e1000 (INTA# through the I/O APIC input found by `net::probe_irq`, level / active low, M38) |
-| 0x60 | wake-up IPI between CPUs (`smp::WAKE_VECTOR`) |
+| 0xF0 | wake-up IPI between CPUs (`smp::WAKE_VECTOR`) |
+| 0xF1 | TLB shootdown IPI (`smp::TLB_VECTOR`, M41): reload CR3 if running the given address space |
 | 0xFF | local APIC spurious vector (ignored, no EOI) |
 
 - Interrupt controllers: **local APIC + I/O APIC** (since M12). Information comes from the ACPI MADT (`acpi.rs`).
@@ -410,4 +411,10 @@ One GDT and TSS per CPU (`gdt::init_cpu`), same layout everywhere. The user data
 - Result via the `isa-debug-exit` device on port 0xF4: value 0x10 → QEMU exit status 33 = PASS, 0x11 → 35 = FAIL.
 - All test output goes through COM1 (`serial_println!`).
 - `scripts/e2e-shell.py` (`make e2e`) boots the real kernel with stdin/stdout on COM1, types commands (incl. escape sequences)
-  and checks the output between prompts; the final `poweroff` must end QEMU. `make check` = `make test` + `make e2e`.
+  and checks the output between prompts; the final `poweroff` must end QEMU. `make check` = `make deps` + `make test` +
+  `make e2e` + `make e2e-uefi`.
+- Robustness (M41): `/bin/syscheck` calls every syscall with bad arguments and races user copies against `brk`;
+  `make soak` (`scripts/soak.py` + `rootfs/soak.sh`) runs a mixed workload for `SOAK_ROUNDS` rounds; `make stress` runs
+  the suite `STRESS_N` times with 1/2/4 CPUs, `qemu64` and UEFI, then a soak run.
+- User memory is only touched in `copy_from_user` / `copy_to_user`: check and copy under the process table lock, in
+  pieces of ≤ 64 KiB (bug #14). Empty buffers are never dereferenced (bug #12).

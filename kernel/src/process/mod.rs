@@ -252,16 +252,25 @@ impl Process {
 
     /// Maps zeroed pages for every not yet used heap or stack page in
     /// `[addr, addr + len)` (demand paging). False if memory ran out.
+    /// The walk stops at the first page that is neither mapped for user mode
+    /// nor demand-paged: the access check after it fails there anyway, and a
+    /// huge `len` must not keep the kernel walking (bug #11).
     pub fn populate(&mut self, addr: u64, len: u64) -> bool {
         let Some(end) = addr.checked_add(len) else { return true };
         let mut page = align_down(addr, PAGE_SIZE);
         while page < end {
-            if self.on_demand(page) {
-                let Some(space) = self.space.as_mut() else { return false };
-                if space.page_flags(VirtAddr(page)).is_none()
-                    && space
-                        .page_frame(VirtAddr(page), Flags::WRITABLE | Flags::NO_EXECUTE)
-                        .is_err()
+            let on_demand = self.on_demand(page);
+            let Some(space) = self.space.as_mut() else { return false };
+            if !space
+                .page_flags(VirtAddr(page))
+                .is_some_and(|f| f.contains(Flags::USER))
+            {
+                if !on_demand {
+                    return true;
+                }
+                if space
+                    .page_frame(VirtAddr(page), Flags::WRITABLE | Flags::NO_EXECUTE)
+                    .is_err()
                 {
                     return false;
                 }

@@ -101,6 +101,55 @@ Format: number · date · title, then symptom → cause → fix → test.
 - **Remember:** a #GP with bit 1 of the error code set points at an IDT vector (index = code >> 3) – usually an
   interrupt without a handler.
 
+### #11 · 2026-10-26 · A syscall with a huge length freezes the system
+- **Symptom:** found by `syscheck` (M41): `write(1, 0, 1 << 47)` never returned, the whole machine stopped responding.
+- **Cause:** before checking a user buffer, `Process::populate` walked *every* page of `[addr, addr + len)` to map
+  demand-paged heap/stack pages – 2^35 iterations here, under the process table lock with interrupts off.
+- **Fix:** the walk stops at the first page that is neither mapped for user mode nor demand-paged (the access check fails
+  there anyway). A request now costs at most the size of the mapped area it touches.
+- **Test:** `syscheck` calls every pointer-taking syscall with lengths up to `u64::MAX` (integration test `userspace`, E2E).
+- **Remember:** every loop over a user-supplied range must be bounded by something the kernel owns, not by the user's length.
+
+### #12 · 2026-10-26 · Kernel panic from ring 3: empty buffer with a null pointer
+- **Symptom:** `KERNEL PANIC: unsafe precondition(s) violated: slice::from_raw_parts requires the pointer to be aligned
+  and non-null` in `copy_from_user`, triggered by the random phase of `syscheck`.
+- **Cause:** zero-length ranges are always "accessible" (see pitfalls: empty slices have dangling pointers), but
+  `copy_from_user` / `copy_to_user` still built a slice / called `copy_nonoverlapping` with that pointer. With a null
+  pointer that is undefined behaviour, which the debug build checks – any program could panic the kernel.
+- **Fix:** both return immediately for empty buffers, without touching the pointer.
+- **Test:** `syscheck`: `write`/`read` with length 0 and pointers 0, 1, `u64::MAX` must return 0.
+- **Remember:** an "accessible" empty range is no licence to dereference its pointer.
+
+### #13 · 2026-10-26 · `readdir` with a bad buffer skipped a directory entry
+- **Symptom:** `syscheck` saw `readdir(fd, bad pointer)` return 0 (end of directory) after a few calls – the failed
+  calls had used up the entries.
+- **Cause:** `sys_readdir` advanced the directory position before copying the entry out; the copy then failed with EFAULT.
+- **Fix:** the buffer is checked first; the position only moves when the entry can be delivered.
+- **Test:** `syscheck`: `readdir` into null → EFAULT, then the first real `readdir` returns the same entry as on a fresh handle.
+- **Remember:** check, then change state – a syscall that fails should leave nothing behind.
+
+### #14 · 2026-10-26 · Kernel panic: user copy raced against `brk` in another thread
+- **Symptom:** `syscheck race` with `KERNEL_SMP=1`: `KERNEL PANIC ... EXCEPTION: PAGE FAULT at address 0x44b000` within
+  a second – a kernel-mode page fault on a user heap address.
+- **Cause:** `copy_from_user` / `copy_to_user` checked the buffer (under the process table lock) and copied it *after*
+  releasing the lock. A timer interrupt between the two let another thread of the process shrink the heap; the copy then
+  touched an unmapped page in ring 0, which is fatal.
+- **Fix:** check and copy happen together under the process table lock (`locked_user_copy`), in pieces of at most
+  64 KiB to keep the time with interrupts off short. `brk` changes the page tables under the same lock.
+- **Test:** `syscheck race 1000` in the integration test (fails within a second on the old code with 1 CPU).
+- **Remember:** a check of user memory is only valid while nothing can change the mapping – hold the lock until the copy is done.
+
+### #15 · 2026-10-26 · TLB shootdown waited for idle CPUs (seconds, or forever)
+- **Symptom:** `syscheck race` with 4 CPUs: only 4 heap shrinks in 5 s (~1 s per `brk`). The new unit test with a
+  spinning thread on every CPU never finished.
+- **Cause:** `paging::shoot_down` sent the CR3 reload as an `smp::run_on` job to every CPU. Jobs run in a CPU's idle
+  thread, which only gets the CPU when no other thread is ready – a busy CPU answered late or never.
+- **Fix:** own IPI vector `smp::TLB_VECTOR` (0xF1): the handler reloads CR3 if that CPU runs the address space and
+  counts down a pending counter the sender spins on (with interrupts on, so two shootdowns cannot deadlock).
+- **Test:** `smp::tests::tlb_shootdown_is_fast_while_all_cpus_are_busy` (20 shootdowns < 50 ms with all CPUs busy;
+  the old code hangs until the 30 s timeout).
+- **Remember:** work that must happen *now* on another CPU belongs in an interrupt handler, not in a job queue.
+
 ## Known pitfalls (not bugs, but worth remembering)
 - **The Limine host utility (`limine bios-install`) needs a C compiler** (`gcc`). It is not required for booting the ISO
   in QEMU with `-cdrom`; it is only needed to make the ISO bootable as a hard disk / USB image.

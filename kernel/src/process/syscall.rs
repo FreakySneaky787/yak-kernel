@@ -374,15 +374,44 @@ fn accessible(addr: u64, len: u64, writable: bool) -> bool {
     .unwrap_or(false)
 }
 
+/// Largest piece of a user buffer copied in one go: the copy runs under the
+/// process table lock with interrupts off, so long buffers are split.
+const COPY_CHUNK: u64 = 64 * 1024;
+
+/// Checks `[addr, addr + len)` and runs `copy` on it in one go under the
+/// process table lock, so no other thread of the process can unmap the pages
+/// (`brk`) between the check and the copy (bug #14).
+fn locked_user_copy(addr: u64, len: u64, writable: bool, copy: impl FnOnce()) -> Result<(), i64> {
+    with_current(|p| {
+        let ok = p.populate(addr, len) && p.space.as_ref().is_some_and(|s| s.is_accessible(addr, len, writable));
+        if ok {
+            crate::arch::x86_64::cpu::user_access(copy);
+        }
+        ok
+    })
+    .filter(|&ok| ok)
+    .map(|_| ())
+    .ok_or(errno::EFAULT)
+}
+
 /// Copies a user buffer into the kernel (after checking it).
 fn copy_from_user(addr: u64, len: u64) -> Result<Vec<u8>, i64> {
+    if len == 0 {
+        // the pointer of an empty buffer may be anything (even null): never build a slice from it (bug #12)
+        return Ok(Vec::new());
+    }
+    // checked as a whole first, so a bogus length cannot make us allocate
     if !accessible(addr, len, false) {
         return Err(errno::EFAULT);
     }
-    // The process's page tables are active: the user buffer is directly readable
-    let bytes = crate::arch::x86_64::cpu::user_access(|| unsafe {
-        core::slice::from_raw_parts(addr as *const u8, len as usize).to_vec()
-    });
+    let mut bytes = alloc::vec![0u8; len as usize];
+    for (i, piece) in bytes.chunks_mut(COPY_CHUNK as usize).enumerate() {
+        let from = addr + i as u64 * COPY_CHUNK;
+        // The process's page tables are active: the user buffer is directly readable
+        locked_user_copy(from, piece.len() as u64, false, || unsafe {
+            core::ptr::copy_nonoverlapping(from as *const u8, piece.as_mut_ptr(), piece.len())
+        })?;
+    }
     Ok(bytes)
 }
 
@@ -392,12 +421,15 @@ pub(super) fn write_user(addr: u64, data: &[u8]) -> Result<(), i64> {
 }
 
 fn copy_to_user(addr: u64, data: &[u8]) -> Result<(), i64> {
-    if !accessible(addr, data.len() as u64, true) {
-        return Err(errno::EFAULT);
+    if data.is_empty() {
+        return Ok(()); // see copy_from_user
     }
-    crate::arch::x86_64::cpu::user_access(|| unsafe {
-        core::ptr::copy_nonoverlapping(data.as_ptr(), addr as *mut u8, data.len())
-    });
+    for (i, piece) in data.chunks(COPY_CHUNK as usize).enumerate() {
+        let to = addr + i as u64 * COPY_CHUNK;
+        locked_user_copy(to, piece.len() as u64, true, || unsafe {
+            core::ptr::copy_nonoverlapping(piece.as_ptr(), to as *mut u8, piece.len())
+        })?;
+    }
     Ok(())
 }
 
@@ -687,6 +719,10 @@ fn sys_close(fd: u64) -> SysResult {
 }
 
 fn sys_readdir(fd: u64, info_addr: u64) -> SysResult {
+    // checked before the entry is taken, so a bad buffer does not skip one (bug #13)
+    if !accessible(info_addr, size_of::<DirEntryInfo>() as u64, true) {
+        return Err(errno::EFAULT);
+    }
     let entry = with_current(|p| match p.files.get_mut(fd as usize) {
         Some(Some(Handle::Dir { entries, next })) => {
             let e = entries.get(*next).cloned();

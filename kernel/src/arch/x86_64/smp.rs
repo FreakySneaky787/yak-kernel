@@ -25,13 +25,15 @@ use crate::time;
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering};
 use spin::Mutex;
 
 /// Highest number of CPUs the kernel manages.
 pub const MAX_CPUS: usize = 16;
 /// IPI vector that wakes an idle AP (the handler only sends EOI).
 pub const WAKE_VECTOR: u8 = 0xF0;
+/// IPI vector of a TLB shootdown (`shoot_down_tlb`).
+pub const TLB_VECTOR: u8 = 0xF1;
 
 const NO_CPU: u8 = 0xFF;
 /// Local APIC ID -> CPU index (0 = boot CPU).
@@ -282,6 +284,51 @@ pub fn run_on<R: Send + 'static>(cpu: usize, f: impl FnOnce() -> R + Send + 'sta
     }
 }
 
+/// One TLB shootdown at a time: the page table to flush and how many CPUs
+/// still have to confirm.
+static SHOOTDOWN: Mutex<()> = Mutex::new(());
+static SHOOTDOWN_ROOT: AtomicU64 = AtomicU64::new(0);
+static SHOOTDOWN_PENDING: AtomicUsize = AtomicUsize::new(0);
+
+fn flush_if_running(root: u64) {
+    if paging::read_cr3().0 == root {
+        unsafe { paging::write_cr3(PhysAddr(root)) };
+    }
+}
+
+/// Makes every CPU that runs on the page table `root` drop its cached
+/// translations (CR3 reload) and waits until all online CPUs have checked.
+/// The other CPUs do it right in the `TLB_VECTOR` interrupt handler, so a
+/// busy CPU answers within microseconds (bug #15: `run_on` waited for its
+/// idle thread). Needs interrupts enabled, so that a CPU waiting here still
+/// answers another CPU's shootdown.
+pub fn shoot_down_tlb(root: PhysAddr) {
+    debug_assert!(super::interrupts_enabled(), "shoot_down_tlb with interrupts off");
+    let _one_at_a_time = SHOOTDOWN.lock();
+    SHOOTDOWN_ROOT.store(root.0, Ordering::SeqCst);
+    // interrupts off: we must not move to another CPU while choosing the targets
+    super::without_interrupts(|| {
+        let me = cpu_index();
+        flush_if_running(root.0);
+        let targets: Vec<usize> = (0..CPU_COUNT.load(Ordering::Relaxed))
+            .filter(|&c| c != me && ONLINE[c].load(Ordering::Acquire))
+            .collect();
+        SHOOTDOWN_PENDING.store(targets.len(), Ordering::SeqCst);
+        for cpu in targets {
+            lapic::send_fixed(CPU_APIC_ID[cpu].load(Ordering::Relaxed), TLB_VECTOR);
+        }
+    });
+    while SHOOTDOWN_PENDING.load(Ordering::SeqCst) != 0 {
+        core::hint::spin_loop();
+    }
+}
+
+/// Called by the `TLB_VECTOR` interrupt handler.
+pub fn on_tlb_ipi() {
+    flush_if_running(SHOOTDOWN_ROOT.load(Ordering::SeqCst));
+    SHOOTDOWN_PENDING.fetch_sub(1, Ordering::SeqCst);
+}
+
 /// Sends the wake-up IPI to CPU `cpu`.
 pub fn wake_cpu(cpu: usize) {
     if ONLINE[cpu].load(Ordering::Acquire) {
@@ -459,6 +506,35 @@ mod tests {
             });
             assert_eq!(v, Some((499_500 * cpu as u64, true)));
         }
+    }
+
+    /// Regression test for bug #15: a TLB shootdown must not wait until busy
+    /// CPUs go idle (it took about a second per `brk` with threads).
+    #[test_case]
+    fn tlb_shootdown_is_fast_while_all_cpus_are_busy() {
+        use crate::task;
+        let stop = Arc::new(AtomicBool::new(false));
+        let ids: Vec<_> = (0..online_count())
+            .map(|_| {
+                let stop = stop.clone();
+                task::spawn("tlb-spin", move || {
+                    while !stop.load(Ordering::Relaxed) {
+                        core::hint::spin_loop();
+                    }
+                })
+            })
+            .collect();
+        crate::time::sleep_ms(20); // let the spinners occupy every CPU
+        let start = crate::time::uptime_us();
+        for _ in 0..20 {
+            paging::shoot_down(paging::kernel_root());
+        }
+        let us = crate::time::uptime_us() - start;
+        stop.store(true, Ordering::Relaxed);
+        for id in ids {
+            task::join(id);
+        }
+        assert!(us < 50_000, "20 shootdowns took {} us", us);
     }
 
     #[test_case]

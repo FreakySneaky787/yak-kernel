@@ -129,6 +129,16 @@ extern "C" fn kmain() -> ! {
     assert_eq!(process::count(), 0, "processes left over");
     assert_eq!(alive(), threads_before, "threads left over");
 
+    // M41: every syscall with bad pointers, lengths, descriptors and numbers
+    let (status, out) = run("syscheck", "");
+    assert_eq!(status, ExitStatus::Exited(0), "{}", out);
+    assert!(out.contains("syscheck: all checks passed"));
+    // bug #14: copies racing against another thread shrinking the heap
+    let (status, out) = run("syscheck", "race 1000");
+    assert_eq!(status, ExitStatus::Exited(0), "{}", out);
+    assert!(out.contains("kernel still alive"));
+    assert_eq!(process::count(), 0, "processes left over");
+
     // M20: the shell as a user program, driven by injected serial input
     kernel::serial::inject_rx(
         b"echo hi from sh\rcd docs\rpwd\rls\reco\x1b[Dh\x1b[C edited\rmem\rnope\rfault exit 4\rexit 7\r",

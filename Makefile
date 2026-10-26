@@ -13,7 +13,7 @@ USER_BIN   := build/user/bin
 OVMF       ?= $(firstword $(wildcard /usr/share/edk2/ovmf/OVMF_CODE.fd /usr/share/OVMF/OVMF_CODE_4M.fd \
                   /usr/share/OVMF/OVMF_CODE.fd) /usr/share/edk2/ovmf/OVMF_CODE.fd)
 
-.PHONY: all deps limine limine-tool user build run run-uefi debug gdb test e2e e2e-uefi check fmt \
+.PHONY: all deps soak stress limine limine-tool user build run run-uefi debug gdb test e2e e2e-uefi check fmt \
         disk disk-reset disasm symbols sections addr2line clean distclean
 
 all: build
@@ -63,6 +63,27 @@ e2e: build
 # Same, but booted through UEFI firmware (OVMF)
 e2e-uefi: build
 	python3 -I scripts/e2e-shell.py $(KERNEL_ELF) -drive if=pflash,format=raw,readonly=on,file=$(OVMF)
+
+# Long-running mix of files, pipes, processes, threads, signals, network and syscall abuse (scripts/soak.py)
+SOAK_ROUNDS ?= 10
+soak: build
+	python3 -I scripts/soak.py $(KERNEL_ELF) $(SOAK_ROUNDS)
+
+# Reliability gate (docs/GOALS.md): STRESS_N passes of the test suite with 1, 2 and 4 CPUs,
+# without SMEP/SMAP/AVX, under UEFI, then a soak run. Stops at the first failure.
+STRESS_N ?= 5
+stress: build
+	set -e; for i in $$(seq $(STRESS_N)); do \
+	  for smp in 1 2 4; do \
+	    echo "=== stress pass $$i/$(STRESS_N): $$smp CPU(s) ==="; \
+	    KERNEL_SMP=$$smp $(MAKE) --no-print-directory test e2e; \
+	  done; \
+	  echo "=== stress pass $$i/$(STRESS_N): qemu64, UEFI ==="; \
+	  KERNEL_CPU=qemu64 $(MAKE) --no-print-directory test; \
+	  $(MAKE) --no-print-directory e2e-uefi; \
+	done; \
+	$(MAKE) --no-print-directory soak; \
+	echo "stress: $(STRESS_N) passes + soak green"
 
 # Host tools present? Prints the install command for missing ones (scripts/check-deps.sh)
 deps:
