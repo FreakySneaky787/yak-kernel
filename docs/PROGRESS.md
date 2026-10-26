@@ -69,6 +69,25 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 | 37 | CPU protection and AVX: SMEP/SMAP, XSAVE with AVX state per thread | ✅ | `tests/smap.rs` (user_access works, kernel read and kernel jump into a user page fault), CR4/XCR0 unit tests, YMM save/restore unit test, `fputest` with YMM0–15 in 4 preempted workers, `sigtest` YMM kept across a handler, E2E `cpu` shows SMEP/SMAP/AVX on; suite also green with `KERNEL_CPU=qemu64` and 1 CPU |
 | 38 | Network polish: e1000 interrupts, TCP window scaling, DHCP lease renewal | ✅ | interrupt test (GSI found, median ping < 3 ms – about 0.5 ms now), 1 MB loopback transfer with a scaled window > 64 KiB, WS option round trip, lease phase/retry unit test, renew + rebind against QEMU's DHCP server, renewal message test; suite green with 1, 2, 4 CPUs and `qemu64` |
 
+## Stage 8: release 1.0 – reliable and understandable (proposed 2026-10-26, see `docs/GOALS.md`)
+No new kernel features: this stage makes the existing system meet the release criteria in `docs/GOALS.md`.
+| # | Milestone | Status | Tests |
+|---|---|---|---|
+| 39 | Front door: `README.md` with screenshot and host packages, `docs/GOALS.md`, OVMF path found on Fedora and Debian/Ubuntu | ✅ | `make check` green on Ubuntu 24.04 with the detected OVMF path |
+| 40 | Reproducible setup: toolchain pinned (`rust-toolchain.toml`, nightly-2026-10-26), `make deps` checks host tools and prints the dnf/apt command, `make check` runs it first; LICENSE (ECPL v1.2) | ✅ | `check-deps.sh --selftest` (hidden tool reported, exit 1) in `make check`; manual run with a reduced PATH; `make check` green with the pinned toolchain on Ubuntu 24.04 |
+| 40b | Optional CI (GitHub Actions running `make check` under TCG) – only if the user wants it | ⬜ | a green run on a push |
+| 41 | Reliability gate: `/bin/syscheck` (bad pointers/lengths/fds/numbers for every syscall, 20 000 seeded random calls, `race` mode), `make soak` (`rootfs/soak.sh` via `scripts/soak.py`), `make stress` (suite N× with 1/2/4 CPUs, `qemu64`, UEFI, then soak); TLB shootdown by IPI | ✅ | `syscheck` + `syscheck race` in integration test, `syscheck` E2E step, shootdown unit test (old code: hangs), soak negative check (an injected failure is reported); bugs #11–#15 found and fixed |
+| 42 | Known limits: "Open items" sorted into documented limitations (no open release blocker); found and fixed on the way: #16 (one `write` grew the kernel heap by its whole buffer) | ✅ | `syscheck`: 16 MiB into a pipe without reader → EPIPE with < 1 MiB heap growth (old kernel: +16 388 KiB), oversized `sendto` → EMSGSIZE |
+| 43 | Walkthroughs (`docs/walkthrough/`): boot to `/bin/sh`, a key press, `cat \| wc`, a page fault – with links to the functions | ✅ | `scripts/check-doc-refs.py` (`make docs-check`, part of `make check`, with self-test): every \[`symbol`\](file) link must name a symbol in an existing file; "things to try" checked in the running system |
+| 44 | Experiments (`docs/EXPERIMENTS.md`): more cores, no FPU save, the bug #14 fix undone, a 16-byte pipe – no build switches, each a small hand edit | ✅ | each experiment run once, results recorded (590 → 250 ms; 4 workers corrupted; panic 2/2; 1.40 → 5.41 s) |
+| 45 | Extending guides (`docs/HACKING.md`): syscall, user program, test, shell built-in | ✅ | the syscall + program guide followed once: syscall 52 `uname` + `/bin/uname` (integration test, E2E step, `syscheck` bad pointers, `SYSCALL_COUNT`) |
+| 46 | Pre-release 0.8.0: GPL-3.0-or-later (`LICENSE` = FSF text, SHA-256 `3972dc97…`), version in both manifests and the boot banner, `CHANGELOG.md`, new screenshot | ✅ | `make check` green; `uname` shows `KernelTry 0.8.0 x86_64` |
+| 47 | Release 1.0.0: everything under "Missing for 1.0" below, then version 1.0.0, `make check` + `make stress` on that commit, tag `v1.0.0` on the default branch | ⬜ | – |
+
+Decided 2026-10-26: name KernelTry; license first ECPL v1.2, then (same day) **GNU GPL v3 or later** (copyright
+FreakySneaky787 and contributors); 1.0 is preceded by the pre-release **0.8.0** (user decision, first prepared as `1.0.0-rc.1`).
+Still open: N for `make stress` (proposal: 5), whether CI is wanted (M40b), whether experiments may add build switches to the kernel (M44).
+
 ## Log
 - **2026-10-24** – Setup: Rust nightly 1.101 (rustup), target `x86_64-unknown-none`, Limine v11.x-binary.
   M1: kernel boots via BIOS and UEFI, prints "Hello from KernelTry!" on serial, colour bars on the framebuffer (1280×800×32).
@@ -306,22 +325,78 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
   ~0.5 ms; loopback packets wake it too). TCP window scaling (shift 3, 256 KiB buffers, 128 segments in flight); DHCP
   lease renewal thread (T1 renew, T2 rebind, static fallback at the end). **Stage 7 is complete.**
 
-## Open items / later
+- **2026-10-26** – User wrote a project definition ("KernelTry – Understand the Kernel"): recorded as a proposal in
+  `docs/GOALS.md`. Stage 8 (M39–M46) planned around its release criteria. M39: `README.md` (overview, screenshot
+  `docs/images/shell.png`, host packages, quick start, documentation map), Makefile finds OVMF on Fedora and Debian/Ubuntu
+  (`OVMF ?=`, override with `make OVMF=<file>`). Found while setting up a fresh Ubuntu container: no toolchain pin
+  (stable rustc fails on the user target), hard-coded Fedora OVMF path – both feed M40.
+
+- **2026-10-26** – User chose the license (ECPL v1.2, their own text) and the name KernelTry. M40: `rust-toolchain.toml`
+  pins nightly-2026-10-26 (rustc 1.101.0-nightly 76456a688) with rust-src, rustfmt and the `x86_64-unknown-none` target;
+  `scripts/check-deps.sh` / `make deps` (Fedora/Debian package names, OVMF, rustup) is the first step of `make check`.
+  `license-file` set in both Cargo manifests.
+
+- **2026-10-26** – M41: `syscheck` found five kernel bugs on its first runs – #11 a huge length froze the machine
+  (`populate` walked every page), #12 an empty buffer with a null pointer panicked the kernel, #13 `readdir` lost an
+  entry on EFAULT, #14 a user copy raced with `brk` in another thread (kernel page fault → panic), #15 TLB shootdowns
+  waited for idle CPUs (seconds, or forever with busy CPUs). Fixes: bounded `populate`, empty copies never touch the
+  pointer, check-before-advance in `readdir`, check + copy under the process table lock in ≤ 64 KiB pieces, a
+  `TLB_VECTOR` IPI. `make soak` (10 rounds ≈ 1–2 min) and `make stress` added. `syscheck race` with 4 CPUs: 4 → ~3500
+  heap shrinks in 5 s. DESIGN.md listed the wake-up IPI as 0x60; it is 0xF0 (fixed).
+
+- **2026-10-26** – `make stress` (5 passes) of the M41 commit: green – 20 × E2E 126/126 with 1/2/4 CPUs and
+  `qemu64`/UEFI, every `make test` green, soak 10 rounds, 26 min in total. M42: #16 fixed (`sys_write` in 64 KiB
+  pieces, `sendto` size check before the copy); the open items became "Known limitations of release 1.0". M43–M45:
+  walkthroughs, experiments (all four run and measured), HACKING.md with syscall 52 `uname` as the worked example,
+  `CHANGELOG.md`, `make docs-check`.
+
+- **2026-10-26** – User switched the license to the GNU GPL v3 (taken as `GPL-3.0-or-later`, the FSF's recommended
+  wording) and wants a pre-release before 1.0. M46: `LICENSE` from Ubuntu's `base-files` (`/usr/share/common-licenses/GPL-3`,
+  identical to the FSF's `gpl-3.0.txt` – gnu.org itself is blocked by the sandbox proxy), dependency licenses checked
+  (limine, lock_api, scopeguard: MIT OR Apache-2.0; spin: MIT; Limine bootloader: BSD-2-Clause – all GPLv3-compatible),
+  version 1.0.0-rc.1 – renamed to **0.8.0** at the user's request (0.x = not yet stable, as SemVer intends).
+
+## Known limitations of release 1.0 (sorted in M42)
+Release blockers were defined as "a program can crash, hang or exhaust the kernel" (`docs/GOALS.md`: isolated
+programs, reliability). All of those found so far are fixed (bugs #11–#16). The rest are **documented limitations**:
+they make KernelTry smaller than a production system, but they do not break the promises of release 1.0.
+
+**Security model**
+- Single user, no permissions: every program may signal any process (`kill`), read and write every file, and use
+  the kernel-command bridge `kshell` – including `reboot`, `poweroff`, `panic` and `int3`, which exist for teaching.
+  Isolation means *memory* isolation: a program cannot read or corrupt another program's or the kernel's memory.
+- The kernel heap grows on demand but never shrinks.
+
+**User space**
+- No AVX-512; the ELF image is mapped eagerly (heap and stack on demand); no thread-local storage; no guard pages for
+  thread stacks; no SIGCHLD/SIGSTOP/alarm, no signal masks; a CPU exception cannot be caught as a signal.
+- `/bin/sh`: no `$(...)`, `case`, `local`, here-documents or `"$@"`; `&&`/`||`/`|`/`&` must be separate words;
+  functions are not inherited by `sh -c` background shells; built-ins, functions and loops inside a pipeline must fit
+  their output into one pipe (64 KiB) – more blocks until Ctrl+C; background jobs share the keyboard with the shell.
+- The line editor handles one console row (input capped at 120 characters).
+- `kshell`/`kcommands` bridge the commands that are still kernel built-ins: cpu, acpi, lspci, disk, hexdump, memmap,
+  layout, demo, colors, version, int3, panic, reboot, poweroff, write, append, echo, sleep, clear, help. Without `/bin`
+  on the disk, the kernel shell has no `ls`/`cat`.
+
+**Files and network**
+- FAT32 only; `read`/`write_at` re-walk the cluster chain per call; directory handles are snapshots; no truncate-to-length.
+- IPv4 only: no fragmentation, no SACK / persist timer, DNS A records only; the e1000 interrupt line is found by
+  probing (no AML interpreter).
+
+**Hardware and tools**
+- QEMU is the reference machine (q35, e1000, AHCI, PS/2, COM1); real hardware is not a goal of 1.0.
+- `make limine-tool` (bios-install for USB/HDD images) exists but has not been tried.
 - `ps` CPU percentages only cover threads that still exist (dead threads are reaped with their counters).
-- Shell lines longer than one console row are not handled by the line editor (input is capped at 120 characters).
-- `gcc` is installed now → `make limine-tool` (bios-install for USB/HDD images) could be used (not tried yet).
-- User space: no AVX-512, the image is mapped eagerly
-  (heap and stack on demand), no thread-local storage, no guard pages for thread stacks, no SIGCHLD/SIGSTOP/alarm, no signal masks.
-- Network: no fragmentation, no SACK/persist timer, DNS only A records; e1000 interrupt found by probing (no AML).
-- `kshell`/`kcommands` are a bridge for the remaining kernel commands. `/bin/sh`: no `$(...)` command substitution, `case`,
-  `local`, here-documents or `"$@"`; `&&`/`||`/`|`/`&` must be separate words; functions are not inherited by `sh -c`
-  background shells; in-shell stages of a pipeline (built-ins, functions, loops) must fit their output into one pipe
-  (64 KiB); background jobs share the keyboard with the shell.
-- File syscalls: `read`/`write_at` re-walk the cluster chain per call; directory handles are snapshots; no truncate-to-length.
-- Still behind `kshell`: cpu, acpi, lspci, disk, hexdump, memmap, layout, demo, colors, version, int3, panic, reboot, poweroff,
-  write, append, echo, sleep, clear, help. Without `/bin` on the disk, the kernel shell has no `ls`/`cat`.
+- Under TCG (no KVM) `make check` takes about 2 minutes on a warm build, `make stress` (5 passes) about 30 minutes.
+
+## Missing for 1.0
+- **Fresh-host test on Fedora** (release criterion "Reproducibility"): only Ubuntu 24.04 has been tested from the README.
+- **A first reader**: somebody who did not build KernelTry follows README → walkthrough 01 → one experiment and
+  reports where they got stuck. That is the real test of the "understandable" goal.
+- **Merge** this branch into the default branch; the tags `v0.8.0` / `v1.0.0` belong on the default branch.
+- **`docs/GOALS.md`** is still marked "proposal" – the user confirms it (or changes it).
+- Decisions: CI (M40b); license headers (`SPDX-License-Identifier: GPL-3.0-or-later`) in every source file – optional,
+  the GPL's "How to Apply" recommends a notice per file; renaming the GitHub repository to KernelTry.
 
 ## Next step
-Stage 7 (M34–M38) is done. Agree on stage 8 with the user before starting – candidates from "Open items": `$(...)`
-command substitution and `case` in `/bin/sh`, `fork`/`exec`-style process API, a virtual file system (`/proc`, `/dev`),
-mmap of files, SACK / IPv4 fragments, USB keyboard (xHCI), a framebuffer GUI.
+0.8.0 is prepared (M46). Next: the items under "Missing for 1.0", then M47.

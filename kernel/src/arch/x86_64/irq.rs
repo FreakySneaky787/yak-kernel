@@ -29,6 +29,7 @@ pub fn install_irq_handlers(idt: &mut Idt) {
     idt.set(pic::PIC2_OFFSET + 7, pic_spurious);
     idt.set(lapic::SPURIOUS_VECTOR, apic_spurious);
     idt.set(super::smp::WAKE_VECTOR, wake);
+    idt.set(super::smp::TLB_VECTOR, tlb_shootdown);
     idt.set(crate::drivers::ahci::VECTOR, ahci);
     idt.set(crate::net::VECTOR, network);
 }
@@ -126,6 +127,11 @@ extern "x86-interrupt" fn wake(mut frame: InterruptStackFrame) {
     if frame.cs & 3 == 3 {
         deliver_signals(&mut frame);
     }
+}
+
+extern "x86-interrupt" fn tlb_shootdown(_frame: InterruptStackFrame) {
+    super::smp::on_tlb_ipi();
+    lapic::eoi();
 }
 
 /// Spurious interrupts must not be acknowledged (no EOI).

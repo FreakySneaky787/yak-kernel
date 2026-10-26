@@ -6,13 +6,15 @@ A kernel written from scratch together with an AI. Runs in QEMU only.
 The conversation with the user happens in German.
 
 ## Read first
-1. `docs/PROGRESS.md` – where we are and what comes next
-2. `docs/DESIGN.md` – architecture and rationale, before changing anything fundamental
-3. `docs/BUGS.md` – known pitfalls, especially for triple faults and boot problems
+1. `docs/GOALS.md` – purpose, audience and release criteria (proposal)
+2. `docs/PROGRESS.md` – where we are and what comes next
+3. `docs/DESIGN.md` – architecture and rationale, before changing anything fundamental
+4. `docs/BUGS.md` – known pitfalls, especially for triple faults and boot problems
 
 ## Commands
 | Command | What |
 |---|---|
+| `make deps` | check host tools, print the install command for missing ones (first step of `make check`) |
 | `make build` | build the user programs and the kernel (`kernel/target/x86_64-unknown-none/debug/kernel`) |
 | `make user` | build the user programs (`user/`) into `build/user/bin` (installed into `/bin` on every disk image) |
 | `make run` | QEMU with a window (BIOS), serial output in the terminal |
@@ -20,7 +22,9 @@ The conversation with the user happens in German.
 | `make test` | all in-kernel tests headless in QEMU, exit status 0 = green |
 | `make e2e` | boot the real kernel and drive the shell over serial (`scripts/e2e-shell.py`) |
 | `make e2e-uefi` | same E2E test, booted through OVMF/UEFI |
-| `make check` | `make test` + `make e2e` + `make e2e-uefi` – run this before every commit |
+| `make check` | `make deps` + `make test` + `make e2e` + `make e2e-uefi` – run this before every commit |
+| `make soak` | long mixed workload on a scratch disk (`SOAK_ROUNDS`, default 10, ~10 s per round) |
+| `make stress` | reliability gate: suite `STRESS_N` (5) times with 1/2/4 CPUs, `qemu64`, UEFI, then soak – about 30 min under TCG |
 | `make fmt` | rustfmt over the kernel (commit formatting separately) |
 | `make disk` / `make disk-reset` | create / recreate the persistent FAT32 disk `build/disk.img` from `rootfs/` |
 | `make debug` + `make gdb` | QEMU waits for gdb on :1234 |
@@ -36,7 +40,7 @@ Interrupt problems: QEMU monitor `info pic`, `info lapic`, `info registers`.
 Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.sh` invocation.
 
 ## Toolchain
-- Rust nightly via rustup, target `x86_64-unknown-none` for the kernel; user programs use `user/x86_64-kerneltry-user.json`
+- Rust nightly via rustup, pinned in `rust-toolchain.toml` (update deliberately + `make check`), target `x86_64-unknown-none` for the kernel; user programs use `user/x86_64-kerneltry-user.json`
   with `-Zbuild-std` (needs the `rust-src` component and `gcc` as host linker – both installed).
 - **GNU tools preferred where they fit:** GNU ld (`ld.bfd`) links the kernel, GNU make drives everything,
   gdb for debugging, binutils (objdump, nm, readelf, addr2line) for inspection, gcc builds host helpers (Limine utility).
@@ -73,13 +77,13 @@ Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.s
 - `kernel/src/fs/` – `mod.rs` (root mount `fs::ROOT`, `SystemDisk`, path `normalize`), `fat32.rs` (FAT32 read/write, LFN, `format`)
 - `kernel/src/drivers/e1000.rs` – network card; `kernel/src/net/` – `packet.rs` (Ethernet/ARP/IPv4/ICMP/UDP/TCP/DHCP formats),
   `mod.rs` (stack, net thread, IRQ probing, sockets), `tcp.rs`, `dhcp.rs` (lease + renewal)
-- `rootfs/` – initial contents of the FAT32 disk image; `scripts/mkdisk.sh` – builds the image;
+- `rootfs/` – initial contents of the FAT32 disk image (`soak.sh` = soak workload, run by `scripts/soak.py`); `scripts/mkdisk.sh` – builds the image;
   `scripts/check-test-disks.sh` – `fsck.fat` + mtools validation of the test disks (run by `make test`);
   `scripts/install-user.sh` – copies `build/user/bin/*` into `/bin` of a disk image
 - `user/` – user programs: `src/lib.rs` (`ulib`: `_start`, `Args`), `sys.rs` (syscalls), `io.rs` (`print!`, `read_line`),
   `fs.rs` (`File`, `Dir`, `stat`), `heap.rs` (allocator on `brk`), `dns.rs` (DNS client), `env.rs` (environment), `signal.rs` (handlers + trampoline), `thread.rs` (spawn/join), `sync.rs` (futex `Mutex`),
   `process.rs` (`spawn`/`wait`/`kill`), `src/bin/*.rs` (one program each: tools cat, ls, cp, mv, rm, mkdir, touch, stat,
-  sort, wc, grep, ps, mem, uptime, df, date, upper, hello, ping, netinfo, udpecho, time, nc, echod, host, wget, httpd, env; self-tests fault, fstest, heaptest, spawntest, pipetest, sigtest, threadtest),
+  sort, wc, grep, ps, mem, uptime, df, date, upper, hello, ping, netinfo, udpecho, time, nc, echod, host, wget, httpd, env, uname; self-tests fault, fstest, heaptest, spawntest, pipetest, sigtest, threadtest, syscheck),
   `src/bin/sh/` (the shell, started as init: `main.rs` executor + built-ins, `syntax.rs` tokenizer/parser, `arith.rs`,
   `glob.rs`, `testcmd.rs`), `src/bin/edit/` (full-screen editor), `linker.ld`
 - `kernel/src/time.rs` – ticks, `uptime_ms`, `sleep_ms`; `kernel/src/sync.rs` – sleeping `Mutex` (blocks instead of spinning)
@@ -89,5 +93,6 @@ Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.s
   `fpu.rs` (x87/SSE/AVX enable, XSAVE/FXSAVE areas), `cpu.rs` also SMEP/SMAP + `user_access`, `smp.rs` (AP trampoline, INIT/SIPI, `run_on`), `tsc.rs` (µs clock), interrupt helpers in `mod.rs`
 - `kernel/tests/` – integration tests (each one is a separate kernel; `reclaim.rs` is the only one that reclaims bootloader memory, `smap.rs` checks SMEP/SMAP)
 - `kernel/linker.ld` – higher-half layout at `0xffffffff80000000`
-- `scripts/run-qemu.sh` – cargo runner: builds the ISO and starts QEMU
+- `scripts/run-qemu.sh` – cargo runner: builds the ISO and starts QEMU; `scripts/check-deps.sh` – host tool check (`make deps`)
+- `LICENSE` – GNU GPL v3 (`GPL-3.0-or-later`, the user's choice); `README.md` – entry point for new readers
 - `vendor/limine` – Limine binaries (not in git, `make limine`)

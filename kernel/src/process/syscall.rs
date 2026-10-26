@@ -131,6 +131,8 @@ pub mod nr {
     pub const FUTEX_WAKE: u32 = 50;
     /// gettid() -> id of the calling thread (getpid() is the process)
     pub const GETTID: u32 = 51;
+    /// uname(buf, len) -> length of "KernelTry <version> x86_64" written to buf; -ERANGE if len is too small
+    pub const UNAME: u32 = 52;
 }
 
 pub mod errno {
@@ -283,6 +285,7 @@ pub extern "C" fn dispatch(frame: &mut SyscallFrame) {
         }
         nr::GETPID => Ok(task::current_owner()),
         nr::GETTID => Ok(task::current_id()),
+        nr::UNAME => sys_uname(a0, a1),
         nr::THREAD_SPAWN => sys_thread_spawn(a0, a1, a2),
         nr::THREAD_EXIT => super::exit_thread(a0 as i64),
         nr::THREAD_JOIN => match super::join_thread(a0) {
@@ -374,15 +377,44 @@ fn accessible(addr: u64, len: u64, writable: bool) -> bool {
     .unwrap_or(false)
 }
 
+/// Largest piece of a user buffer copied in one go: the copy runs under the
+/// process table lock with interrupts off, so long buffers are split.
+const COPY_CHUNK: u64 = 64 * 1024;
+
+/// Checks `[addr, addr + len)` and runs `copy` on it in one go under the
+/// process table lock, so no other thread of the process can unmap the pages
+/// (`brk`) between the check and the copy (bug #14).
+fn locked_user_copy(addr: u64, len: u64, writable: bool, copy: impl FnOnce()) -> Result<(), i64> {
+    with_current(|p| {
+        let ok = p.populate(addr, len) && p.space.as_ref().is_some_and(|s| s.is_accessible(addr, len, writable));
+        if ok {
+            crate::arch::x86_64::cpu::user_access(copy);
+        }
+        ok
+    })
+    .filter(|&ok| ok)
+    .map(|_| ())
+    .ok_or(errno::EFAULT)
+}
+
 /// Copies a user buffer into the kernel (after checking it).
 fn copy_from_user(addr: u64, len: u64) -> Result<Vec<u8>, i64> {
+    if len == 0 {
+        // the pointer of an empty buffer may be anything (even null): never build a slice from it (bug #12)
+        return Ok(Vec::new());
+    }
+    // checked as a whole first, so a bogus length cannot make us allocate
     if !accessible(addr, len, false) {
         return Err(errno::EFAULT);
     }
-    // The process's page tables are active: the user buffer is directly readable
-    let bytes = crate::arch::x86_64::cpu::user_access(|| unsafe {
-        core::slice::from_raw_parts(addr as *const u8, len as usize).to_vec()
-    });
+    let mut bytes = alloc::vec![0u8; len as usize];
+    for (i, piece) in bytes.chunks_mut(COPY_CHUNK as usize).enumerate() {
+        let from = addr + i as u64 * COPY_CHUNK;
+        // The process's page tables are active: the user buffer is directly readable
+        locked_user_copy(from, piece.len() as u64, false, || unsafe {
+            core::ptr::copy_nonoverlapping(from as *const u8, piece.as_mut_ptr(), piece.len())
+        })?;
+    }
     Ok(bytes)
 }
 
@@ -392,12 +424,15 @@ pub(super) fn write_user(addr: u64, data: &[u8]) -> Result<(), i64> {
 }
 
 fn copy_to_user(addr: u64, data: &[u8]) -> Result<(), i64> {
-    if !accessible(addr, data.len() as u64, true) {
-        return Err(errno::EFAULT);
+    if data.is_empty() {
+        return Ok(()); // see copy_from_user
     }
-    crate::arch::x86_64::cpu::user_access(|| unsafe {
-        core::ptr::copy_nonoverlapping(data.as_ptr(), addr as *mut u8, data.len())
-    });
+    for (i, piece) in data.chunks(COPY_CHUNK as usize).enumerate() {
+        let to = addr + i as u64 * COPY_CHUNK;
+        locked_user_copy(to, piece.len() as u64, true, || unsafe {
+            core::ptr::copy_nonoverlapping(piece.as_ptr(), to as *mut u8, piece.len())
+        })?;
+    }
     Ok(())
 }
 
@@ -466,9 +501,43 @@ fn target(fd: u64) -> Result<Target, i64> {
     .unwrap_or(Err(errno::EBADF))
 }
 
+/// Largest piece of a `write` copied into the kernel at once: a program may
+/// hand over its whole 64 MiB heap, and a kernel copy of that (per thread!)
+/// could exhaust memory - a failed kernel allocation halts the system.
+const MAX_WRITE_PIECE: u64 = 64 * 1024;
+
 fn sys_write(fd: u64, buf: u64, len: u64) -> SysResult {
+    target(fd)?; // EBADF before EFAULT, like before
+    if !accessible(buf, len, false) {
+        return Err(errno::EFAULT);
+    }
+    let mut done = 0;
+    while done < len {
+        let mut data = copy_from_user(buf + done, (len - done).min(MAX_WRITE_PIECE))?;
+        if done + (data.len() as u64) < len {
+            // do not cut a UTF-8 character in two (the console prints each piece as text)
+            if let Err(e) = core::str::from_utf8(&data) {
+                if e.error_len().is_none() {
+                    data.truncate(e.valid_up_to());
+                }
+            }
+        }
+        match write_piece(fd, &data) {
+            Ok(n) => {
+                done += n;
+                if n < data.len() as u64 {
+                    break; // interrupted after a partial write
+                }
+            }
+            Err(e) if done == 0 => return Err(e),
+            Err(_) => break,
+        }
+    }
+    Ok(done)
+}
+
+fn write_piece(fd: u64, data: &[u8]) -> SysResult {
     let target = target(fd)?;
-    let data = copy_from_user(buf, len)?;
     if let Target::File {
         path,
         offset,
@@ -478,11 +547,11 @@ fn sys_write(fd: u64, buf: u64, len: u64) -> SysResult {
     } = &target
     {
         // positioned write; the descriptor's offset moves on
-        fs::with_root(|fs| fs.write_at(path, *offset, &data)).map_err(fs_errno)?;
+        fs::with_root(|fs| fs.write_at(path, *offset, data)).map_err(fs_errno)?;
         set_offset(fd, offset + data.len() as u64);
-        return Ok(len);
+        return Ok(data.len() as u64);
     }
-    write_target(target, &data)
+    write_target(target, data)
 }
 
 fn set_offset(fd: u64, new: u64) {
@@ -687,6 +756,10 @@ fn sys_close(fd: u64) -> SysResult {
 }
 
 fn sys_readdir(fd: u64, info_addr: u64) -> SysResult {
+    // checked before the entry is taken, so a bad buffer does not skip one (bug #13)
+    if !accessible(info_addr, size_of::<DirEntryInfo>() as u64, true) {
+        return Err(errno::EFAULT);
+    }
     let entry = with_current(|p| match p.files.get_mut(fd as usize) {
         Some(Some(Handle::Dir { entries, next })) => {
             let e = entries.get(*next).cloned();
@@ -1244,6 +1317,9 @@ fn udp_socket_of(fd: u64) -> Result<alloc::sync::Arc<net::UdpSocket>, i64> {
 
 fn sys_sendto(fd: u64, buf: u64, len: u64, ip: u64, port: u64) -> SysResult {
     let socket = udp_socket_of(fd)?;
+    if len > net::MAX_UDP_PAYLOAD as u64 {
+        return Err(errno::EMSGSIZE); // checked before the copy: one datagram, one kernel buffer
+    }
     let data = copy_from_user(buf, len)?;
     let port = u16::try_from(port).map_err(|_| errno::EINVAL)?;
     socket
@@ -1342,6 +1418,15 @@ fn sys_environ(buf: u64, len: u64) -> SysResult {
     }
     copy_to_user(buf, all.as_bytes())?;
     Ok(all.len() as u64)
+}
+
+fn sys_uname(buf: u64, len: u64) -> SysResult {
+    const NAME: &str = concat!("KernelTry ", env!("CARGO_PKG_VERSION"), " x86_64");
+    if (NAME.len() as u64) > len {
+        return Err(errno::ERANGE);
+    }
+    copy_to_user(buf, NAME.as_bytes())?;
+    Ok(NAME.len() as u64)
 }
 
 fn sys_getcwd(buf: u64, len: u64) -> SysResult {
