@@ -129,6 +129,11 @@ extern "C" fn kmain() -> ! {
     assert_eq!(process::count(), 0, "processes left over");
     assert_eq!(alive(), threads_before, "threads left over");
 
+    // M45: the example syscall + program of docs/HACKING.md
+    let (status, out) = run("uname", "");
+    assert_eq!(status, ExitStatus::Exited(0));
+    assert_eq!(out, alloc::format!("KernelTry {} x86_64\n", env!("CARGO_PKG_VERSION")));
+
     // M41: every syscall with bad pointers, lengths, descriptors and numbers
     let (status, out) = run("syscheck", "");
     assert_eq!(status, ExitStatus::Exited(0), "{}", out);

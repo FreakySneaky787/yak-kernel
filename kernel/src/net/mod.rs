@@ -82,7 +82,7 @@ impl Drop for UdpSocket {
 const PING_ID: u16 = 0x4B54; // "KT"
 const SOCKET_QUEUE_MAX: usize = 64;
 const ARP_TIMEOUT_MS: u64 = 1000;
-const MAX_UDP_PAYLOAD: usize = 1472; // 1500 - IPv4 - UDP header
+pub const MAX_UDP_PAYLOAD: usize = 1472; // 1500 - IPv4 - UDP header
 
 static NIC: Mutex<Option<E1000>> = Mutex::new(None);
 /// Changes once, when DHCP is done; read with interrupts off (small lock).

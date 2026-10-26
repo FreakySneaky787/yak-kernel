@@ -342,20 +342,38 @@ Still open: N for `make stress` (proposal: 5), whether CI is wanted (M40b), whet
   `TLB_VECTOR` IPI. `make soak` (10 rounds ≈ 1–2 min) and `make stress` added. `syscheck race` with 4 CPUs: 4 → ~3500
   heap shrinks in 5 s. DESIGN.md listed the wake-up IPI as 0x60; it is 0xF0 (fixed).
 
-## Open items / later
+## Known limitations of release 1.0 (sorted in M42)
+Release blockers were defined as "a program can crash, hang or exhaust the kernel" (`docs/GOALS.md`: isolated
+programs, reliability). All of those found so far are fixed (bugs #11–#16). The rest are **documented limitations**:
+they make KernelTry smaller than a production system, but they do not break the promises of release 1.0.
+
+**Security model**
+- Single user, no permissions: every program may signal any process (`kill`), read and write every file, and use
+  the kernel-command bridge `kshell` – including `reboot`, `poweroff`, `panic` and `int3`, which exist for teaching.
+  Isolation means *memory* isolation: a program cannot read or corrupt another program's or the kernel's memory.
+- The kernel heap grows on demand but never shrinks.
+
+**User space**
+- No AVX-512; the ELF image is mapped eagerly (heap and stack on demand); no thread-local storage; no guard pages for
+  thread stacks; no SIGCHLD/SIGSTOP/alarm, no signal masks; a CPU exception cannot be caught as a signal.
+- `/bin/sh`: no `$(...)`, `case`, `local`, here-documents or `"$@"`; `&&`/`||`/`|`/`&` must be separate words;
+  functions are not inherited by `sh -c` background shells; built-ins, functions and loops inside a pipeline must fit
+  their output into one pipe (64 KiB) – more blocks until Ctrl+C; background jobs share the keyboard with the shell.
+- The line editor handles one console row (input capped at 120 characters).
+- `kshell`/`kcommands` bridge the commands that are still kernel built-ins: cpu, acpi, lspci, disk, hexdump, memmap,
+  layout, demo, colors, version, int3, panic, reboot, poweroff, write, append, echo, sleep, clear, help. Without `/bin`
+  on the disk, the kernel shell has no `ls`/`cat`.
+
+**Files and network**
+- FAT32 only; `read`/`write_at` re-walk the cluster chain per call; directory handles are snapshots; no truncate-to-length.
+- IPv4 only: no fragmentation, no SACK / persist timer, DNS A records only; the e1000 interrupt line is found by
+  probing (no AML interpreter).
+
+**Hardware and tools**
+- QEMU is the reference machine (q35, e1000, AHCI, PS/2, COM1); real hardware is not a goal of 1.0.
+- `make limine-tool` (bios-install for USB/HDD images) exists but has not been tried.
 - `ps` CPU percentages only cover threads that still exist (dead threads are reaped with their counters).
-- Shell lines longer than one console row are not handled by the line editor (input is capped at 120 characters).
-- `gcc` is installed now → `make limine-tool` (bios-install for USB/HDD images) could be used (not tried yet).
-- User space: no AVX-512, the image is mapped eagerly
-  (heap and stack on demand), no thread-local storage, no guard pages for thread stacks, no SIGCHLD/SIGSTOP/alarm, no signal masks.
-- Network: no fragmentation, no SACK/persist timer, DNS only A records; e1000 interrupt found by probing (no AML).
-- `kshell`/`kcommands` are a bridge for the remaining kernel commands. `/bin/sh`: no `$(...)` command substitution, `case`,
-  `local`, here-documents or `"$@"`; `&&`/`||`/`|`/`&` must be separate words; functions are not inherited by `sh -c`
-  background shells; in-shell stages of a pipeline (built-ins, functions, loops) must fit their output into one pipe
-  (64 KiB); background jobs share the keyboard with the shell.
-- File syscalls: `read`/`write_at` re-walk the cluster chain per call; directory handles are snapshots; no truncate-to-length.
-- Still behind `kshell`: cpu, acpi, lspci, disk, hexdump, memmap, layout, demo, colors, version, int3, panic, reboot, poweroff,
-  write, append, echo, sleep, clear, help. Without `/bin` on the disk, the kernel shell has no `ls`/`cat`.
+- Under TCG (no KVM) the full `make stress` takes hours; `make check` takes about 10 minutes.
 
 ## Next step
 M41 is done; run `make stress` (5 passes) and record the result. Then M42 (sort the open items, fix release blockers).

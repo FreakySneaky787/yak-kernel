@@ -188,6 +188,7 @@
   | 49 | `futex_wait(addr, expected, timeout_ms)` | `-EAGAIN` if `*addr != expected`, `-ETIMEDOUT`, `-EINTR` |
   | 50 | `futex_wake(addr, n)` | number of threads woken |
   | 51 | `gettid()` | `getpid()` returns the process id in every thread |
+  | 52 | `uname(buf, len)` | "KernelTry <version> x86_64", `-ERANGE` if `len` is too small (the example of `docs/HACKING.md`) |
 - **`/bin/edit`**: `buffer.rs` is pure logic (tested by `edit --selftest`), `main.rs` draws with `ESC[r;cH`, `ESC[K`, SGR 7.
   The text area is all rows but the last; the cursor line and the status bar are redrawn per key, the whole screen only after
   scrolling or when lines are inserted/removed. Writing the bottom-right cell is safe: the console wraps lazily (only when the

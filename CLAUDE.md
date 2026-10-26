@@ -83,7 +83,7 @@ Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.s
 - `user/` – user programs: `src/lib.rs` (`ulib`: `_start`, `Args`), `sys.rs` (syscalls), `io.rs` (`print!`, `read_line`),
   `fs.rs` (`File`, `Dir`, `stat`), `heap.rs` (allocator on `brk`), `dns.rs` (DNS client), `env.rs` (environment), `signal.rs` (handlers + trampoline), `thread.rs` (spawn/join), `sync.rs` (futex `Mutex`),
   `process.rs` (`spawn`/`wait`/`kill`), `src/bin/*.rs` (one program each: tools cat, ls, cp, mv, rm, mkdir, touch, stat,
-  sort, wc, grep, ps, mem, uptime, df, date, upper, hello, ping, netinfo, udpecho, time, nc, echod, host, wget, httpd, env; self-tests fault, fstest, heaptest, spawntest, pipetest, sigtest, threadtest, syscheck),
+  sort, wc, grep, ps, mem, uptime, df, date, upper, hello, ping, netinfo, udpecho, time, nc, echod, host, wget, httpd, env, uname; self-tests fault, fstest, heaptest, spawntest, pipetest, sigtest, threadtest, syscheck),
   `src/bin/sh/` (the shell, started as init: `main.rs` executor + built-ins, `syntax.rs` tokenizer/parser, `arith.rs`,
   `glob.rs`, `testcmd.rs`), `src/bin/edit/` (full-screen editor), `linker.ld`
 - `kernel/src/time.rs` – ticks, `uptime_ms`, `sleep_ms`; `kernel/src/sync.rs` – sleeping `Mutex` (blocks instead of spinning)

@@ -15,10 +15,10 @@ running, testing and changing one. It runs in QEMU (BIOS and UEFI).
 | CPU | own GDT/TSS/IDT, local APIC + I/O APIC, every core from the ACPI MADT started via INIT/SIPI (QEMU: 4), SMEP/SMAP, x87/SSE/AVX state per thread |
 | Memory | bitmap frame allocator, 4-level paging, guarded kernel stacks, kernel heap, demand-paged user heaps and stacks |
 | Scheduling | preemptive round-robin SMP scheduler, kernel and user threads, futexes, sleeping mutexes |
-| Processes | ring 3, one address space per process, ELF loader, 52 syscalls, signals, pipes, environment variables |
+| Processes | ring 3, one address space per process, ELF loader, 53 syscalls, signals, pipes, environment variables |
 | Storage | PCI, AHCI SATA driver with MSI, sector cache, FAT32 with long file names – persistent across reboots |
 | Network | e1000, Ethernet/ARP/IPv4/ICMP/UDP/TCP, DHCP, DNS client, `wget` and `httpd` |
-| User space | `/bin/sh` (pipes, redirection, scripts, `if`/`while`/`for`, functions, jobs), a full-screen editor and 36 more programs (tools, network clients/servers, self-tests) |
+| User space | `/bin/sh` (pipes, redirection, scripts, `if`/`while`/`for`, functions, jobs), a full-screen editor and 37 more programs (tools, network clients/servers, self-tests) |
 
 Everything above is our own code. The only crates are `limine` (boot protocol) and `spin` (locks).
 
@@ -56,6 +56,9 @@ Try in the shell: `help`, `ls /bin`, `cat /README.txt | wc`, `ps`, `cpu`, `ping 
 | File | Read it for |
 |---|---|
 | [docs/GOALS.md](docs/GOALS.md) | purpose, audience, release criteria |
+| [docs/walkthrough/](docs/walkthrough/README.md) | **start here**: four tours through the code – boot, a key press, a pipeline, a page fault |
+| [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md) | guided experiments: change one thing, predict, observe |
+| [docs/HACKING.md](docs/HACKING.md) | how to add a syscall, a program, a test, a shell built-in |
 | [docs/LEARN.md](docs/LEARN.md) | short explanations of every subsystem, in the order they were built |
 | [docs/DESIGN.md](docs/DESIGN.md) | architecture and the reasons behind each decision |
 | [docs/BUGS.md](docs/BUGS.md) | every bug found so far: symptom, cause, fix, test |

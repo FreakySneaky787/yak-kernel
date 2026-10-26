@@ -56,6 +56,9 @@ pub const THREAD_JOIN: u64 = 48;
 pub const FUTEX_WAIT: u64 = 49;
 pub const FUTEX_WAKE: u64 = 50;
 pub const GETTID: u64 = 51;
+pub const UNAME: u64 = 52;
+/// Number of syscalls the kernel knows (0 ..= SYSCALL_COUNT - 1); higher numbers return -ENOSYS.
+pub const SYSCALL_COUNT: u64 = 53;
 
 pub const STDIN: u64 = 0;
 pub const STDOUT: u64 = 1;
@@ -544,6 +547,11 @@ pub fn tcp_accept(fd: u64, from: &mut SockAddr) -> i64 {
 /// No more writing on a TCP connection (the peer sees the end of the stream).
 pub fn shutdown(fd: u64) -> i64 {
     unsafe { syscall3(SHUTDOWN, fd, 0, 0) }
+}
+
+/// Writes the system name ("KernelTry <version> x86_64") into `buf`; returns its length or -ERANGE.
+pub fn uname(buf: &mut [u8]) -> i64 {
+    unsafe { syscall3(UNAME, buf.as_mut_ptr() as u64, buf.len() as u64, 0) }
 }
 
 /// Sets (or with `None` removes) an environment variable of this process.

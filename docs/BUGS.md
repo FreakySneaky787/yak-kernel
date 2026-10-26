@@ -150,6 +150,17 @@ Format: number · date · title, then symptom → cause → fix → test.
   the old code hangs until the 30 s timeout).
 - **Remember:** work that must happen *now* on another CPU belongs in an interrupt handler, not in a job queue.
 
+### #16 · 2026-10-26 · One `write` could make the kernel heap grow by the whole buffer
+- **Symptom:** found while sorting the open items (M42) and confirmed with `syscheck`: a 16 MiB `write` into a pipe
+  without a reader grew the kernel heap by 16 388 KiB before failing with EPIPE. The kernel heap never shrinks, and a
+  failed kernel allocation halts the system – two programs writing their 64 MiB heaps at once could take the machine down.
+- **Cause:** `sys_write` (and `sys_sendto`) copied the whole user buffer into a kernel `Vec` before doing anything.
+- **Fix:** `sys_write` copies and writes in pieces of at most 64 KiB (pieces end on a UTF-8 character boundary, the
+  console prints each piece as text); `sendto` refuses datagrams larger than `MAX_UDP_PAYLOAD` *before* copying (EMSGSIZE).
+  Programs still see one complete write – `ulib` does not expect short writes.
+- **Test:** `syscheck`: 16 MiB into a pipe without a reader → EPIPE with < 1 MiB heap growth; `sendto` of 1 GiB → EMSGSIZE.
+- **Remember:** the size of a kernel allocation must never be chosen by a user program.
+
 ## Known pitfalls (not bugs, but worth remembering)
 - **The Limine host utility (`limine bios-install`) needs a C compiler** (`gcc`). It is not required for booting the ISO
   in QEMU with `-cdrom`; it is only needed to make the ISO bootable as a hard disk / USB image.

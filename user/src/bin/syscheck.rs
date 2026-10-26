@@ -21,6 +21,7 @@ ulib::entry!(main);
 const ENOSYS: i64 = 38;
 const EBADF: i64 = 9;
 const EFAULT: i64 = 14;
+const EPIPE: i64 = 32;
 
 /// Addresses no program may hand to the kernel: unmapped low memory, the gap
 /// below the stack area, above the stack, non-canonical and kernel addresses.
@@ -165,6 +166,7 @@ fn main(mut args: ulib::Args) -> i32 {
             }
             expect_error(sys::GETENV, [p, l, hp, 64, 0], "getenv name");
             expect_error(sys::ENVIRON, [p, l, 0, 0, 0], "environ");
+            expect_error(sys::UNAME, [p, l, 0, 0, 0], "uname");
         }
         expect_error(sys::STAT, [pp, pl, p, 0, 0], "stat buffer");
         expect_error(sys::READDIR, [dir, p, 0, 0, 0], "readdir");
@@ -294,7 +296,14 @@ fn main(mut args: ulib::Args) -> i32 {
     );
 
     // 3. bad numbers and values
-    for nr in [52, 53, 1000, u32::MAX as u64, 1 << 32, u64::MAX] {
+    for nr in [
+        sys::SYSCALL_COUNT,
+        sys::SYSCALL_COUNT + 1,
+        1000,
+        u32::MAX as u64,
+        1 << 32,
+        u64::MAX,
+    ] {
         check(
             call(nr, [0; 5]) == -ENOSYS,
             &format_args!("syscall {:#x} -> ENOSYS", nr),
@@ -337,6 +346,32 @@ fn main(mut args: ulib::Args) -> i32 {
         );
     }
 
+    // a huge write must not be copied into the kernel in one piece (bug #16):
+    // 16 MiB into a pipe without a reader fails at once, the kernel heap stays put
+    let mut fds = [0u32; 2];
+    check(sys::pipe(&mut fds) == 0, &"pipe for the big write");
+    sys::close(fds[0] as u64);
+    let big = vec![b'x'; 16 << 20];
+    let heap_before = sys::sysinfo().heap_total;
+    check(
+        sys::write(fds[1] as u64, &big) == -EPIPE,
+        &"16 MiB into a pipe without reader -> EPIPE",
+    );
+    let grown = sys::sysinfo().heap_total - heap_before;
+    check(
+        grown < 1 << 20,
+        &format_args!("kernel heap grew by {} KiB for one write", grown / 1024),
+    );
+    sys::close(fds[1] as u64);
+    drop(big);
+    // a datagram larger than the network can carry is refused before it is copied
+    let udp = sys::udp_socket(0);
+    if udp >= 0 {
+        let r = call(sys::SENDTO, [udp as u64, hp, 1 << 30, 0x0A00_0202, 7]);
+        check(r == -90, &format_args!("sendto with 1 GiB -> EMSGSIZE, got {}", r));
+        sys::close(udp as u64);
+    }
+
     // 4. a bad status pointer must not lose a child's exit status
     match process::spawn("/bin/hello", []) {
         Ok(child) => {
@@ -355,9 +390,9 @@ fn main(mut args: ulib::Args) -> i32 {
     // 5. random mixes of all of the above (no calls that block, end the
     // process, change its memory, its signals or its descriptors 0-2)
     // (kill is left out: any process may signal any other one, by design)
-    const RANDOM_OK: [u64; 33] = [
+    const RANDOM_OK: [u64; 34] = [
         1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 31, 36, 40, 41,
-        42, 43, 49,
+        42, 43, 49, 52,
     ];
     let mut pool = vec![0u64, 3, 7, 15, 64, 999];
     pool.extend_from_slice(&BAD_PTRS);
@@ -368,7 +403,7 @@ fn main(mut args: ulib::Args) -> i32 {
     let start = sys::uptime_ms();
     for _ in 0..random_calls {
         let nr = if rng.next() % 64 == 0 {
-            52 + rng.next() % 1000
+            sys::SYSCALL_COUNT + rng.next() % 1000
         } else {
             rng.pick(&RANDOM_OK)
         };
