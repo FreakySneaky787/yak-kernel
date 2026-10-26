@@ -91,7 +91,7 @@ Still open: N for `make stress` (proposal: 5), whether CI is wanted (M40b), whet
 | # | Milestone | Status | Tests |
 |---|---|---|---|
 | 47 | CI: `.github/workflows/check.yml` runs `make check` on ubuntu-24.04 and in a `fedora:latest` container (QEMU TCG, pinned toolchain, 120 s per test kernel, `build/` uploaded on failure); CI badge in the README | ✅ | first run red on both (bug #17: shootdown test limit too strict for CI runners), then green on both: all kernel tests, all test disks fsck-clean, 127/127 E2E steps BIOS + UEFI |
-| 48 | Release 1.0.0: outside-reader feedback addressed, version, CHANGELOG, `make stress`; tag + GitHub release by the user | ⬜ | `make check` + `make stress` on the release commit |
+| 48 | Release prep for 1.0.0: `CHANGELOG.md` "Unreleased" section (CI, website, #17–#19); version, `make stress` and the tag follow when the outside-reader feedback is in (user) | 🔨 | – |
 
 ## Stage 10: course infrastructure (roadmap phase B)
 | # | Milestone | Status | Tests |
