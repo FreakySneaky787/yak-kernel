@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0-rc.1 – pre-release (2026-10-26)
+## 0.8.0 – pre-release (2026-10-26)
 Stage 8: no new subsystems, but the release criteria of `docs/GOALS.md`.
 
 **For readers**
@@ -23,7 +23,7 @@ Stage 8: no new subsystems, but the release criteria of `docs/GOALS.md`.
 **New**
 - Syscall 52 `uname` and `/bin/uname` (the worked example of `docs/HACKING.md`).
 
-## 0.1.0 – stages 1–7 (2026-10-24 … 2026-10-25)
+## Before 0.8.0 – stages 1–7 (version number 0.1.0 throughout) (2026-10-24 … 2026-10-25)
 Milestones M1–M38, see `docs/PROGRESS.md`: boot via Limine (BIOS/UEFI), own GDT/IDT/paging/allocators, APIC and SMP
 scheduler, AHCI + FAT32, ring 3 with ELF loader and syscalls, `/bin/sh`, pipes, signals, threads, editor, FPU/AVX state,
 SMEP/SMAP, e1000 + IPv4/UDP/TCP/DHCP/DNS/HTTP.

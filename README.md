@@ -5,7 +5,7 @@ running, testing and changing one. It runs in QEMU (BIOS and UEFI).
 
 ![KernelTry shell running in QEMU: uname, cpu, netinfo, ps and df](docs/images/shell.png)
 
-> **Status:** pre-release **1.0.0-rc.1** – a hobby / learning project, working towards release 1.0 (see [docs/GOALS.md](docs/GOALS.md) and
+> **Status:** pre-release **0.8.0** – a hobby / learning project, working towards release 1.0 (see [docs/GOALS.md](docs/GOALS.md) and
 > stage 8 in [docs/PROGRESS.md](docs/PROGRESS.md)). The project is developed together with an AI assistant.
 
 ## What is in it
