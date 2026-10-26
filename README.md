@@ -62,6 +62,7 @@ Try in the shell: `help`, `ls /bin`, `cat /README.txt | wc`, `ps`, `cpu`, `ping 
 | [docs/LEARN.md](docs/LEARN.md) | short explanations of every subsystem, in the order they were built |
 | [docs/DESIGN.md](docs/DESIGN.md) | architecture and the reasons behind each decision |
 | [docs/BUGS.md](docs/BUGS.md) | every bug found so far: symptom, cause, fix, test |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | where the project is going: a chapter-by-chapter course on its own website |
 | [docs/PROGRESS.md](docs/PROGRESS.md) | milestones, log, open items, next step |
 | [CLAUDE.md](CLAUDE.md) | all `make` targets, debugging helpers and the source layout |
 

@@ -82,11 +82,24 @@ No new kernel features: this stage makes the existing system meet the release cr
 | 44 | Experiments (`docs/EXPERIMENTS.md`): more cores, no FPU save, the bug #14 fix undone, a 16-byte pipe – no build switches, each a small hand edit | ✅ | each experiment run once, results recorded (590 → 250 ms; 4 workers corrupted; panic 2/2; 1.40 → 5.41 s) |
 | 45 | Extending guides (`docs/HACKING.md`): syscall, user program, test, shell built-in | ✅ | the syscall + program guide followed once: syscall 52 `uname` + `/bin/uname` (integration test, E2E step, `syscheck` bad pointers, `SYSCALL_COUNT`) |
 | 46 | Pre-release 0.8.0: GPL-3.0-or-later (`LICENSE` = FSF text, SHA-256 `3972dc97…`), version in both manifests and the boot banner, `CHANGELOG.md`, new screenshot | ✅ | `make check` green; `uname` shows `KernelTry 0.8.0 x86_64` |
-| 47 | Release 1.0.0: everything under "Missing for 1.0" below, then version 1.0.0, `make check` + `make stress` on that commit, tag `v1.0.0` on the default branch | ⬜ | – |
 
 Decided 2026-10-26: name KernelTry; license first ECPL v1.2, then (same day) **GNU GPL v3 or later** (copyright
 FreakySneaky787 and contributors); 1.0 is preceded by the pre-release **0.8.0** (user decision, first prepared as `1.0.0-rc.1`).
 Still open: N for `make stress` (proposal: 5), whether CI is wanted (M40b), whether experiments may add build switches to the kernel (M44).
+
+## Stage 9: CI and release 1.0 (roadmap phase A, agreed 2026-10-26)
+| # | Milestone | Status | Tests |
+|---|---|---|---|
+| 47 | CI: GitHub Actions run `make check` on Ubuntu and in a Fedora container (QEMU TCG) | ⬜ | green runs on both |
+| 48 | Release 1.0.0: outside-reader feedback addressed, version, CHANGELOG, `make stress`; tag + GitHub release by the user | ⬜ | `make check` + `make stress` on the release commit |
+
+## Stage 10: course infrastructure (roadmap phase B)
+| # | Milestone | Status | Tests |
+|---|---|---|---|
+| 49 | Website: mdBook in `book/`, existing docs integrated, GitHub Pages deploy | ⬜ | CI builds and deploys the book; doc-reference check covers it |
+| 50 | Chapter format + `course/NN-slug` branches + chapter check script in CI | ⬜ | a sample chapter branch passes the check |
+
+Then: phase C (pilot chapters 1–4 + feedback), phases D/E – see `docs/ROADMAP.md`.
 
 ## Log
 - **2026-10-24** – Setup: Rust nightly 1.101 (rustup), target `x86_64-unknown-none`, Limine v11.x-binary.
@@ -359,6 +372,11 @@ Still open: N for `make stress` (proposal: 5), whether CI is wanted (M40b), whet
 - **2026-10-26** – Stage 8 merged into `main` (FreakySneaky787/yak-kernel#1, merge commit `a75812b`). The user
   published the GitHub pre-release **v0.8.0** on that commit (tag pushes are not possible from Claude's sandbox).
 
+- **2026-10-26** – Direction for the next 1–2 years decided by the user: a learning platform for self-learners and
+  hobby kernel developers; an English course in which learners rebuild the kernel chapter by chapter (one branch per
+  chapter), published as a website; the user steers, Claude builds. Written down in `docs/ROADMAP.md`; `docs/GOALS.md`
+  updated; stages 9 (CI, 1.0) and 10 (course infrastructure) planned.
+
 ## Known limitations of release 1.0 (sorted in M42)
 Release blockers were defined as "a program can crash, hang or exhaust the kernel" (`docs/GOALS.md`: isolated
 programs, reliability). All of those found so far are fixed (bugs #11–#16). The rest are **documented limitations**:
@@ -401,5 +419,4 @@ they make KernelTry smaller than a production system, but they do not break the 
   the GPL's "How to Apply" recommends a notice per file; renaming the GitHub repository to KernelTry.
 
 ## Next step
-0.8.0 is published (pre-release, tag `v0.8.0` on `main`). Next: the items under "Missing for 1.0", then M47
-(tag `v1.0.0` on `main`, set by the user).
+Stage 9, M47: CI with `make check` on Ubuntu and Fedora (also closes the Fedora item under "Missing for 1.0").
