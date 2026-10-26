@@ -356,6 +356,9 @@ Still open: N for `make stress` (proposal: 5), whether CI is wanted (M40b), whet
   (limine, lock_api, scopeguard: MIT OR Apache-2.0; spin: MIT; Limine bootloader: BSD-2-Clause – all GPLv3-compatible),
   version 1.0.0-rc.1 – renamed to **0.8.0** at the user's request (0.x = not yet stable, as SemVer intends).
 
+- **2026-10-26** – Stage 8 merged into `main` (FreakySneaky787/yak-kernel#1, merge commit `a75812b`). The user
+  published the GitHub pre-release **v0.8.0** on that commit (tag pushes are not possible from Claude's sandbox).
+
 ## Known limitations of release 1.0 (sorted in M42)
 Release blockers were defined as "a program can crash, hang or exhaust the kernel" (`docs/GOALS.md`: isolated
 programs, reliability). All of those found so far are fixed (bugs #11–#16). The rest are **documented limitations**:
@@ -393,10 +396,10 @@ they make KernelTry smaller than a production system, but they do not break the 
 - **Fresh-host test on Fedora** (release criterion "Reproducibility"): only Ubuntu 24.04 has been tested from the README.
 - **A first reader**: somebody who did not build KernelTry follows README → walkthrough 01 → one experiment and
   reports where they got stuck. That is the real test of the "understandable" goal.
-- **Merge** this branch into the default branch; the tags `v0.8.0` / `v1.0.0` belong on the default branch.
 - **`docs/GOALS.md`** is still marked "proposal" – the user confirms it (or changes it).
 - Decisions: CI (M40b); license headers (`SPDX-License-Identifier: GPL-3.0-or-later`) in every source file – optional,
   the GPL's "How to Apply" recommends a notice per file; renaming the GitHub repository to KernelTry.
 
 ## Next step
-0.8.0 is prepared (M46). Next: the items under "Missing for 1.0", then M47.
+0.8.0 is published (pre-release, tag `v0.8.0` on `main`). Next: the items under "Missing for 1.0", then M47
+(tag `v1.0.0` on `main`, set by the user).
