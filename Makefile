@@ -13,7 +13,7 @@ USER_BIN   := build/user/bin
 OVMF       ?= $(firstword $(wildcard /usr/share/edk2/ovmf/OVMF_CODE.fd /usr/share/OVMF/OVMF_CODE_4M.fd \
                   /usr/share/OVMF/OVMF_CODE.fd) /usr/share/edk2/ovmf/OVMF_CODE.fd)
 
-.PHONY: all deps docs-check soak stress limine limine-tool user build run run-uefi debug gdb test e2e e2e-uefi check fmt \
+.PHONY: all deps docs-check book soak stress limine limine-tool user build run run-uefi debug gdb test e2e e2e-uefi check fmt \
         disk disk-reset disasm symbols sections addr2line clean distclean
 
 all: build
@@ -63,6 +63,11 @@ e2e: build
 # Same, but booted through UEFI firmware (OVMF)
 e2e-uefi: build
 	python3 -I scripts/e2e-shell.py $(KERNEL_ELF) -drive if=pflash,format=raw,readonly=on,file=$(OVMF)
+
+# The website: mdBook over docs/ into build/book, source links pointed at GitHub (scripts/build-book.py)
+book:
+	python3 -I scripts/build-book.py --selftest
+	python3 -I scripts/build-book.py
 
 # Long-running mix of files, pipes, processes, threads, signals, network and syscall abuse (scripts/soak.py)
 SOAK_ROUNDS ?= 10
