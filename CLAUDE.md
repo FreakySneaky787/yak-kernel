@@ -27,6 +27,7 @@ The conversation with the user happens in German.
 | `make soak` | long mixed workload on a scratch disk (`SOAK_ROUNDS`, default 10, ~10 s per round) |
 | `make stress` | reliability gate: suite `STRESS_N` (5) times with 1/2/4 CPUs, `qemu64`, UEFI, then soak – about 30 min under TCG |
 | `make book` | build the website (mdBook over `docs/`, `book.toml`) into `build/book`; fails on broken links (needs `mdbook`, see `make deps`) |
+| `make course` | course: static checks + `make test` in every chapter folder `course/NN-slug/` (`scripts/check-course.py`) |
 | `make fmt` | rustfmt over the kernel (commit formatting separately) |
 | `make disk` / `make disk-reset` | create / recreate the persistent FAT32 disk `build/disk.img` from `rootfs/` |
 | `make debug` + `make gdb` | QEMU waits for gdb on :1234 |
@@ -99,5 +100,7 @@ Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.s
 - `docs/` – also the website source: `docs/SUMMARY.md` (navigation), `docs/index.md` (home page); `scripts/build-book.py`
   builds it and points links to files outside `docs/` at GitHub; `.github/workflows/check.yml` (CI: `make check` on
   Ubuntu + Fedora, `make book`), `.github/workflows/pages.yml` (deploys the website from `main`)
+- `course/NN-slug/` – the course chapters, each a complete project (`make run`, `make test`); their pages are
+  `docs/course/NN-slug.md`; code blocks with `file=` must match the folder (`scripts/check-course.py`, see `docs/HACKING.md`)
 - `LICENSE` – GNU GPL v3 (`GPL-3.0-or-later`, the user's choice); `README.md` – entry point for new readers
 - `vendor/limine` – Limine binaries (not in git, `make limine`)

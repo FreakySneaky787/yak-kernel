@@ -13,7 +13,7 @@ USER_BIN   := build/user/bin
 OVMF       ?= $(firstword $(wildcard /usr/share/edk2/ovmf/OVMF_CODE.fd /usr/share/OVMF/OVMF_CODE_4M.fd \
                   /usr/share/OVMF/OVMF_CODE.fd) /usr/share/edk2/ovmf/OVMF_CODE.fd)
 
-.PHONY: all deps docs-check book soak stress limine limine-tool user build run run-uefi debug gdb test e2e e2e-uefi check fmt \
+.PHONY: all deps docs-check course book soak stress limine limine-tool user build run run-uefi debug gdb test e2e e2e-uefi check fmt \
         disk disk-reset disasm symbols sections addr2line clean distclean
 
 all: build
@@ -99,6 +99,12 @@ deps:
 docs-check:
 	python3 -I scripts/check-doc-refs.py --selftest
 	python3 -I scripts/check-doc-refs.py
+	python3 -I scripts/check-course.py --selftest
+	python3 -I scripts/check-course.py
+
+# The course: static checks + `make test` in every chapter folder course/NN-slug/ (scripts/check-course.py)
+course: limine
+	python3 -I scripts/check-course.py --build
 
 # Everything: host tools, unit + integration tests, then the end-to-end shell test (BIOS and UEFI)
 check: deps docs-check test e2e e2e-uefi

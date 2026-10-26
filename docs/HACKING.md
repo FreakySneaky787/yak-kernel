@@ -72,6 +72,24 @@ Everything else should be a program.
 3. Test it in the scripted `sh` sessions of [`userspace.rs`](../kernel/tests/userspace.rs) (injected serial input) or
    with an E2E step.
 
+## Write a course chapter
+Chapter NN consists of the folder `course/NN-slug/` and the page `docs/course/NN-slug.md` (listed in
+`docs/SUMMARY.md` and in the table of [`course/README.md`](course/README.md)).
+1. **Start from the previous chapter:** copy `course/(NN-1)-*/` to `course/NN-slug/` and add the chapter's code. The
+   folder must stay a complete project: `Makefile` with `run` and `test`, a copy of `rust-toolchain.toml`.
+2. **`make test` proves the chapter's promise** – it boots the kernel headless and checks its serial output (later
+   chapters: the in-kernel test runner). A chapter without a test that fails when the new code is missing is not done.
+3. **Write the page:** goal · background · the code step by step · run it · what the test checks · what can go wrong
+   (from `docs/BUGS.md` where the reference kernel hit the same problem) · experiments.
+4. **Code shown on the page is real code:** a block written as
+   ```` ```rust,file=kernel/src/serial.rs ```` must appear line for line in that file of the chapter folder;
+   `scripts/check-course.py` (in `make docs-check`) fails otherwise. Blocks without `file=` are free (output,
+   shell commands, sketches).
+5. `make course` builds and tests every chapter; CI runs it on every pull request.
+
+Rules: one concept per chapter; no code the learner has not seen explained; no claim without a test or a recorded
+run; numbers and outputs on the page come from a real run.
+
 ## When something goes wrong
 - `docs/BUGS.md` – most symptoms have happened before.
 - `make addr2line ADDR=…` for a RIP from a panic; `make debug` + `make gdb` for stepping.

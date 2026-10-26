@@ -3,3 +3,6 @@
 /build/
 /vendor/
 *.iso
+/course/*/kernel/target/
+/course/*/build/
+/course/*/vendor/

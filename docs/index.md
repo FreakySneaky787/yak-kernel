@@ -16,9 +16,10 @@ reading, running, testing and changing one. It runs in QEMU (BIOS and UEFI).
 The [learning notes](LEARN.md) explain every subsystem in the order it was built; the [design notes](DESIGN.md) give
 the reasons behind each decision, and the [bug log](BUGS.md) tells what went wrong and how it was found.
 
-## Coming next: the course
-KernelTry is turning into a course in which you **rebuild the kernel chapter by chapter**, each chapter a runnable,
-tested state of its own. The plan is in the [roadmap](ROADMAP.md); the chapters will appear here.
+## The course
+KernelTry is turning into a [course](course/README.md) in which you **rebuild the kernel chapter by chapter**, each
+chapter a runnable, tested state of its own. The first chapters are being written; the plan is in the
+[roadmap](ROADMAP.md).
 
 ## About
 KernelTry is free software under the GNU General Public License v3 or later
