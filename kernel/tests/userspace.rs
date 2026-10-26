@@ -41,9 +41,18 @@ extern "C" fn kmain() -> ! {
     assert_eq!(status, ExitStatus::Exited(0));
     assert!(out.starts_with("Hello from user space! I am process "));
     assert!(out.contains("  arg 1: a\n  arg 2: b\n"));
-    assert!(out.contains("Slept for 10")); // 100 ms, 10 ms timer resolution
+    // 100 ms measured in 10 ms ticks: at least 100 (bug #18), at most one tick more
+    assert!(out.contains("Slept for 100 ms") || out.contains("Slept for 110 ms"), "{}", out);
 
     assert_eq!(run("fault", "exit 7").0, ExitStatus::Exited(7));
+    // bug #19: the panic handler works with an exhausted heap (it used to recurse until the stack was gone)
+    let (status, out) = run("fault", "oom");
+    assert_eq!(status, ExitStatus::Exited(101), "{}", out);
+    assert!(
+        out.contains("panic: memory allocation of 1048576 bytes failed"),
+        "{}",
+        out
+    );
     let (status, out) = run("fault", "panic");
     assert_eq!(status, ExitStatus::Exited(101));
     assert!(out.contains("panic: fault was asked to panic"));

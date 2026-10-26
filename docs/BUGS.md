@@ -172,6 +172,36 @@ Format: number · date · title, then symptom → cause → fix → test.
 - **Remember:** a timing assertion must separate *good* from *broken* behaviour, not *fast machine* from *slow machine* –
   pick the limit from the broken case, not from the local measurement (see `docs/HACKING.md`, "Add a test").
 
+### #18 · 2026-10-26 · `sleep_ms` could end up to one tick early
+- **Symptom:** one local E2E run: `time hello` printed `real 0.095377 s` for a program that sleeps 100 ms (and itself
+  reported "Slept for 100 ms", measured in ticks).
+- **Cause:** the deadline was "now + ⌈ms / 10⌉ ticks". The tick that is already running counts fully, although part
+  of it is over – a sleep starting just before a tick ended almost a whole tick early; `sleep_ms(10)` could return
+  after a few microseconds.
+- **Fix:** one tick more (`sleep_ms_or_abort`): a sleep now lasts at least `ms` and at most `ms` + 10 ms.
+- **Test:** `irq::tests::sleep_never_ends_early` – 20 sleeps of 10 ms started at different points inside a tick,
+  measured with the TSC clock; fails on the old code, passes on the new.
+- **Remember:** a tick counter tells *which* tick it is, not *how far into it* – deadlines must round up.
+
+### #19 · 2026-10-26 · A new process could miss its own table entry (SMP race)
+- **Symptom:** CI on Fedora, E2E step `ls /bin | grep test | sort -r`: `sort` killed by a "page fault at
+  0x7fffffeefff8 (page not present, write, user mode)" in `core::panicking::panic_nounwind_fmt` – 8 bytes below the
+  1 MiB stack area. Not reproducible by running the pipeline 200 times locally.
+- **Cause:** two bugs in a chain. (1) `process::spawn_with` made the new thread runnable (`task::spawn_user`) *before*
+  inserting the process into the table. Another CPU – woken by an IPI because a thread became ready – could start the
+  program at once; its first `brk` found no table entry and failed with EBADF, so the program's allocator could never
+  get memory. (2) The allocation failure made Rust panic, and `ulib`'s panic handler formatted its message with
+  `eprintln!`, which allocates – it panicked again, recursively, until the stack was used up.
+- **Fix:** (1) `spawn_with` holds the process table lock while it creates the thread and inserts the entry – the order
+  `spawn_thread` already used. (2) The panic handler formats into a 256-byte buffer on the stack and stops at a
+  second panic ("panic while panicking").
+- **Test:** `process::tests::first_syscall_of_a_new_process_finds_its_table_entry` (240 processes whose first syscall
+  is `brk`; failed in 4 of 6 runs on the old code with "first brk returned -9", 0 of 7 on the new, also with 1 and
+  2 CPUs); `fault oom` fills the heap to the last byte and must still print "panic: memory allocation of 1048576 bytes
+  failed" (old handler: the same page fault below the stack as in CI).
+- **Remember:** "interrupts off" protects against *this* CPU only – on SMP, anything a new thread may look at must
+  exist before the thread becomes runnable.
+
 ## Known pitfalls (not bugs, but worth remembering)
 - **The Limine host utility (`limine bios-install`) needs a C compiler** (`gcc`). It is not required for booting the ISO
   in QEMU with `-cdrom`; it is only needed to make the ISO bootable as a hard disk / USB image.

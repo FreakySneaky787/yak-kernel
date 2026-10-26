@@ -382,6 +382,12 @@ Then: phase C (pilot chapters 1–4 + feedback), phases D/E – see `docs/ROADMA
   whole suite work there unchanged. The only failure was the TLB shootdown test's 50 ms limit (~75 ms on the runners,
   bug #17), now 1 s. A Ubuntu job takes ~3.5 min, Fedora ~4 min.
 
+- **2026-10-26** – CI paid off at once: besides #17 it showed a Fedora-only failure (`sort` killed below its stack).
+  Root cause, reproduced locally with a new test: an SMP race in `process::spawn_with` – a new program could run its
+  first syscall before its process table entry existed (#19), plus a panic handler that needed the heap. A local
+  E2E repetition also showed `sleep_ms` ending up to a tick early (#18). All three fixed with regression tests that
+  fail on the old code; `make check` and `make stress STRESS_N=1` green.
+
 ## Known limitations of release 1.0 (sorted in M42)
 Release blockers were defined as "a program can crash, hang or exhaust the kernel" (`docs/GOALS.md`: isolated
 programs, reliability). All of those found so far are fixed (bugs #11–#16). The rest are **documented limitations**:
