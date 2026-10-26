@@ -97,7 +97,11 @@ Still open: N for `make stress` (proposal: 5), whether CI is wanted (M40b), whet
 | # | Milestone | Status | Tests |
 |---|---|---|---|
 | 49 | Website: mdBook over `docs/` (`book.toml`, `docs/SUMMARY.md`, home page `docs/index.md`), `make book` via `scripts/build-book.py` (links to files outside `docs/` point at GitHub; build fails on broken links), CI builds it, `.github/workflows/pages.yml` deploys `main` to GitHub Pages | ✅ | `build-book.py --selftest`; 17 pages, 0 broken links; rendered pages checked in a headless browser; CI step "Website builds without broken links" |
-| 50 | Chapter format + `course/NN-slug` branches + chapter check script in CI | ⬜ | a sample chapter branch passes the check |
+| 50 | Chapter infrastructure: chapters are folders `course/NN-slug/` in `main` (user decision 2026-10-26, instead of branches), pages `docs/course/`, `scripts/check-course.py` (folder/page pairs, numbering, toolchain copy, every `file=` code block must match the folder; `--build` runs each chapter's `make test`), `make course`, CI job `course`, authoring rules in `docs/HACKING.md` | ✅ | `check-course.py --selftest`; static check in `make docs-check`; `make course` green |
+| C1 | Pilot chapter 1 – Booting with Limine (serial output) | ✅ | `make test`: serial output matches `expected.txt`; fails when the greeting is removed |
+| C2 | Pilot chapter 2 – Testing without an operating system (custom test framework, isa-debug-exit, cargo runner) | ✅ | 3 in-kernel tests; a broken assertion makes `make test` fail with QEMU status 35 |
+| C3 | Pilot chapter 3 – Text on the screen (PSF2 font, framebuffer console, `println!`) | ✅ | 12 in-kernel tests incl. drawing into an in-memory screen with stride ≠ width; screenshot on the page |
+| C4 | Pilot chapter 4 – GDT and TSS | ⬜ | – |
 
 Then: phase C (pilot chapters 1–4 + feedback), phases D/E – see `docs/ROADMAP.md`.
 
@@ -392,6 +396,11 @@ Then: phase C (pilot chapters 1–4 + feedback), phases D/E – see `docs/ROADMA
   (no copy of the docs); mdBook 0.4.52 is a host tool (`cargo install`), not a kernel dependency. GitHub Pages must be
   switched to "GitHub Actions" by the user before the first deploy.
 
+- **2026-10-26** – M50 + pilot chapters 1–3. Chapters live as folders in `main` (the sandbox cannot push other
+  branches; the user chose folders). Every code block on a chapter page that names a file is checked against the
+  chapter folder, so the text cannot drift from the code. Found while writing chapter 3: a dash (U+2013) is drawn as
+  `?` by a Latin-1 font table – kept as a "what can go wrong" note.
+
 ## Known limitations of release 1.0 (sorted in M42)
 Release blockers were defined as "a program can crash, hang or exhaust the kernel" (`docs/GOALS.md`: isolated
 programs, reliability). All of those found so far are fixed (bugs #11–#16). The rest are **documented limitations**:
@@ -433,5 +442,5 @@ they make KernelTry smaller than a production system, but they do not break the 
   the GPL's "How to Apply" recommends a notice per file; renaming the GitHub repository to KernelTry.
 
 ## Next step
-M49 is done once the first Pages deploy is live (user: Settings → Pages → Source "GitHub Actions"). Then M48 (release
-notes for #17–#19, no tag) and M50 (chapter infrastructure).
+Pilot chapter 4 (GDT and TSS), then stop for feedback on chapters 1–4 (user + at least one outside reader).
+GitHub Pages still needs "Settings → Pages → Source: GitHub Actions" (user); then re-run the `pages` workflow.
