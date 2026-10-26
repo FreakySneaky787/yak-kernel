@@ -2,6 +2,14 @@
 
 [Welcome](index.md)
 
+# The course
+
+- [Build a kernel, chapter by chapter](course/README.md)
+  - [1 – Booting with Limine](course/01-boot.md)
+  - [2 – Testing without an operating system](course/02-tests.md)
+  - [3 – Text on the screen](course/03-console.md)
+  - [4 – GDT and TSS](course/04-gdt.md)
+
 # Understand the kernel
 
 - [Walkthroughs](walkthrough/README.md)
@@ -10,7 +18,7 @@
   - [03 – cat /README.txt | wc](walkthrough/03-pipeline.md)
   - [04 – A page fault in a program](walkthrough/04-page-fault.md)
 - [Experiments](EXPERIMENTS.md)
-- [Extending KernelTry](HACKING.md)
+- [Extending YAK](HACKING.md)
 
 # Reference
 

@@ -1,6 +1,6 @@
 # The website (https://freakysneaky787.github.io/yak-kernel/): mdBook over docs/. Build with `make book`.
 [book]
-title = "KernelTry – Understand the Kernel"
+title = "YAK – Yet Another Kernel"
 authors = ["FreakySneaky787 and contributors"]
 language = "en"
 src = "docs"

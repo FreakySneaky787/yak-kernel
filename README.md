@@ -1,4 +1,4 @@
-# KernelTry – Understand the Kernel
+# YAK – Yet Another Kernel
 
 [![check](https://github.com/FreakySneaky787/yak-kernel/actions/workflows/check.yml/badge.svg)](https://github.com/FreakySneaky787/yak-kernel/actions/workflows/check.yml)
 
@@ -8,13 +8,13 @@ running, testing and changing one. It runs in QEMU (BIOS and UEFI).
 **Website:** [freakysneaky787.github.io/yak-kernel](https://freakysneaky787.github.io/yak-kernel/) – the documentation below as a
 book with navigation and search.
 
-![KernelTry shell running in QEMU: uname, cpu, netinfo, ps and df](docs/images/shell.png)
+![YAK shell running in QEMU: uname, cpu, netinfo, ps and df](docs/images/shell.png)
 
 > **Status:** pre-release **0.8.0** – a hobby / learning project, working towards release 1.0 (see [docs/GOALS.md](docs/GOALS.md) and
 > stage 8 in [docs/PROGRESS.md](docs/PROGRESS.md)). The project is developed together with an AI assistant.
 
 ## What is in it
-| Area | What KernelTry does |
+| Area | What YAK does |
 |---|---|
 | Boot | Limine boot protocol, BIOS and UEFI, higher-half kernel |
 | CPU | own GDT/TSS/IDT, local APIC + I/O APIC, every core from the ACPI MADT started via INIT/SIPI (QEMU: 4), SMEP/SMAP, x87/SSE/AVX state per thread |
@@ -82,13 +82,13 @@ Try in the shell: `help`, `ls /bin`, `cat /README.txt | wc`, `ps`, `cpu`, `ping 
 ## License
 Copyright (C) 2026 FreakySneaky787 and contributors.
 
-KernelTry is free software: you can redistribute it and/or modify it under the terms of the **GNU General Public
+YAK is free software: you can redistribute it and/or modify it under the terms of the **GNU General Public
 License** as published by the Free Software Foundation, either **version 3** of the License, or (at your option) any
 later version (SPDX: `GPL-3.0-or-later`). It is distributed in the hope that it will be useful, but WITHOUT ANY
 WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See
 [LICENSE](LICENSE) for the full text.
 
-In short: anyone may use, study, change and share KernelTry; whoever distributes it or a changed version must pass on
+In short: anyone may use, study, change and share YAK; whoever distributes it or a changed version must pass on
 the source code under the same license.
 
 Exceptions: the bundled Terminus font keeps its SIL Open Font License ([kernel/assets/README.md](kernel/assets/README.md));

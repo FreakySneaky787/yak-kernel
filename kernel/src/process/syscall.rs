@@ -131,7 +131,7 @@ pub mod nr {
     pub const FUTEX_WAKE: u32 = 50;
     /// gettid() -> id of the calling thread (getpid() is the process)
     pub const GETTID: u32 = 51;
-    /// uname(buf, len) -> length of "KernelTry <version> x86_64" written to buf; -ERANGE if len is too small
+    /// uname(buf, len) -> length of "YAK <version> x86_64" written to buf; -ERANGE if len is too small
     pub const UNAME: u32 = 52;
 }
 
@@ -1421,7 +1421,7 @@ fn sys_environ(buf: u64, len: u64) -> SysResult {
 }
 
 fn sys_uname(buf: u64, len: u64) -> SysResult {
-    const NAME: &str = concat!("KernelTry ", env!("CARGO_PKG_VERSION"), " x86_64");
+    const NAME: &str = concat!("YAK ", env!("CARGO_PKG_VERSION"), " x86_64");
     if (NAME.len() as u64) > len {
         return Err(errno::ERANGE);
     }

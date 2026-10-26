@@ -3,7 +3,7 @@
 > Agreed with the user on 2026-10-26. Phases are worked off as stages in `docs/PROGRESS.md`.
 
 ## Context
-KernelTry 0.8.0 is published (pre-release): a working x86-64 kernel (M1–M46) with tests, walkthroughs and
+YAK 0.8.0 is published (pre-release): a working x86-64 kernel (M1–M46) with tests, walkthroughs and
 experiments. The user decided the direction for the next 1–2 years:
 - **What:** a learning platform (not a feature-race hobby OS, not a lab).
 - **For whom:** self-learners and hobby kernel developers.
@@ -88,7 +88,7 @@ Roughly 30 chapters; one chapter ≈ one milestone of work. Order of writing = o
 - **Nightly Rust** breaks over time: the pinned toolchain must keep working; CI shows when it stops.
 
 ## Decisions still needed from the user (later, not now)
-- Repository rename (`yak-kernel` → KernelTry) – before the website URL is published.
+- Repository rename (`yak-kernel` → YAK) – before the website URL is published.
 - Website address (GitHub Pages default vs. own domain).
 
 ## How progress is checked

@@ -1,4 +1,4 @@
-//! ulib: the tiny runtime of KernelTry user programs.
+//! ulib: the tiny runtime of YAK user programs.
 //!
 //! - `_start`: the entry point the kernel jumps to. RDI/RSI hold pointer and
 //!   length of the argument block (arguments separated by NUL bytes); it calls

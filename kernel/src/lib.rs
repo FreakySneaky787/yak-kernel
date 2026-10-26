@@ -1,4 +1,4 @@
-//! The KernelTry kernel as a library: `main.rs`, the unit tests and the
+//! The YAK kernel as a library: `main.rs`, the unit tests and the
 //! integration tests in `tests/` all share this code.
 
 #![no_std]

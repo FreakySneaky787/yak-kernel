@@ -3,11 +3,15 @@
 ## Unreleased (towards 1.0.0)
 Stage 9 and the start of stage 10 (`docs/ROADMAP.md`, phases A and B).
 
+**Name**
+- The project is now called **YAK – Yet Another Kernel** (formerly KernelTry): boot banner, `uname`, disk label,
+  docs and website.
+
 **Infrastructure**
 - CI: `make check` on fresh Ubuntu and Fedora machines for every push and pull request
   (`.github/workflows/check.yml`); the website is built there too.
 - Website: the documentation as a book (mdBook over `docs/`, `make book`), deployed to GitHub Pages from `main`.
-- `docs/ROADMAP.md`: the plan to turn KernelTry into a course that rebuilds the kernel chapter by chapter.
+- `docs/ROADMAP.md`: the plan to turn YAK into a course that rebuilds the kernel chapter by chapter.
 
 **Fixed** (found by the new CI, see `docs/BUGS.md`)
 - #19: a new process could run its first syscall before its process table entry existed (SMP race in `spawn_with`);

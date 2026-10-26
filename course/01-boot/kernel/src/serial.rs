@@ -1,0 +1,62 @@
+//! The serial port COM1: a 16550 UART at I/O port 0x3F8.
+//! QEMU connects it to our terminal (`-serial stdio`) - the first way a kernel can talk to us.
+
+use core::fmt::{self, Write};
+
+const COM1: u16 = 0x3F8;
+
+/// Writes `value` to an I/O port (the x86 `out` instruction).
+unsafe fn outb(port: u16, value: u8) {
+    unsafe { core::arch::asm!("out dx, al", in("dx") port, in("al") value) };
+}
+
+/// Reads a byte from an I/O port (the x86 `in` instruction).
+unsafe fn inb(port: u16) -> u8 {
+    let value: u8;
+    unsafe { core::arch::asm!("in al, dx", in("dx") port, out("al") value) };
+    value
+}
+
+/// Sets the UART to 115200 baud, 8 data bits, no parity, 1 stop bit.
+pub fn init() {
+    unsafe {
+        outb(COM1 + 1, 0x00); // no interrupts: we only send, and check the status ourselves
+        outb(COM1 + 3, 0x80); // DLAB on: the next two registers are the baud rate divisor
+        outb(COM1, 0x01); //     divisor 1 = 115200 baud (low byte)
+        outb(COM1 + 1, 0x00); // (high byte)
+        outb(COM1 + 3, 0x03); // DLAB off; 8 bits, no parity, 1 stop bit
+        outb(COM1 + 2, 0xC7); // FIFO on and cleared
+    }
+}
+
+fn send(byte: u8) {
+    // Line status register, bit 5: the transmit register is empty and takes the next byte
+    while unsafe { inb(COM1 + 5) } & 0x20 == 0 {
+        core::hint::spin_loop();
+    }
+    unsafe { outb(COM1, byte) };
+}
+
+/// The port has no state of its own, so a zero-sized type is enough to plug it into `core::fmt`.
+pub struct Serial;
+
+impl Write for Serial {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        for byte in s.bytes() {
+            if byte == b'\n' {
+                send(b'\r'); // terminals expect "\r\n" to start a new line at the left edge
+            }
+            send(byte);
+        }
+        Ok(())
+    }
+}
+
+/// `format!`-style output to the serial port, with a line break.
+#[macro_export]
+macro_rules! serial_println {
+    ($($arg:tt)*) => {{
+        use core::fmt::Write;
+        let _ = writeln!($crate::serial::Serial, $($arg)*);
+    }};
+}

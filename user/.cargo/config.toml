@@ -1,9 +1,9 @@
-# User programs use their own target (x86_64-kerneltry-user.json): like the
+# User programs use their own target (x86_64-yak-user.json): like the
 # kernel's x86_64-unknown-none, but with SSE2 hardware floating point (the
 # kernel saves the SSE registers per thread) and linked low (small code model).
 # `core` and `alloc` are built from source for it (needs the rust-src component).
 [build]
-target = "x86_64-kerneltry-user.json"
+target = "x86_64-yak-user.json"
 rustflags = ["-C", "link-arg=-Tlinker.ld"]
 
 [unstable]

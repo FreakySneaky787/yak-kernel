@@ -188,7 +188,7 @@
   | 49 | `futex_wait(addr, expected, timeout_ms)` | `-EAGAIN` if `*addr != expected`, `-ETIMEDOUT`, `-EINTR` |
   | 50 | `futex_wake(addr, n)` | number of threads woken |
   | 51 | `gettid()` | `getpid()` returns the process id in every thread |
-  | 52 | `uname(buf, len)` | "KernelTry <version> x86_64", `-ERANGE` if `len` is too small (the example of `docs/HACKING.md`) |
+  | 52 | `uname(buf, len)` | "YAK <version> x86_64", `-ERANGE` if `len` is too small (the example of `docs/HACKING.md`) |
 - **`/bin/edit`**: `buffer.rs` is pure logic (tested by `edit --selftest`), `main.rs` draws with `ESC[r;cH`, `ESC[K`, SGR 7.
   The text area is all rows but the last; the cursor line and the status bar are redrawn per key, the whole screen only after
   scrolling or when lines are inserted/removed. Writing the bottom-right cell is safe: the console wraps lazily (only when the
@@ -266,7 +266,7 @@
   per CPU by `cpu::enable_protection` when CPUID has them; QEMU runs `-cpu max` (TCG) so they are there
   (`KERNEL_CPU=qemu64` runs without SMEP/SMAP/XSAVE/AVX - the fallback paths). `tests/smap.rs` checks that a kernel
   read and a kernel jump into a user page fault.
-- **User programs** (`user/`, crate `ulib` + `src/bin/*`): own target `user/x86_64-kerneltry-user.json` (x86-64 with SSE2 and
+- **User programs** (`user/`, crate `ulib` + `src/bin/*`): own target `user/x86_64-yak-user.json` (x86-64 with SSE2 and
   the normal hard-float ABI, static, `code-model=small`, red zone allowed – interrupts from ring 3 switch stacks), built with
   `-Zbuild-std=core,alloc` (+ `compiler-builtins-mem`; needs `rust-src` and `gcc` as host linker for build scripts),
   linked by GNU ld at `0x40_0000` (`user/linker.ld`). `make user` copies them to `build/user/bin`; `scripts/mkdisk.sh`

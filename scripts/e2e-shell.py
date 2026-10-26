@@ -174,8 +174,8 @@ STEPS = [
     ("echo hello from e2e\r", ["hello from e2e"], ["error"]),
     ('echo "quoted   words" plain\r', ["quoted   words plain"], []),
     ("eco" + LEFT + "h" + RIGHT + " edited\r", ["edited"], ["unknown command"]),  # insert in the middle: eco -> echo
-    ("ver\t\r", ["KernelTry"], ["unknown command"]),  # tab completion of 'version'
-    (UP + "\r", ["KernelTry"], []),  # history: run 'version' again
+    ("ver\t\r", ["YAK"], ["unknown command"]),  # tab completion of 'version'
+    (UP + "\r", ["YAK"], []),  # history: run 'version' again
     ("help\r", ["Available commands", "poweroff", "memmap"], []),
     ("mem\r", ["Physical:", "MiB usable", "Heap:"], []),
     ("memmap\r", ["usable", "kernel and modules"], []),
@@ -204,7 +204,7 @@ STEPS = [
     ("cp \"My Notes/today.txt\" \"/My copy.txt\"\r", [], ["error"]),  # NUL-separated args keep the spaces
     ("cat \"/My copy.txt\"\r", ["written before the reboot", "Grüße äöü"], ["error"]),
     ("cd ..\r", [], ["error"]),
-    ("df\r", ["KERNELTRY", "free"], []),
+    ("df\r", ["YAK", "free"], []),
     ("date\r", ["20"], []),
     ("cat /nope\r", ["no such file or directory"], []),
     ("does-not-exist\r", ["unknown command 'does-not-exist'"], []),
@@ -241,7 +241,7 @@ STEPS = [
     ("grep sh /ps.txt\r", ["sh"], ["error"]),
     ("fault spin | cat\r" + PAUSE + CTRL_C, ["fault was killed: interrupted"], []),
     ("pipetest\r", ["pipetest: all checks passed"], ["FAIL"]),
-    ("uname\r", ["KernelTry ", " x86_64"], ["error"]),
+    ("uname\r", ["YAK ", " x86_64"], ["error"]),
     # M41: every syscall with bad pointers, lengths, descriptors and numbers - the kernel must survive
     ("syscheck\r", ["syscheck: all checks passed"], ["FAIL", "PANIC", "killed"]),
     ("netinfo\r", ["IPv4     10.0.2.15", "link up", "DNS      10.0.2.3", "config   DHCP"], ["error"]),  # M27, M30
@@ -250,7 +250,7 @@ STEPS = [
     (f"udpecho 10.0.2.2 {UDP_PORT} hello over UDP\r", [f"reply from 10.0.2.2:{UDP_PORT}: hello over UDP"], ["error"]),
     (f"nc 10.0.2.2 {TCP_ECHO_PORT} hello over TCP\r", ["hello over TCP"], ["error"]),  # TCP (M29)
     (f"echo go | nc 10.0.2.2 {TCP_BULK_PORT} | wc\r", ["  100000"], ["error"]),  # 100 KB from the host
-    (f"host www.kerneltry.test 10.0.2.2 {DNS_PORT}\r", ["www.kerneltry.test has address 10.0.2.2"], ["error"]),  # M30
+    (f"host www.yak.test 10.0.2.2 {DNS_PORT}\r", ["www.yak.test has address 10.0.2.2"], ["error"]),  # M30
     ("host --selftest\r", ["host selftest: all checks passed"], ["FAIL"]),
     (f"wget http://10.0.2.2:{HTTP_PORT}/hello\r", ["Hello from the host over HTTP", "200 OK"], ["error"]),
     (f"wget -O /fetched.txt http://10.0.2.2:{HTTP_PORT}/hello\r", ["200 OK"], ["error"]),
