@@ -64,5 +64,6 @@ user program asks the kernel for something.
 
 ## Things to try
 - `make debug`, `make gdb`, `break kernel::process::spawn_with`, `continue`: inspect the ELF segments being mapped.
-- Rename `/bin/sh` in the running system (`mv /bin/sh /bin/sh.off`, then `exit`) and reboot: `run_init` fails and the
-  kernel shell starts instead. (Rename it back with the kernel shell's help.)
+- `mv /bin/sh /bin/sh.off; exit` in the running system: `run_init` returns and the kernel shell starts
+  (`kernel:/>`); after a reboot, `run_init` cannot find `/bin/sh` at all. `mv /bin/sh.off /bin/sh` in the kernel shell
+  puts it back.

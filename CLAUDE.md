@@ -24,7 +24,7 @@ The conversation with the user happens in German.
 | `make e2e-uefi` | same E2E test, booted through OVMF/UEFI |
 | `make check` | `make deps` + `make test` + `make e2e` + `make e2e-uefi` – run this before every commit |
 | `make soak` | long mixed workload on a scratch disk (`SOAK_ROUNDS`, default 10, ~10 s per round) |
-| `make stress` | reliability gate: suite `STRESS_N` (5) times with 1/2/4 CPUs, `qemu64`, UEFI, then soak – takes hours under TCG |
+| `make stress` | reliability gate: suite `STRESS_N` (5) times with 1/2/4 CPUs, `qemu64`, UEFI, then soak – about 30 min under TCG |
 | `make fmt` | rustfmt over the kernel (commit formatting separately) |
 | `make disk` / `make disk-reset` | create / recreate the persistent FAT32 disk `build/disk.img` from `rootfs/` |
 | `make debug` + `make gdb` | QEMU waits for gdb on :1234 |

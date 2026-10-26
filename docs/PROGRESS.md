@@ -77,10 +77,10 @@ No new kernel features: this stage makes the existing system meet the release cr
 | 40 | Reproducible setup: toolchain pinned (`rust-toolchain.toml`, nightly-2026-10-26), `make deps` checks host tools and prints the dnf/apt command, `make check` runs it first; LICENSE (ECPL v1.2) | ✅ | `check-deps.sh --selftest` (hidden tool reported, exit 1) in `make check`; manual run with a reduced PATH; `make check` green with the pinned toolchain on Ubuntu 24.04 |
 | 40b | Optional CI (GitHub Actions running `make check` under TCG) – only if the user wants it | ⬜ | a green run on a push |
 | 41 | Reliability gate: `/bin/syscheck` (bad pointers/lengths/fds/numbers for every syscall, 20 000 seeded random calls, `race` mode), `make soak` (`rootfs/soak.sh` via `scripts/soak.py`), `make stress` (suite N× with 1/2/4 CPUs, `qemu64`, UEFI, then soak); TLB shootdown by IPI | ✅ | `syscheck` + `syscheck race` in integration test, `syscheck` E2E step, shootdown unit test (old code: hangs), soak negative check (an injected failure is reported); bugs #11–#15 found and fixed |
-| 42 | Known limits: sort "Open items" into fixed / documented limitation; fix the release blockers among them | ⬜ | one test per fix |
-| 43 | Walkthroughs (`docs/walkthrough/`): boot to `/bin/sh`; a key press to a program's `read`; `cat f \| wc` through syscalls, scheduler, FAT32 and the pipe; a user page fault – each with file:line references | ⬜ | a script checks that every referenced file and symbol still exists (run by `make check`) |
-| 44 | Experiments (`docs/EXPERIMENTS.md`): ≥ 3 guided "change X, expect Y" experiments (e.g. drop the FPU save → `fputest` fails, 1 CPU vs 4 with `demo`, cache off → slower `wc`) | ⬜ | each expected result is reproduced once and recorded |
-| 45 | Extending guides (`docs/HACKING.md`): add a syscall, a user program, a test, a shell command | ⬜ | each guide followed once on a scratch branch; an example program added to `/bin` |
+| 42 | Known limits: "Open items" sorted into documented limitations (no open release blocker); found and fixed on the way: #16 (one `write` grew the kernel heap by its whole buffer) | ✅ | `syscheck`: 16 MiB into a pipe without reader → EPIPE with < 1 MiB heap growth (old kernel: +16 388 KiB), oversized `sendto` → EMSGSIZE |
+| 43 | Walkthroughs (`docs/walkthrough/`): boot to `/bin/sh`, a key press, `cat \| wc`, a page fault – with links to the functions | ✅ | `scripts/check-doc-refs.py` (`make docs-check`, part of `make check`, with self-test): every \[`symbol`\](file) link must name a symbol in an existing file; "things to try" checked in the running system |
+| 44 | Experiments (`docs/EXPERIMENTS.md`): more cores, no FPU save, the bug #14 fix undone, a 16-byte pipe – no build switches, each a small hand edit | ✅ | each experiment run once, results recorded (590 → 250 ms; 4 workers corrupted; panic 2/2; 1.40 → 5.41 s) |
+| 45 | Extending guides (`docs/HACKING.md`): syscall, user program, test, shell built-in | ✅ | the syscall + program guide followed once: syscall 52 `uname` + `/bin/uname` (integration test, E2E step, `syscheck` bad pointers, `SYSCALL_COUNT`) |
 | 46 | Release 1.0: version number in the boot banner, `CHANGELOG.md`, git tag | ⬜ | `make check` + `make stress` green on the tagged commit |
 
 Decided 2026-10-26: license ECPL v1.2 (the user's own license, copyright FreakySneaky787, Swiss law), name KernelTry.
@@ -342,6 +342,12 @@ Still open: N for `make stress` (proposal: 5), whether CI is wanted (M40b), whet
   `TLB_VECTOR` IPI. `make soak` (10 rounds ≈ 1–2 min) and `make stress` added. `syscheck race` with 4 CPUs: 4 → ~3500
   heap shrinks in 5 s. DESIGN.md listed the wake-up IPI as 0x60; it is 0xF0 (fixed).
 
+- **2026-10-26** – `make stress` (5 passes) of the M41 commit: green – 20 × E2E 126/126 with 1/2/4 CPUs and
+  `qemu64`/UEFI, every `make test` green, soak 10 rounds, 26 min in total. M42: #16 fixed (`sys_write` in 64 KiB
+  pieces, `sendto` size check before the copy); the open items became "Known limitations of release 1.0". M43–M45:
+  walkthroughs, experiments (all four run and measured), HACKING.md with syscall 52 `uname` as the worked example,
+  `CHANGELOG.md`, `make docs-check`.
+
 ## Known limitations of release 1.0 (sorted in M42)
 Release blockers were defined as "a program can crash, hang or exhaust the kernel" (`docs/GOALS.md`: isolated
 programs, reliability). All of those found so far are fixed (bugs #11–#16). The rest are **documented limitations**:
@@ -373,8 +379,9 @@ they make KernelTry smaller than a production system, but they do not break the 
 - QEMU is the reference machine (q35, e1000, AHCI, PS/2, COM1); real hardware is not a goal of 1.0.
 - `make limine-tool` (bios-install for USB/HDD images) exists but has not been tried.
 - `ps` CPU percentages only cover threads that still exist (dead threads are reaped with their counters).
-- Under TCG (no KVM) the full `make stress` takes hours; `make check` takes about 10 minutes.
+- Under TCG (no KVM) `make check` takes about 2 minutes on a warm build, `make stress` (5 passes) about 30 minutes.
 
 ## Next step
-M41 is done; run `make stress` (5 passes) and record the result. Then M42 (sort the open items, fix release blockers).
-Still open with the user: CI (M40b), whether experiments may add build switches (M44).
+M39–M45 are done. M46 (release 1.0) needs the user: confirm the release criteria in `docs/GOALS.md` are met, then
+version 1.0.0 (Cargo manifests, `CHANGELOG.md`), `make check` + `make stress` on that commit, git tag `v1.0.0`.
+Still open with the user: CI (M40b).

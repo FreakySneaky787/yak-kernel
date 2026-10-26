@@ -41,7 +41,7 @@ The parent's `wait` returns the reason; [`number_for_reason`](../../kernel/src/p
 exception as signal 11 (SIGSEGV), so the shell sets `$?` to 139 and prints `error: fault was killed: …`.
 
 `fault kernel` reads `0xffffffff80000000`: the page *is* mapped – the kernel itself lives there – but without the USER
-bit. The CPU refuses the access from ring 3 (error code "present, read, user mode"), which is exactly the protection
+bit. The CPU refuses the access from ring 3 (the message says "protection violation, read, user mode"), which is exactly the protection
 that keeps programs out of the kernel.
 
 ## 4. Kernel mode: a bug
