@@ -1,8 +1,10 @@
 //! Misbehaves on purpose, to show that the kernel only kills the process.
-//! Usage: fault null | kernel | cli | stack | panic | spin | sleep | exit <code>
+//! Usage: fault null | kernel | cli | stack | panic | oom | spin | sleep | exit <code>
 
 #![no_std]
 #![no_main]
+
+extern crate alloc;
 
 use core::hint::black_box;
 use ulib::{eprintln, println};
@@ -37,6 +39,20 @@ fn main(mut words: ulib::Args) -> i32 {
             black_box(recurse(0));
         }
         Some("panic") => panic!("fault was asked to panic"),
+        Some("oom") => {
+            // Fill the heap (64 MiB) down to the last byte, then ask for more: the allocation
+            // fails and Rust panics. The panic handler must report it without the heap (bug #19).
+            println!("filling the heap ...");
+            let mut size = 1usize << 20;
+            while size >= 16 {
+                let layout = core::alloc::Layout::from_size_align(size, 8).unwrap();
+                // black_box: LLVM may otherwise drop the unused allocation and assume success
+                if black_box(unsafe { alloc::alloc::alloc(layout) }).is_null() {
+                    size /= 2; // the rest no longer fits: try smaller blocks
+                }
+            }
+            black_box(alloc::vec![0u8; 1 << 20]);
+        }
         Some("spin") => {
             println!("spinning forever (Ctrl+C stops me) ...");
             loop {

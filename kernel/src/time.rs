@@ -36,7 +36,9 @@ pub fn sleep_ms(ms: u64) {
 /// Like `sleep_ms`, but returns early (false) once `abort()` is true - it is
 /// checked whenever the thread is woken (used for signals).
 pub fn sleep_ms_or_abort(ms: u64, abort: impl Fn() -> bool) -> bool {
-    let target = ticks().saturating_add(ms.div_ceil(MS_PER_TICK));
+    // + 1: the tick that is already running counts only partly - without it a sleep could end
+    // up to one tick early (bug #18)
+    let target = ticks().saturating_add(ms.div_ceil(MS_PER_TICK) + 1);
     if crate::task::is_running() {
         crate::task::wait_for(crate::task::Wait::Until(target), || ticks() >= target || abort());
         return ticks() >= target || !abort();

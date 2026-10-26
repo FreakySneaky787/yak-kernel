@@ -385,30 +385,31 @@ pub fn spawn_with(name: &str, elf: &[u8], args: &str, opts: Options) -> Result<P
         arg1: args.len() as u64,
     };
 
-    // The thread must not run before its table entry exists
+    let process = Process {
+        name: String::from(name),
+        cwd: String::from(opts.cwd),
+        files: opts.std_files.map_or_else(standard_files, |f| f.into_iter().collect()),
+        space: Some(space),
+        heap_start,
+        heap_end: heap_start,
+        stdout: opts.stdout,
+        stdin_pending: Vec::new(),
+        status: None,
+        signals: opts.signals.unwrap_or_else(Signals::new),
+        threads: BTreeMap::new(),
+        exiting: None,
+        parent: opts.parent,
+        orphan: false,
+        ignore_interrupt: opts.ignore_interrupt,
+        env: opts.env.unwrap_or_else(default_env),
+    };
+    let root = process.space.as_ref().map(|s| s.root()).expect("just created");
+    // The table lock is held until the entry exists: another CPU may start the new thread at
+    // once, and its first syscall must find the process (bug #19; same order as `spawn_thread`).
     let pid = without_interrupts(|| {
-        let pid = task::spawn_user(name, space.root(), entry);
-        PROCESSES.lock().insert(
-            pid,
-            Process {
-                name: String::from(name),
-                cwd: String::from(opts.cwd),
-                files: opts.std_files.map_or_else(standard_files, |f| f.into_iter().collect()),
-                space: Some(space),
-                heap_start,
-                heap_end: heap_start,
-                stdout: opts.stdout,
-                stdin_pending: Vec::new(),
-                status: None,
-                signals: opts.signals.unwrap_or_else(Signals::new),
-                threads: BTreeMap::new(),
-                exiting: None,
-                parent: opts.parent,
-                orphan: false,
-                ignore_interrupt: opts.ignore_interrupt,
-                env: opts.env.unwrap_or_else(default_env),
-            },
-        );
+        let mut procs = PROCESSES.lock();
+        let pid = task::spawn_user(name, root, entry);
+        procs.insert(pid, process);
         if opts.foreground {
             FOREGROUND.store(pid, Ordering::Relaxed);
         }
@@ -743,6 +744,27 @@ mod tests {
     /// `exit(rax)` - ends a program with the result of the last syscall.
     fn exit_with_rax() -> Vec<u8> {
         [&RDI_FROM_RAX[..], &mov_eax(syscall::nr::EXIT), &SYSCALL].concat()
+    }
+
+    /// Regression test for bug #19: a new process's first syscall must find its process table
+    /// entry. The thread used to be made runnable before the entry was inserted, so another CPU
+    /// could start it in between - `brk` then failed with EBADF and the program's allocator broke.
+    #[test_case]
+    fn first_syscall_of_a_new_process_finds_its_table_entry() {
+        // exit(brk(0)): the heap end on success, -EBADF if the process was not in the table yet
+        let code = [&mov_eax(syscall::nr::BRK)[..], &mov_edi(0), &SYSCALL, &exit_with_rax()].concat();
+        let elf = elf::build_test_elf(&code, 64);
+        for round in 0..40 {
+            let pids: Vec<Pid> = (0..6)
+                .map(|_| spawn("brk-first", &elf, "", Output::Capture(Arc::new(Mutex::new(Vec::new())))).unwrap())
+                .collect();
+            for pid in pids {
+                match wait(pid).unwrap() {
+                    ExitStatus::Exited(end) => assert!(end > 0, "round {}: first brk returned {}", round, end),
+                    other => panic!("round {}: {:?}", round, other),
+                }
+            }
+        }
     }
 
     fn run_code(code: &[u8], args: &str) -> (ExitStatus, String) {

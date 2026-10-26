@@ -181,4 +181,26 @@ mod tests {
         let elapsed = time::ticks() - start;
         assert!((5..=10).contains(&elapsed), "sleep_ms(50) took {} ticks", elapsed);
     }
+
+    /// Regression test for bug #18: a sleep must never end early, wherever inside a tick it starts.
+    #[test_case]
+    fn sleep_never_ends_early() {
+        for i in 0..20u64 {
+            // start at a different point inside the 10 ms tick each time
+            let spin_until = time::uptime_us() + i * 700 % 10_000;
+            while time::uptime_us() < spin_until {
+                core::hint::spin_loop();
+            }
+            let start = time::uptime_us();
+            time::sleep_ms(10);
+            let slept = time::uptime_us() - start;
+            // 5 % margin for the TSC vs. timer calibration; the bug slept as little as a few µs
+            assert!(
+                slept >= 9_500,
+                "sleep_ms(10) returned after {} us (start offset {} us)",
+                slept,
+                i * 700 % 10_000
+            );
+        }
+    }
 }

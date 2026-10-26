@@ -130,8 +130,34 @@ macro_rules! entry {
     };
 }
 
+/// Formats into a fixed buffer on the stack (cut off when full): the panic
+/// handler must not need the heap - a failed allocation is a reason to panic.
+struct StackText {
+    buf: [u8; 256],
+    len: usize,
+}
+
+impl core::fmt::Write for StackText {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        let n = s.len().min(self.buf.len() - self.len);
+        self.buf[self.len..self.len + n].copy_from_slice(&s.as_bytes()[..n]);
+        self.len += n;
+        Ok(())
+    }
+}
+
+static PANICKING: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    eprintln!("panic: {}", info.message());
+    // A panic inside the handler (or a second thread panicking) must not recurse until the
+    // stack is gone (bug #19): report once and leave.
+    if PANICKING.swap(true, core::sync::atomic::Ordering::SeqCst) {
+        sys::write(sys::STDERR, b"panic while panicking\n");
+        sys::exit(101)
+    }
+    let mut text = StackText { buf: [0; 256], len: 0 };
+    let _ = core::fmt::write(&mut text, format_args!("panic: {}\n", info.message()));
+    sys::write(sys::STDERR, &text.buf[..text.len]);
     sys::exit(101)
 }

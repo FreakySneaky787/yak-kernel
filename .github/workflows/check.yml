@@ -1,0 +1,82 @@
+# `make check` on a fresh Ubuntu and a fresh Fedora machine for every push to main and every pull request.
+# QEMU runs without KVM (TCG), exactly like in the development sandbox. Package names come from
+# scripts/check-deps.sh, which `make check` runs first and which fails if anything is missing.
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # TCG on a shared runner is slower than a developer machine: give each test kernel more time
+  KERNEL_TEST_TIMEOUT: "120"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ubuntu:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Host packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 ovmf xorriso dosfstools mtools \
+            make gcc binutils git python3 gdb
+      - name: Rust toolchain (pinned in rust-toolchain.toml)
+        run: |
+          rustup --version
+          rustup toolchain install
+          rustc --version
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            kernel/target
+            user/target
+          key: ubuntu-${{ hashFiles('rust-toolchain.toml', 'kernel/Cargo.lock', 'user/Cargo.lock') }}
+      - name: make check
+        run: make check
+      - name: Logs and disk images on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ubuntu-build
+          path: build/
+          if-no-files-found: ignore
+
+  fedora:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    container: fedora:latest
+    steps:
+      - name: Host packages
+        run: |
+          dnf install -y qemu-system-x86 edk2-ovmf xorriso dosfstools mtools make gcc binutils git python3 gdb \
+            curl findutils diffutils
+      - uses: actions/checkout@v4
+      - name: Rust toolchain via rustup (pinned in rust-toolchain.toml)
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none --profile minimal
+          . "$HOME/.cargo/env"
+          rustup toolchain install
+          rustc --version
+      - name: make check
+        run: |
+          . "$HOME/.cargo/env"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          make check
+      - name: Logs and disk images on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fedora-build
+          path: build/
+          if-no-files-found: ignore
