@@ -90,7 +90,7 @@ Still open: N for `make stress` (proposal: 5), whether CI is wanted (M40b), whet
 ## Stage 9: CI and release 1.0 (roadmap phase A, agreed 2026-10-26)
 | # | Milestone | Status | Tests |
 |---|---|---|---|
-| 47 | CI: GitHub Actions run `make check` on Ubuntu and in a Fedora container (QEMU TCG) | ⬜ | green runs on both |
+| 47 | CI: `.github/workflows/check.yml` runs `make check` on ubuntu-24.04 and in a `fedora:latest` container (QEMU TCG, pinned toolchain, 120 s per test kernel, `build/` uploaded on failure); CI badge in the README | ✅ | first run red on both (bug #17: shootdown test limit too strict for CI runners), then green on both: all kernel tests, all test disks fsck-clean, 127/127 E2E steps BIOS + UEFI |
 | 48 | Release 1.0.0: outside-reader feedback addressed, version, CHANGELOG, `make stress`; tag + GitHub release by the user | ⬜ | `make check` + `make stress` on the release commit |
 
 ## Stage 10: course infrastructure (roadmap phase B)
@@ -377,6 +377,11 @@ Then: phase C (pilot chapters 1–4 + feedback), phases D/E – see `docs/ROADMA
   chapter), published as a website; the user steers, Claude builds. Written down in `docs/ROADMAP.md`; `docs/GOALS.md`
   updated; stages 9 (CI, 1.0) and 10 (course infrastructure) planned.
 
+- **2026-10-26** – M47: CI on GitHub Actions (FreakySneaky787/yak-kernel#2). Fedora was tested for the first time
+  (its mirrors are blocked in the sandbox): `make deps`, the OVMF path (`/usr/share/edk2/ovmf/OVMF_CODE.fd`) and the
+  whole suite work there unchanged. The only failure was the TLB shootdown test's 50 ms limit (~75 ms on the runners,
+  bug #17), now 1 s. A Ubuntu job takes ~3.5 min, Fedora ~4 min.
+
 ## Known limitations of release 1.0 (sorted in M42)
 Release blockers were defined as "a program can crash, hang or exhaust the kernel" (`docs/GOALS.md`: isolated
 programs, reliability). All of those found so far are fixed (bugs #11–#16). The rest are **documented limitations**:
@@ -411,7 +416,6 @@ they make KernelTry smaller than a production system, but they do not break the 
 - Under TCG (no KVM) `make check` takes about 2 minutes on a warm build, `make stress` (5 passes) about 30 minutes.
 
 ## Missing for 1.0
-- **Fresh-host test on Fedora** (release criterion "Reproducibility"): only Ubuntu 24.04 has been tested from the README.
 - **A first reader**: somebody who did not build KernelTry follows README → walkthrough 01 → one experiment and
   reports where they got stuck. That is the real test of the "understandable" goal.
 - **`docs/GOALS.md`** is still marked "proposal" – the user confirms it (or changes it).
@@ -419,4 +423,4 @@ they make KernelTry smaller than a production system, but they do not break the 
   the GPL's "How to Apply" recommends a notice per file; renaming the GitHub repository to KernelTry.
 
 ## Next step
-Stage 9, M47: CI with `make check` on Ubuntu and Fedora (also closes the Fedora item under "Missing for 1.0").
+M47 is done. M48 (release prep for 1.0, without the tag), then M49 (website).
