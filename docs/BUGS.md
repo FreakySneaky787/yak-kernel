@@ -161,6 +161,17 @@ Format: number · date · title, then symptom → cause → fix → test.
 - **Test:** `syscheck`: 16 MiB into a pipe without a reader → EPIPE with < 1 MiB heap growth; `sendto` of 1 GiB → EMSGSIZE.
 - **Remember:** the size of a kernel allocation must never be chosen by a user program.
 
+### #17 · 2026-10-26 · Shootdown regression test too strict for CI runners
+- **Symptom:** the first CI run (M47) failed on Ubuntu and Fedora alike: `tlb_shootdown_is_fast_while_all_cpus_are_busy`
+  – "20 shootdowns took 72610 us" (Fedora: 74845 us) against a limit of 50 000 us. Locally the test passed.
+- **Cause:** the limit was chosen from local runs. GitHub's shared runners emulate 4 CPUs with TCG on fewer real cores,
+  so every IPI round trip takes longer. Not a kernel bug.
+- **Fix:** limit raised to 1 s. The test still tells the two implementations apart: the old `run_on` shootdown never
+  finished with all CPUs busy (30 s timeout).
+- **Test:** the test itself, green in CI on Ubuntu and Fedora.
+- **Remember:** a timing assertion must separate *good* from *broken* behaviour, not *fast machine* from *slow machine* –
+  pick the limit from the broken case, not from the local measurement (see `docs/HACKING.md`, "Add a test").
+
 ## Known pitfalls (not bugs, but worth remembering)
 - **The Limine host utility (`limine bios-install`) needs a C compiler** (`gcc`). It is not required for booting the ISO
   in QEMU with `-cdrom`; it is only needed to make the ISO bootable as a hard disk / USB image.

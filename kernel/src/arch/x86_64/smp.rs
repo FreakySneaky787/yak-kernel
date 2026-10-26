@@ -534,7 +534,9 @@ mod tests {
         for id in ids {
             task::join(id);
         }
-        assert!(us < 50_000, "20 shootdowns took {} us", us);
+        // The old code never finished here (30 s timeout); the IPI version needs a few ms locally and
+        // ~75 ms on a loaded CI runner under TCG (bug #17) - 1 s keeps a wide margin on both sides.
+        assert!(us < 1_000_000, "20 shootdowns took {} us", us);
     }
 
     #[test_case]
