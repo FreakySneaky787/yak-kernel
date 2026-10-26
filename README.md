@@ -1,5 +1,7 @@
 # KernelTry – Understand the Kernel
 
+[![check](https://github.com/FreakySneaky787/yak-kernel/actions/workflows/check.yml/badge.svg)](https://github.com/FreakySneaky787/yak-kernel/actions/workflows/check.yml)
+
 A small x86-64 operating system written from scratch in Rust, for **learning how a kernel works** by reading,
 running, testing and changing one. It runs in QEMU (BIOS and UEFI).
 
@@ -71,6 +73,7 @@ Try in the shell: `help`, `ls /bin`, `cat /README.txt | wc`, `ps`, `cpu`, `ping 
 - `make e2e` / `make e2e-uefi` – boots the real system and types commands into `/bin/sh` over the serial port.
 - `KERNEL_SMP=1 make test` (1–4 cores) and `KERNEL_CPU=qemu64 make test` (no SMEP/SMAP/AVX) check other machines.
 - `syscheck` (in `/bin`, part of the tests) throws bad pointers, lengths, descriptors and random syscalls at the kernel.
+- CI (`.github/workflows/check.yml`) runs `make check` on fresh Ubuntu and Fedora machines for every push and pull request.
 - `make soak` runs a long mixed workload; `make stress` runs everything many times (the release gate, about 30 minutes).
 
 ## License
