@@ -1,0 +1,2 @@
+Hello from KernelTry!
+Limine base revision 6 is supported.
