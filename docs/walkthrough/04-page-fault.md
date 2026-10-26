@@ -1,7 +1,7 @@
 # 04 – A page fault in a program
 
 Every memory access goes through the page tables. When a translation is missing or forbids the access, the CPU raises
-exception 14, a **page fault**. The same exception means three very different things in KernelTry:
+exception 14, a **page fault**. The same exception means three very different things in YAK:
 
 | Situation | Result |
 |---|---|
@@ -63,4 +63,4 @@ the check and the copy under one lock.
 ## Things to try
 - `fault null`, `fault kernel`, `fault stack` (stack overflow in user mode: the stack area ends after 1 MiB).
 - `heaptest`, then `mem`: memory is only used for touched pages.
-- `sigtest` installs a handler – but a fault is not a signal you can catch yet in KernelTry; compare with what Linux does.
+- `sigtest` installs a handler – but a fault is not a signal you can catch yet in YAK; compare with what Linux does.

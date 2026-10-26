@@ -1,4 +1,4 @@
-# KernelTry - entry point for all tasks. See CLAUDE.md.
+# YAK - entry point for all tasks. See CLAUDE.md.
 SHELL      := /bin/bash
 CARGO      := source $$HOME/.cargo/env && cd kernel && cargo
 LIMINE_DIR := vendor/limine
@@ -7,7 +7,7 @@ KERNEL_ELF := kernel/target/x86_64-unknown-none/debug/kernel
 # User programs (user/src/bin/<name>.rs or user/src/bin/<name>/main.rs) are copied to /bin on every disk image
 USER_PROGRAMS := $(basename $(notdir $(wildcard user/src/bin/*.rs))) \
                  $(notdir $(patsubst %/,%,$(dir $(wildcard user/src/bin/*/main.rs))))
-USER_OUT   := user/target/x86_64-kerneltry-user/release
+USER_OUT   := user/target/x86_64-yak-user/release
 USER_BIN   := build/user/bin
 # UEFI firmware: Fedora (edk2-ovmf) or Debian/Ubuntu (ovmf) path; override with `make OVMF=<file>`
 OVMF       ?= $(firstword $(wildcard /usr/share/edk2/ovmf/OVMF_CODE.fd /usr/share/OVMF/OVMF_CODE_4M.fd \

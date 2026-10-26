@@ -122,20 +122,20 @@ mod tests {
         let hello = with_root(|fs| fs.read_file("/docs/hello.txt")).unwrap();
         assert_eq!(hello, include_bytes!("../../../rootfs/docs/hello.txt"));
         let label = with_root(|fs| Ok(String::from(fs.label()))).unwrap();
-        assert_eq!(label, "KERNELTRY");
+        assert_eq!(label, "YAK");
     }
 
     #[test_case]
     fn write_on_real_disk_and_remount() {
         with_root(|fs| {
             fs.create_dir("/from kernel")?;
-            fs.write_file("/from kernel/written by KernelTry.txt", b"persistent data\n")?;
-            fs.append_file("/from kernel/written by KernelTry.txt", b"second line\n")
+            fs.write_file("/from kernel/written by YAK.txt", b"persistent data\n")?;
+            fs.append_file("/from kernel/written by YAK.txt", b"second line\n")
         })
         .unwrap();
         // Mount a second instance on the same disk: everything must be on disk
         let mut fresh = FatFs::mount(SystemDisk).unwrap();
-        let data = fresh.read_file("/From Kernel/WRITTEN BY KERNELTRY.TXT").unwrap();
+        let data = fresh.read_file("/From Kernel/WRITTEN BY YAK.TXT").unwrap();
         assert_eq!(data, b"persistent data\nsecond line\n");
         assert!(SystemDisk.sector_count() > 0);
     }

@@ -25,7 +25,7 @@ fn write_all(fd: u64, mut data: &[u8]) {
 
 fn respond(fd: u64, status: &str, content_type: &str, body: &[u8]) {
     let head = alloc::format!(
-        "HTTP/1.0 {}\r\nServer: KernelTry-httpd\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        "HTTP/1.0 {}\r\nServer: YAK-httpd\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         status,
         content_type,
         body.len()

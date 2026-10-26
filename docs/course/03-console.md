@@ -143,7 +143,7 @@ The QEMU window shows the two lines from the picture above; the terminal shows t
 console size:
 
 ```text
-Hello from KernelTry!
+Hello from YAK!
 Console: 160 x 50 characters
 Grüße - umlauts work too: äöü ÄÖÜ ß
 ```

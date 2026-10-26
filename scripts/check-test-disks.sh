@@ -20,7 +20,7 @@ done
 # The library unit tests write these files (see kernel/src/fs/mod.rs)
 lib_img=$(ls -t "$DIR"/kernel-*.img 2>/dev/null | head -1)
 if [[ -n "$lib_img" ]]; then
-    got=$(mtype -i "$lib_img" "::/from kernel/written by KernelTry.txt")
+    got=$(mtype -i "$lib_img" "::/from kernel/written by YAK.txt")
     if [[ "$got" == $'persistent data\nsecond line' ]]; then
         echo "[disk-check] mtools sees the kernel's text file"
     else

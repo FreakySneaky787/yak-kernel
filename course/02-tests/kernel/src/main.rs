@@ -39,7 +39,7 @@ static REQUESTS_END: RequestsEndMarker = RequestsEndMarker::new();
 #[unsafe(no_mangle)]
 extern "C" fn kmain() -> ! {
     serial::init();
-    serial_println!("Hello from KernelTry!");
+    serial_println!("Hello from YAK!");
     if !BASE_REVISION.is_supported() {
         serial_println!("Limine does not support our base revision");
         halt();

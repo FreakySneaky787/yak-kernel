@@ -1,4 +1,4 @@
-Hello from KernelTry!
+Hello from YAK!
 Console: 160 x 50 characters
 Grüße - umlauts work too: äöü ÄÖÜ ß
 GDT loaded: code segment 0x8, TSS 0x18, double fault stack top 0xffffffff8

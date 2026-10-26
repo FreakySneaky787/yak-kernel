@@ -1,4 +1,4 @@
-# Extending KernelTry
+# Extending YAK
 
 Recipes for the four most common changes. Each one ends with the tests that prove it works – a change without a test
 is not finished (see `CLAUDE.md`). Run `make check` before every commit.

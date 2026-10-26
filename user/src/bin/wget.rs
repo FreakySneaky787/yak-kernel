@@ -66,7 +66,7 @@ fn main(args: ulib::Args) -> i32 {
     }
     let fd = fd as u64;
     let request = alloc::format!(
-        "GET {} HTTP/1.0\r\nHost: {}\r\nUser-Agent: KernelTry-wget\r\n\r\n",
+        "GET {} HTTP/1.0\r\nHost: {}\r\nUser-Agent: YAK-wget\r\n\r\n",
         path,
         host
     );

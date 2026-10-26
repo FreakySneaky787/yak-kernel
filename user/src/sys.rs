@@ -549,7 +549,7 @@ pub fn shutdown(fd: u64) -> i64 {
     unsafe { syscall3(SHUTDOWN, fd, 0, 0) }
 }
 
-/// Writes the system name ("KernelTry <version> x86_64") into `buf`; returns its length or -ERANGE.
+/// Writes the system name ("YAK <version> x86_64") into `buf`; returns its length or -ERANGE.
 pub fn uname(buf: &mut [u8]) -> i64 {
     unsafe { syscall3(UNAME, buf.as_mut_ptr() as u64, buf.len() as u64, 0) }
 }

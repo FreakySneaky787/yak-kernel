@@ -42,7 +42,11 @@ extern "C" fn kmain() -> ! {
     assert!(out.starts_with("Hello from user space! I am process "));
     assert!(out.contains("  arg 1: a\n  arg 2: b\n"));
     // 100 ms measured in 10 ms ticks: at least 100 (bug #18), at most one tick more
-    assert!(out.contains("Slept for 100 ms") || out.contains("Slept for 110 ms"), "{}", out);
+    assert!(
+        out.contains("Slept for 100 ms") || out.contains("Slept for 110 ms"),
+        "{}",
+        out
+    );
 
     assert_eq!(run("fault", "exit 7").0, ExitStatus::Exited(7));
     // bug #19: the panic handler works with an exhausted heap (it used to recurse until the stack was gone)
@@ -141,7 +145,7 @@ extern "C" fn kmain() -> ! {
     // M45: the example syscall + program of docs/HACKING.md
     let (status, out) = run("uname", "");
     assert_eq!(status, ExitStatus::Exited(0));
-    assert_eq!(out, alloc::format!("KernelTry {} x86_64\n", env!("CARGO_PKG_VERSION")));
+    assert_eq!(out, alloc::format!("YAK {} x86_64\n", env!("CARGO_PKG_VERSION")));
 
     // M41: every syscall with bad pointers, lengths, descriptors and numbers
     let (status, out) = run("syscheck", "");
@@ -209,7 +213,7 @@ extern "C" fn kmain() -> ! {
     );
     assert!(run("mem", "").1.contains("MiB usable"));
     assert!(run("uptime", "").1.contains("ticks at 100 Hz"));
-    assert!(run("df", "").1.contains("KERNELTRY"));
+    assert!(run("df", "").1.contains("YAK"));
     assert!(run("date", "").1.starts_with("20"));
     assert_eq!(run("mkdir", "/m22").0, ExitStatus::Exited(0));
     assert_eq!(run("touch", "/m22/a.txt").0, ExitStatus::Exited(0));

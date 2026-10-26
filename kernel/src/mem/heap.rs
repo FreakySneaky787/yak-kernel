@@ -360,9 +360,9 @@ mod tests {
     fn box_and_string() {
         let b = Box::new(41u64);
         assert_eq!(*b + 1, 42);
-        let mut s = String::from("Kernel");
-        s.push_str("Try");
-        assert_eq!(alloc::format!("{}!", s), "KernelTry!");
+        let mut s = String::from("Y");
+        s.push_str("AK");
+        assert_eq!(alloc::format!("{}!", s), "YAK!");
     }
 
     #[test_case]

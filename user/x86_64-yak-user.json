@@ -11,7 +11,7 @@
   "llvm-target": "x86_64-unknown-none-elf",
   "max-atomic-width": 64,
   "metadata": {
-    "description": "KernelTry user programs: static, ring 3, SSE2 hardware floating point",
+    "description": "YAK user programs: static, ring 3, SSE2 hardware floating point",
     "host_tools": false,
     "std": false
   },

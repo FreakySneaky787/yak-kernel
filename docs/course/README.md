@@ -1,6 +1,6 @@
 # The course: build a kernel, chapter by chapter
 
-In this course you write an x86-64 kernel in Rust from nothing, the same way KernelTry was built: one small, working
+In this course you write an x86-64 kernel in Rust from nothing, the same way YAK was built: one small, working
 step at a time. Every chapter ends with a kernel that boots in QEMU and passes its own tests.
 
 ## How it works

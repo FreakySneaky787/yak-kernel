@@ -25,7 +25,7 @@ extern "C" fn kernel_main() -> ! {
     let mem = pmm::stats();
     let heap = heap::stats();
     println!(
-        "\x1b[1;96mKernelTry\x1b[0m {} - a hobby kernel in Rust",
+        "\x1b[1;96mYAK\x1b[0m {} - Yet Another Kernel, a hobby kernel in Rust",
         env!("CARGO_PKG_VERSION")
     );
     println!(

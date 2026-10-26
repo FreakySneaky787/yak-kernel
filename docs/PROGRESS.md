@@ -81,9 +81,9 @@ No new kernel features: this stage makes the existing system meet the release cr
 | 43 | Walkthroughs (`docs/walkthrough/`): boot to `/bin/sh`, a key press, `cat \| wc`, a page fault – with links to the functions | ✅ | `scripts/check-doc-refs.py` (`make docs-check`, part of `make check`, with self-test): every \[`symbol`\](file) link must name a symbol in an existing file; "things to try" checked in the running system |
 | 44 | Experiments (`docs/EXPERIMENTS.md`): more cores, no FPU save, the bug #14 fix undone, a 16-byte pipe – no build switches, each a small hand edit | ✅ | each experiment run once, results recorded (590 → 250 ms; 4 workers corrupted; panic 2/2; 1.40 → 5.41 s) |
 | 45 | Extending guides (`docs/HACKING.md`): syscall, user program, test, shell built-in | ✅ | the syscall + program guide followed once: syscall 52 `uname` + `/bin/uname` (integration test, E2E step, `syscheck` bad pointers, `SYSCALL_COUNT`) |
-| 46 | Pre-release 0.8.0: GPL-3.0-or-later (`LICENSE` = FSF text, SHA-256 `3972dc97…`), version in both manifests and the boot banner, `CHANGELOG.md`, new screenshot | ✅ | `make check` green; `uname` shows `KernelTry 0.8.0 x86_64` |
+| 46 | Pre-release 0.8.0: GPL-3.0-or-later (`LICENSE` = FSF text, SHA-256 `3972dc97…`), version in both manifests and the boot banner, `CHANGELOG.md`, new screenshot | ✅ | `make check` green; `uname` shows `YAK 0.8.0 x86_64` |
 
-Decided 2026-10-26: name KernelTry; license first ECPL v1.2, then (same day) **GNU GPL v3 or later** (copyright
+Decided 2026-10-26: name KernelTry, renamed the same evening to **YAK – Yet Another Kernel** (user); license first ECPL v1.2, then (same day) **GNU GPL v3 or later** (copyright
 FreakySneaky787 and contributors); 1.0 is preceded by the pre-release **0.8.0** (user decision, first prepared as `1.0.0-rc.1`).
 Still open: N for `make stress` (proposal: 5), whether CI is wanted (M40b), whether experiments may add build switches to the kernel (M44).
 
@@ -401,10 +401,14 @@ Then: phase C (pilot chapters 1–4 + feedback), phases D/E – see `docs/ROADMA
   chapter folder, so the text cannot drift from the code. Found while writing chapter 3: a dash (U+2013) is drawn as
   `?` by a Latin-1 font table – kept as a "what can go wrong" note.
 
+- **2026-10-26** – The project is called **YAK – Yet Another Kernel** (user decision; "KernelTry" was the working
+  name). Renamed everywhere except in this log: boot banner, `uname`, disk label `YAK`, user target
+  `user/x86_64-yak-user.json`, the course chapters, website and docs.
+
 ## Known limitations of release 1.0 (sorted in M42)
 Release blockers were defined as "a program can crash, hang or exhaust the kernel" (`docs/GOALS.md`: isolated
 programs, reliability). All of those found so far are fixed (bugs #11–#16). The rest are **documented limitations**:
-they make KernelTry smaller than a production system, but they do not break the promises of release 1.0.
+they make YAK smaller than a production system, but they do not break the promises of release 1.0.
 
 **Security model**
 - Single user, no permissions: every program may signal any process (`kill`), read and write every file, and use
@@ -435,11 +439,11 @@ they make KernelTry smaller than a production system, but they do not break the 
 - Under TCG (no KVM) `make check` takes about 2 minutes on a warm build, `make stress` (5 passes) about 30 minutes.
 
 ## Missing for 1.0
-- **A first reader**: somebody who did not build KernelTry follows README → walkthrough 01 → one experiment and
+- **A first reader**: somebody who did not build YAK follows README → walkthrough 01 → one experiment and
   reports where they got stuck. That is the real test of the "understandable" goal.
 - **`docs/GOALS.md`** is still marked "proposal" – the user confirms it (or changes it).
 - Decisions: CI (M40b); license headers (`SPDX-License-Identifier: GPL-3.0-or-later`) in every source file – optional,
-  the GPL's "How to Apply" recommends a notice per file; renaming the GitHub repository to KernelTry.
+  the GPL's "How to Apply" recommends a notice per file.
 
 ## Next step
 **Pilot complete – stop here for feedback** (agreed): the user and at least one outside reader go through chapters

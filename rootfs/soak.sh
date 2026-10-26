@@ -50,7 +50,7 @@ while [ $round -lt $rounds ]; do
     httpd 8080 -n 1 > /soak/httpd.log 2>&1 &
     wget -O /soak/got.txt http://10.0.2.15:8080/README.txt > /soak/log 2>&1 || bad wget
     wait
-    grep "KernelTry disk" /soak/got.txt > /soak/log || bad "wget contents"
+    grep "YAK disk" /soak/got.txt > /soak/log || bad "wget contents"
 
     echo "soak: round $round of $rounds done, $fail failures"
 done

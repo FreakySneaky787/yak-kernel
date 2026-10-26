@@ -1016,7 +1016,7 @@ fn cmd_date(_: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), Stri
 fn cmd_version(_: &mut Shell, _: &[String], out: &mut dyn Write) -> Result<(), String> {
     writeln!(
         out,
-        "KernelTry {} (x86_64, Rust, Limine boot protocol)",
+        "YAK {} (x86_64, Rust, Limine boot protocol)",
         env!("CARGO_PKG_VERSION")
     )
     .ok();
@@ -1176,7 +1176,7 @@ mod tests {
         assert!(ok(&mut shell, "rm shelltest/empty").0);
         assert!(ok(&mut shell, "rm shelltest").0);
         assert!(ok(&mut shell, "cat nothing-here").1.contains("no such file"));
-        assert!(ok(&mut shell, "df").1.contains("KERNELTRY"));
+        assert!(ok(&mut shell, "df").1.contains("YAK"));
         assert!(!ok(&mut shell, "cd README.txt").0);
     }
 

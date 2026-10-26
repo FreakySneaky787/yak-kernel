@@ -1,4 +1,4 @@
-# KernelTry – hobby kernel in Rust (x86_64, QEMU)
+# YAK – hobby kernel in Rust (x86_64, QEMU)
 
 A kernel written from scratch together with an AI. Runs in QEMU only.
 
@@ -43,7 +43,7 @@ Interrupt problems: QEMU monitor `info pic`, `info lapic`, `info registers`.
 Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.sh` invocation.
 
 ## Toolchain
-- Rust nightly via rustup, pinned in `rust-toolchain.toml` (update deliberately + `make check`), target `x86_64-unknown-none` for the kernel; user programs use `user/x86_64-kerneltry-user.json`
+- Rust nightly via rustup, pinned in `rust-toolchain.toml` (update deliberately + `make check`), target `x86_64-unknown-none` for the kernel; user programs use `user/x86_64-yak-user.json`
   with `-Zbuild-std` (needs the `rust-src` component and `gcc` as host linker – both installed).
 - **GNU tools preferred where they fit:** GNU ld (`ld.bfd`) links the kernel, GNU make drives everything,
   gdb for debugging, binutils (objdump, nm, readelf, addr2line) for inspection, gcc builds host helpers (Limine utility).

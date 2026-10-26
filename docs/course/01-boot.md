@@ -1,7 +1,7 @@
 # 1 – Booting with Limine
 
 **Goal:** a kernel that a real bootloader starts in 64-bit mode and that greets us on the serial port.
-**You end up with:** `make run` shows `Hello from KernelTry!` in your terminal; `make test` checks it automatically.
+**You end up with:** `make run` shows `Hello from YAK!` in your terminal; `make test` checks it automatically.
 **Code:** [`course/01-boot/`](https://github.com/FreakySneaky787/yak-kernel/tree/main/course/01-boot)
 
 ## Background: who starts a kernel?
@@ -135,7 +135,7 @@ To get `format!`-style output for free, we implement `core::fmt::Write` for a ze
 #[unsafe(no_mangle)]
 extern "C" fn kmain() -> ! {
     serial::init();
-    serial_println!("Hello from KernelTry!");
+    serial_println!("Hello from YAK!");
     if !BASE_REVISION.is_supported() {
         serial_println!("Limine does not support our base revision");
         halt();
@@ -169,7 +169,7 @@ The first `make` downloads Limine and builds the kernel. QEMU opens a window (em
 and your terminal shows:
 
 ```text
-Hello from KernelTry!
+Hello from YAK!
 Limine base revision 6 is supported.
 ```
 

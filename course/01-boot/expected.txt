@@ -1,2 +1,2 @@
-Hello from KernelTry!
+Hello from YAK!
 Limine base revision 6 is supported.

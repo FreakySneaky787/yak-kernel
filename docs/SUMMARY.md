@@ -18,7 +18,7 @@
   - [03 – cat /README.txt | wc](walkthrough/03-pipeline.md)
   - [04 – A page fault in a program](walkthrough/04-page-fault.md)
 - [Experiments](EXPERIMENTS.md)
-- [Extending KernelTry](HACKING.md)
+- [Extending YAK](HACKING.md)
 
 # Reference
 

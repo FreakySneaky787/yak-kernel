@@ -54,7 +54,7 @@ extern "C" fn kmain() -> ! {
     }
     console::init();
     gdt::init();
-    println!("Hello from KernelTry!");
+    println!("Hello from YAK!");
     match console::CONSOLE.lock().as_ref() {
         Some(c) => serial_println!("Console: {} x {} characters", c.size().0, c.size().1),
         None => serial_println!("No 32-bit framebuffer - text goes to the serial port only"),
