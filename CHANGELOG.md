@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased (towards 1.0.0)
+Stage 9 and the start of stage 10 (`docs/ROADMAP.md`, phases A and B).
+
+**Infrastructure**
+- CI: `make check` on fresh Ubuntu and Fedora machines for every push and pull request
+  (`.github/workflows/check.yml`); the website is built there too.
+- Website: the documentation as a book (mdBook over `docs/`, `make book`), deployed to GitHub Pages from `main`.
+- `docs/ROADMAP.md`: the plan to turn KernelTry into a course that rebuilds the kernel chapter by chapter.
+
+**Fixed** (found by the new CI, see `docs/BUGS.md`)
+- #19: a new process could run its first syscall before its process table entry existed (SMP race in `spawn_with`);
+  the user-space panic handler needed the heap and recursed when an allocation failed.
+- #18: `sleep_ms` could end up to one tick early.
+- #17: the TLB shootdown regression test's time limit was too strict for CI machines.
+
 ## 0.8.0 – pre-release (2026-10-26)
 Stage 8: no new subsystems, but the release criteria of `docs/GOALS.md`.
 

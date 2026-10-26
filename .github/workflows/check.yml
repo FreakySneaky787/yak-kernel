@@ -44,6 +44,14 @@ jobs:
           key: ubuntu-${{ hashFiles('rust-toolchain.toml', 'kernel/Cargo.lock', 'user/Cargo.lock') }}
       - name: make check
         run: make check
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/mdbook
+          key: mdbook-0.4.52
+      - name: Website builds without broken links
+        run: |
+          test -x ~/.cargo/bin/mdbook || cargo +stable install mdbook --locked --version 0.4.52
+          make book
       - name: Logs and disk images on failure
         if: failure()
         uses: actions/upload-artifact@v4

@@ -1,0 +1,44 @@
+# Builds the website (mdBook over docs/, see `make book`) and publishes it on GitHub Pages
+# for every push to main. Needs "Settings → Pages → Source: GitHub Actions" in the repository.
+name: pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/mdbook
+          key: mdbook-0.4.52
+      - name: mdBook
+        run: test -x ~/.cargo/bin/mdbook || cargo +stable install mdbook --locked --version 0.4.52
+      - name: make book
+        run: make book
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/book
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

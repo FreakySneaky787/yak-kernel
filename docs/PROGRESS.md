@@ -91,12 +91,12 @@ Still open: N for `make stress` (proposal: 5), whether CI is wanted (M40b), whet
 | # | Milestone | Status | Tests |
 |---|---|---|---|
 | 47 | CI: `.github/workflows/check.yml` runs `make check` on ubuntu-24.04 and in a `fedora:latest` container (QEMU TCG, pinned toolchain, 120 s per test kernel, `build/` uploaded on failure); CI badge in the README | ✅ | first run red on both (bug #17: shootdown test limit too strict for CI runners), then green on both: all kernel tests, all test disks fsck-clean, 127/127 E2E steps BIOS + UEFI |
-| 48 | Release 1.0.0: outside-reader feedback addressed, version, CHANGELOG, `make stress`; tag + GitHub release by the user | ⬜ | `make check` + `make stress` on the release commit |
+| 48 | Release prep for 1.0.0: `CHANGELOG.md` "Unreleased" section (CI, website, #17–#19); version, `make stress` and the tag follow when the outside-reader feedback is in (user) | 🔨 | – |
 
 ## Stage 10: course infrastructure (roadmap phase B)
 | # | Milestone | Status | Tests |
 |---|---|---|---|
-| 49 | Website: mdBook in `book/`, existing docs integrated, GitHub Pages deploy | ⬜ | CI builds and deploys the book; doc-reference check covers it |
+| 49 | Website: mdBook over `docs/` (`book.toml`, `docs/SUMMARY.md`, home page `docs/index.md`), `make book` via `scripts/build-book.py` (links to files outside `docs/` point at GitHub; build fails on broken links), CI builds it, `.github/workflows/pages.yml` deploys `main` to GitHub Pages | ✅ | `build-book.py --selftest`; 17 pages, 0 broken links; rendered pages checked in a headless browser; CI step "Website builds without broken links" |
 | 50 | Chapter format + `course/NN-slug` branches + chapter check script in CI | ⬜ | a sample chapter branch passes the check |
 
 Then: phase C (pilot chapters 1–4 + feedback), phases D/E – see `docs/ROADMAP.md`.
@@ -388,6 +388,10 @@ Then: phase C (pilot chapters 1–4 + feedback), phases D/E – see `docs/ROADMA
   E2E repetition also showed `sleep_ms` ending up to a tick early (#18). All three fixed with regression tests that
   fail on the old code; `make check` and `make stress STRESS_N=1` green.
 
+- **2026-10-26** – M47 merged (FreakySneaky787/yak-kernel#2, `7f8f5b2`). M49: the website is mdBook over `docs/`
+  (no copy of the docs); mdBook 0.4.52 is a host tool (`cargo install`), not a kernel dependency. GitHub Pages must be
+  switched to "GitHub Actions" by the user before the first deploy.
+
 ## Known limitations of release 1.0 (sorted in M42)
 Release blockers were defined as "a program can crash, hang or exhaust the kernel" (`docs/GOALS.md`: isolated
 programs, reliability). All of those found so far are fixed (bugs #11–#16). The rest are **documented limitations**:
@@ -429,4 +433,5 @@ they make KernelTry smaller than a production system, but they do not break the 
   the GPL's "How to Apply" recommends a notice per file; renaming the GitHub repository to KernelTry.
 
 ## Next step
-M47 is done. M48 (release prep for 1.0, without the tag), then M49 (website).
+M49 is done once the first Pages deploy is live (user: Settings → Pages → Source "GitHub Actions"). Then M48 (release
+notes for #17–#19, no tag) and M50 (chapter infrastructure).

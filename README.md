@@ -5,6 +5,9 @@
 A small x86-64 operating system written from scratch in Rust, for **learning how a kernel works** by reading,
 running, testing and changing one. It runs in QEMU (BIOS and UEFI).
 
+**Website:** [freakysneaky787.github.io/yak-kernel](https://freakysneaky787.github.io/yak-kernel/) – the documentation below as a
+book with navigation and search.
+
 ![KernelTry shell running in QEMU: uname, cpu, netinfo, ps and df](docs/images/shell.png)
 
 > **Status:** pre-release **0.8.0** – a hobby / learning project, working towards release 1.0 (see [docs/GOALS.md](docs/GOALS.md) and

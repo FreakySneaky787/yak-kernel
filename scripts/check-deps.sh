@@ -84,6 +84,13 @@ else
     missing_required=1
 fi
 
+# mdBook builds the website (`make book`); optional, not a distribution package
+if command -v mdbook > /dev/null 2>&1 || [ -x "$HOME/.cargo/bin/mdbook" ]; then
+    echo "ok       mdbook"
+else
+    echo "missing: mdbook (optional, for make book) – cargo install mdbook --locked --version 0.4.52"
+fi
+
 if [ -n "$packages" ]; then
     case $distro in
         fedora) echo "install with: sudo dnf install$packages" ;;
