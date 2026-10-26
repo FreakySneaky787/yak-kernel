@@ -1,13 +1,13 @@
 # Changelog
 
-## Unreleased – candidate for 1.0.0
+## 1.0.0-rc.1 – pre-release (2026-10-26)
 Stage 8: no new subsystems, but the release criteria of `docs/GOALS.md`.
 
 **For readers**
 - `README.md` with screenshot, host packages and quick start; `docs/GOALS.md` (purpose, audience, release criteria).
 - Four walkthroughs through the code (`docs/walkthrough/`), checked by `scripts/check-doc-refs.py` in `make check`.
 - Guided experiments (`docs/EXPERIMENTS.md`) and recipes for extending the system (`docs/HACKING.md`).
-- License: Ethical Copyleft Public License v1.2 (`LICENSE`).
+- License: GNU General Public License v3 or later (`LICENSE`).
 
 **Reproducibility**
 - Rust toolchain pinned in `rust-toolchain.toml`; `make deps` checks the host tools (Fedora and Debian/Ubuntu package names).

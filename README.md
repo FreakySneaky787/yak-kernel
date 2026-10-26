@@ -3,9 +3,9 @@
 A small x86-64 operating system written from scratch in Rust, for **learning how a kernel works** by reading,
 running, testing and changing one. It runs in QEMU (BIOS and UEFI).
 
-![KernelTry shell running in QEMU: cpu, netinfo, ps and df](docs/images/shell.png)
+![KernelTry shell running in QEMU: uname, cpu, netinfo, ps and df](docs/images/shell.png)
 
-> **Status:** hobby / learning project, working towards release 1.0 (see [docs/GOALS.md](docs/GOALS.md) and
+> **Status:** pre-release **1.0.0-rc.1** – a hobby / learning project, working towards release 1.0 (see [docs/GOALS.md](docs/GOALS.md) and
 > stage 8 in [docs/PROGRESS.md](docs/PROGRESS.md)). The project is developed together with an AI assistant.
 
 ## What is in it
@@ -73,11 +73,16 @@ Try in the shell: `help`, `ls /bin`, `cat /README.txt | wc`, `ps`, `cpu`, `ping 
 - `make soak` runs a long mixed workload; `make stress` runs everything many times (the release gate, about 30 minutes).
 
 ## License
-KernelTry is licensed under the **Ethical Copyleft Public License v1.2** – see [LICENSE](LICENSE).
-In short (the license text is what counts): free use for individuals, non-profits, educational institutions,
-cooperatives and very small businesses; no use by military, police or intelligence agencies; changes must be
-published under the same license, also when the software is offered over a network. Governing law: Switzerland.
-This is **not** an OSI-approved open source license.
+Copyright (C) 2026 FreakySneaky787 and contributors.
+
+KernelTry is free software: you can redistribute it and/or modify it under the terms of the **GNU General Public
+License** as published by the Free Software Foundation, either **version 3** of the License, or (at your option) any
+later version (SPDX: `GPL-3.0-or-later`). It is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See
+[LICENSE](LICENSE) for the full text.
+
+In short: anyone may use, study, change and share KernelTry; whoever distributes it or a changed version must pass on
+the source code under the same license.
 
 Exceptions: the bundled Terminus font keeps its SIL Open Font License ([kernel/assets/README.md](kernel/assets/README.md));
 the Limine bootloader downloaded into `vendor/limine` keeps its own license.

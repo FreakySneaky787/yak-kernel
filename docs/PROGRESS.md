@@ -81,9 +81,11 @@ No new kernel features: this stage makes the existing system meet the release cr
 | 43 | Walkthroughs (`docs/walkthrough/`): boot to `/bin/sh`, a key press, `cat \| wc`, a page fault – with links to the functions | ✅ | `scripts/check-doc-refs.py` (`make docs-check`, part of `make check`, with self-test): every \[`symbol`\](file) link must name a symbol in an existing file; "things to try" checked in the running system |
 | 44 | Experiments (`docs/EXPERIMENTS.md`): more cores, no FPU save, the bug #14 fix undone, a 16-byte pipe – no build switches, each a small hand edit | ✅ | each experiment run once, results recorded (590 → 250 ms; 4 workers corrupted; panic 2/2; 1.40 → 5.41 s) |
 | 45 | Extending guides (`docs/HACKING.md`): syscall, user program, test, shell built-in | ✅ | the syscall + program guide followed once: syscall 52 `uname` + `/bin/uname` (integration test, E2E step, `syscheck` bad pointers, `SYSCALL_COUNT`) |
-| 46 | Release 1.0: version number in the boot banner, `CHANGELOG.md`, git tag | ⬜ | `make check` + `make stress` green on the tagged commit |
+| 46 | Pre-release 1.0.0-rc.1: GPL-3.0-or-later (`LICENSE` = FSF text, SHA-256 `3972dc97…`), version in both manifests and the boot banner, `CHANGELOG.md`, new screenshot | ✅ | `make check` green; `uname` shows `KernelTry 1.0.0-rc.1 x86_64` |
+| 47 | Release 1.0.0: everything under "Missing for 1.0" below, then version 1.0.0, `make check` + `make stress` on that commit, tag `v1.0.0` on the default branch | ⬜ | – |
 
-Decided 2026-10-26: license ECPL v1.2 (the user's own license, copyright FreakySneaky787, Swiss law), name KernelTry.
+Decided 2026-10-26: name KernelTry; license first ECPL v1.2, then (same day) **GNU GPL v3 or later** (copyright
+FreakySneaky787 and contributors); 1.0 goes out as a pre-release `1.0.0-rc.1` first.
 Still open: N for `make stress` (proposal: 5), whether CI is wanted (M40b), whether experiments may add build switches to the kernel (M44).
 
 ## Log
@@ -348,6 +350,12 @@ Still open: N for `make stress` (proposal: 5), whether CI is wanted (M40b), whet
   walkthroughs, experiments (all four run and measured), HACKING.md with syscall 52 `uname` as the worked example,
   `CHANGELOG.md`, `make docs-check`.
 
+- **2026-10-26** – User switched the license to the GNU GPL v3 (taken as `GPL-3.0-or-later`, the FSF's recommended
+  wording) and wants a pre-release before 1.0. M46: `LICENSE` from Ubuntu's `base-files` (`/usr/share/common-licenses/GPL-3`,
+  identical to the FSF's `gpl-3.0.txt` – gnu.org itself is blocked by the sandbox proxy), dependency licenses checked
+  (limine, lock_api, scopeguard: MIT OR Apache-2.0; spin: MIT; Limine bootloader: BSD-2-Clause – all GPLv3-compatible),
+  version 1.0.0-rc.1.
+
 ## Known limitations of release 1.0 (sorted in M42)
 Release blockers were defined as "a program can crash, hang or exhaust the kernel" (`docs/GOALS.md`: isolated
 programs, reliability). All of those found so far are fixed (bugs #11–#16). The rest are **documented limitations**:
@@ -381,7 +389,14 @@ they make KernelTry smaller than a production system, but they do not break the 
 - `ps` CPU percentages only cover threads that still exist (dead threads are reaped with their counters).
 - Under TCG (no KVM) `make check` takes about 2 minutes on a warm build, `make stress` (5 passes) about 30 minutes.
 
+## Missing for 1.0
+- **Fresh-host test on Fedora** (release criterion "Reproducibility"): only Ubuntu 24.04 has been tested from the README.
+- **A first reader**: somebody who did not build KernelTry follows README → walkthrough 01 → one experiment and
+  reports where they got stuck. That is the real test of the "understandable" goal.
+- **Merge** this branch into the default branch; the tags `v1.0.0-rc.1` / `v1.0.0` belong on the default branch.
+- **`docs/GOALS.md`** is still marked "proposal" – the user confirms it (or changes it).
+- Decisions: CI (M40b); license headers (`SPDX-License-Identifier: GPL-3.0-or-later`) in every source file – optional,
+  the GPL's "How to Apply" recommends a notice per file; renaming the GitHub repository to KernelTry.
+
 ## Next step
-M39–M45 are done. M46 (release 1.0) needs the user: confirm the release criteria in `docs/GOALS.md` are met, then
-version 1.0.0 (Cargo manifests, `CHANGELOG.md`), `make check` + `make stress` on that commit, git tag `v1.0.0`.
-Still open with the user: CI (M40b).
+1.0.0-rc.1 is prepared (M46). Next: the items under "Missing for 1.0", then M47.

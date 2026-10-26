@@ -94,5 +94,5 @@ Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.s
 - `kernel/tests/` – integration tests (each one is a separate kernel; `reclaim.rs` is the only one that reclaims bootloader memory, `smap.rs` checks SMEP/SMAP)
 - `kernel/linker.ld` – higher-half layout at `0xffffffff80000000`
 - `scripts/run-qemu.sh` – cargo runner: builds the ISO and starts QEMU; `scripts/check-deps.sh` – host tool check (`make deps`)
-- `LICENSE` – ECPL v1.2 (the user's license); `README.md` – entry point for new readers
+- `LICENSE` – GNU GPL v3 (`GPL-3.0-or-later`, the user's choice); `README.md` – entry point for new readers
 - `vendor/limine` – Limine binaries (not in git, `make limine`)

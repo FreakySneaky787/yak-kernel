@@ -1,8 +1,8 @@
 [package]
 name = "kernel"
-version = "0.1.0"
+version = "1.0.0-rc.1"
 edition = "2024"
-license-file = "../LICENSE"
+license = "GPL-3.0-or-later"
 
 [dependencies]
 limine = "0.6.5"

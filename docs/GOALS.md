@@ -42,7 +42,7 @@ experience of a first-time reader**, not about new features. Stage 8 in `docs/PR
 | Area | Criterion |
 |---|---|
 | Entry point | `README.md` explains what KernelTry is, shows a screenshot, lists host packages and gets a new reader from clone to a running shell |
-| Legal | `LICENSE` (ECPL v1.2, chosen by the user on 2026-10-26) applies to the whole repository except third-party assets |
+| Legal | `LICENSE` (GNU GPL v3 or later, chosen by the user on 2026-10-26, replacing ECPL v1.2) applies to the whole repository except third-party assets |
 | Reproducibility | the Rust toolchain is pinned; a dependency check names missing host tools; `make check` passes on a fresh Fedora and Ubuntu host |
 | Reliability | `make check` passes N times in a row (N agreed in stage 8) with 1, 2 and 4 CPUs and with `KERNEL_CPU=qemu64`; a soak test runs for a fixed time without failure; every syscall rejects invalid arguments without crashing the kernel |
 | Known limits | every open item is either fixed or listed as a documented limitation |
