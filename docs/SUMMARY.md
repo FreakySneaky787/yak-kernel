@@ -2,6 +2,13 @@
 
 [Welcome](index.md)
 
+# The course
+
+- [Build a kernel, chapter by chapter](course/README.md)
+  - [1 – Booting with Limine](course/01-boot.md)
+  - [2 – Testing without an operating system](course/02-tests.md)
+  - [3 – Text on the screen](course/03-console.md)
+
 # Understand the kernel
 
 - [Walkthroughs](walkthrough/README.md)
