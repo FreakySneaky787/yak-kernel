@@ -74,16 +74,17 @@ No new kernel features: this stage makes the existing system meet the release cr
 | # | Milestone | Status | Tests |
 |---|---|---|---|
 | 39 | Front door: `README.md` with screenshot and host packages, `docs/GOALS.md`, OVMF path found on Fedora and Debian/Ubuntu | ✅ | `make check` green on Ubuntu 24.04 with the detected OVMF path |
-| 40 | Reproducible setup: pin the toolchain (`rust-toolchain.toml`), `make deps` checks host tools and prints the install command, optional CI running `make check` | ⬜ | fresh-container run from the README alone; `make deps` with a tool missing |
+| 40 | Reproducible setup: toolchain pinned (`rust-toolchain.toml`, nightly-2026-10-26), `make deps` checks host tools and prints the dnf/apt command, `make check` runs it first; LICENSE (ECPL v1.2) | ✅ | `check-deps.sh --selftest` (hidden tool reported, exit 1) in `make check`; manual run with a reduced PATH; `make check` green with the pinned toolchain on Ubuntu 24.04 |
+| 40b | Optional CI (GitHub Actions running `make check` under TCG) – only if the user wants it | ⬜ | a green run on a push |
 | 41 | Reliability gate: `make stress` (`make check` N× with 1/2/4 CPUs and `qemu64`), soak test (shell script mixing pipes, files, threads, network for a fixed time), syscall robustness test (every syscall with bad pointers, bad fds, huge lengths) | ⬜ | the new targets themselves; every failure found → BUGS.md + regression test |
 | 42 | Known limits: sort "Open items" into fixed / documented limitation; fix the release blockers among them | ⬜ | one test per fix |
 | 43 | Walkthroughs (`docs/walkthrough/`): boot to `/bin/sh`; a key press to a program's `read`; `cat f \| wc` through syscalls, scheduler, FAT32 and the pipe; a user page fault – each with file:line references | ⬜ | a script checks that every referenced file and symbol still exists (run by `make check`) |
 | 44 | Experiments (`docs/EXPERIMENTS.md`): ≥ 3 guided "change X, expect Y" experiments (e.g. drop the FPU save → `fputest` fails, 1 CPU vs 4 with `demo`, cache off → slower `wc`) | ⬜ | each expected result is reproduced once and recorded |
 | 45 | Extending guides (`docs/HACKING.md`): add a syscall, a user program, a test, a shell command | ⬜ | each guide followed once on a scratch branch; an example program added to `/bin` |
-| 46 | Release 1.0: license, final name, version number in the boot banner, `CHANGELOG.md`, git tag | ⬜ | `make check` + `make stress` green on the tagged commit |
+| 46 | Release 1.0: version number in the boot banner, `CHANGELOG.md`, git tag | ⬜ | `make check` + `make stress` green on the tagged commit |
 
-Decisions needed from the user: license (M46, required before others may use the code), name (`yak-kernel` vs KernelTry),
-N for `make stress` (proposal: 5), whether CI is wanted (M40), whether experiments may add build switches to the kernel (M44).
+Decided 2026-10-26: license ECPL v1.2 (the user's own license, copyright FreakySneaky787, Swiss law), name KernelTry.
+Still open: N for `make stress` (proposal: 5), whether CI is wanted (M40b), whether experiments may add build switches to the kernel (M44).
 
 ## Log
 - **2026-10-24** – Setup: Rust nightly 1.101 (rustup), target `x86_64-unknown-none`, Limine v11.x-binary.
@@ -328,6 +329,11 @@ N for `make stress` (proposal: 5), whether CI is wanted (M40), whether experimen
   (`OVMF ?=`, override with `make OVMF=<file>`). Found while setting up a fresh Ubuntu container: no toolchain pin
   (stable rustc fails on the user target), hard-coded Fedora OVMF path – both feed M40.
 
+- **2026-10-26** – User chose the license (ECPL v1.2, their own text) and the name KernelTry. M40: `rust-toolchain.toml`
+  pins nightly-2026-10-26 (rustc 1.101.0-nightly 76456a688) with rust-src, rustfmt and the `x86_64-unknown-none` target;
+  `scripts/check-deps.sh` / `make deps` (Fedora/Debian package names, OVMF, rustup) is the first step of `make check`.
+  `license-file` set in both Cargo manifests.
+
 ## Open items / later
 - `ps` CPU percentages only cover threads that still exist (dead threads are reaped with their counters).
 - Shell lines longer than one console row are not handled by the line editor (input is capped at 120 characters).
@@ -344,5 +350,4 @@ N for `make stress` (proposal: 5), whether CI is wanted (M40), whether experimen
   write, append, echo, sleep, clear, help. Without `/bin` on the disk, the kernel shell has no `ls`/`cat`.
 
 ## Next step
-Stage 8 is proposed (M39 done). Confirm stage 8 and the open decisions listed under it with the user, then continue with M40
-(toolchain pin + `make deps`).
+M40 is done. Ask the user about CI (M40b) and N for `make stress`, then continue with M41 (reliability gate).

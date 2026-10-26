@@ -1,0 +1,122 @@
+ETHICAL COPYLEFT PUBLIC LICENSE (ECPL v1.2)
+
+Copyright (c) 2026 FreakySneaky787
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to use,
+copy, modify, merge, publish, distribute, sublicense, and/or host copies
+of the Software, subject to the following conditions:
+
+1. ATTRIBUTION
+The above copyright notice, this permission notice, and a clear attribution
+to the original author(s) must be included in all copies or substantial
+portions of the Software.
+
+2. ELIGIBLE USERS
+The User of the Software must be one of the following:
+  a. An individual person, laboring for themselves.
+  b. A non-profit organization.
+  c. An educational institution.
+  d. An organization that seeks shared profit for all of its members, and
+     allows non-members to set the cost of their labor.
+  e. A small commercial enterprise that employs fewer than five (5) full-time
+     equivalent workers AND generates less than $100,000 USD in gross annual revenue
+     in the preceding fiscal year.
+
+For the purpose of subsection 2(e), the revenue and employee count shall be
+calculated cumulatively to include the entity, its parent companies, subsidiaries,
+affiliates, and any corporate group it belongs to. If the User is an organization
+with owners operating under section 2(d), then all owners must be workers and all
+workers must be owners with equal equity and/or equal vote.
+
+3. RESTRICTED USERS & USES
+Notwithstanding Section 2, the Software MUST NOT be used, operated, modified,
+or distributed by:
+  a. Law enforcement agencies, military entities, intelligence agencies, private
+     security contractors working under their authority, or any entity working for,
+     contracting with, or operating under the control or direction of either.
+  b. Any entity or individual involved in violations of international human rights
+     laws, specifically as outlined by the United Nations Universal Declaration of
+     Human Rights, systematic labor exploitation, forced labor, or severe environmental
+     destruction.
+
+4. COPYLEFT REQUIREMENT (SOURCE DISTRIBUTION)
+If you modify, transform, extend, or build upon the Software, or integrate
+it into another project, you may distribute or make available the resulting
+work ONLY under the exact terms of this License. You must make the full
+source code of your modifications freely available to all eligible users
+under these same conditions.
+
+5. NETWORK COPYLEFT, SERVICE PROVISION & INTERACTION BOUNDARIES
+If you run a modified or unmodified version of the Software on a server or
+isolated environment (including containers, virtual machines, microservices, or
+cloud infrastructure) and permit other users or software components to interact
+with it remotely over a network or application programming interface (API),
+you MUST offer those network users access to the corresponding complete source
+code of your version under the terms of this License, at no extra charge.
+
+For the avoidance of doubt, any software component or system that directly links
+to, communicates with, or depends upon the functionality of the Software via an
+API, RPC, shared memory, or network protocol to deliver a combined user-facing
+service shall be deemed a derivative work governed by Section 4 and Section 5.
+
+6. AUTOMATIC TERMINATION
+Any use, copying, modification, or distribution of the Software not in strict
+compliance with the terms and conditions of this License automatically terminates
+your rights under this License with immediate effect (ipso facto). Upon termination,
+you must immediately cease all use, hosting, and distribution of the Software and
+destroy all copies in your possession or control.
+
+7. COMPLIANCE & AUDIT RIGHTS
+Upon reasonable written notice from the Copyright Holder, any User that is an
+organization must provide written verification and supporting documentation
+confirming its compliance with Section 2 (Eligible Users) and Section 3
+(Restricted Users & Uses), including employee count and gross revenue verification
+certified by an independent accounting professional or authorized officer of
+the organization.
+
+8. PATENT PROTECTION & TERMINATION
+Subject to the terms and conditions of this License, each contributor hereby
+grants to you a perpetual, worldwide, non-exclusive, no-charge, royalty-free,
+irrevocable patent license to make, have made, use, offer to sell, sell,
+import, and otherwise transfer the Software.
+
+If you institute patent litigation against any entity (including a cross-claim
+or counterclaim in a lawsuit) alleging that the Software or a contribution
+within the Software constitutes direct or contributory patent infringement,
+then any patent licenses granted to you under this License for that Software
+shall terminate as of the date such litigation is filed.
+
+9. HARDWARE & INSTALLATION INFORMATION (ANTI-TIVOIZATION)
+If you convey an object code or executable version of the Software embedded
+in or accompanied by a physical device or hardware product, you must provide
+the recipient with all Installation Information necessary to install and run
+modified versions of the Software on that device (including any required
+keys, authorization tokens, or bypasses for digital restrictions mechanisms).
+
+10. TRADEMARK PROTECTION
+This License does not grant permission to use the trade names, trademarks,
+service marks, or product names of the Copyright Holder, except as required
+for reasonable and customary use in describing the origin of the Software and
+reproducing the content of the copyright notice.
+
+11. SEVERABILITY
+If any provision of this License is held by a court of competent jurisdiction
+to be invalid, illegal, or unenforceable, such provision shall be enforced to
+the maximum extent permissible, and the remaining provisions of this License
+shall remain in full force and effect.
+
+12. GOVERNING LAW & JURISDICTION
+This License and any dispute or claim arising out of or in connection with it
+shall be governed by and construed in accordance with the laws of Switzerland,
+without giving effect to any choice or conflict of law provision. Any legal
+action or proceeding arising under this License shall be brought exclusively in
+the courts located in Switzerland.
+
+13. DISCLAIMER OF WARRANTY & LIMITATION OF LIABILITY
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

@@ -36,14 +36,15 @@ Host packages (names for Fedora / Debian-Ubuntu):
 | Build tools | `make gcc binutils git python3` | `make gcc binutils git python3` |
 | Debugger (optional) | `gdb` | `gdb` |
 
-Rust nightly via [rustup](https://rustup.rs):
+Rust comes from [rustup](https://rustup.rs) (not from the distribution). The exact nightly compiler is pinned in
+`rust-toolchain.toml`; inside the repository, rustup installs it with
 ```sh
-rustup toolchain install nightly --component rust-src --target x86_64-unknown-none
-rustup default nightly        # or: rustup override set nightly (inside this directory)
+rustup toolchain install      # reads rust-toolchain.toml (rustup ≥ 1.28)
 ```
 
 Then:
 ```sh
+make deps        # checks the host tools and prints the install command for missing ones
 make run         # build everything, boot in a QEMU window; serial output in the terminal
 make check       # all tests: in-kernel tests, end-to-end shell sessions under BIOS and UEFI
 ```
@@ -67,6 +68,11 @@ Try in the shell: `help`, `ls /bin`, `cat /README.txt | wc`, `ps`, `cpu`, `ping 
 - `KERNEL_SMP=1 make test` (1–4 cores) and `KERNEL_CPU=qemu64 make test` (no SMEP/SMAP/AVX) check other machines.
 
 ## License
-No license has been chosen yet – until then, all rights are reserved by the author. This is an open release item
-(see [docs/GOALS.md](docs/GOALS.md)). The bundled Terminus font is under the SIL Open Font License
-([kernel/assets/README.md](kernel/assets/README.md)).
+KernelTry is licensed under the **Ethical Copyleft Public License v1.2** – see [LICENSE](LICENSE).
+In short (the license text is what counts): free use for individuals, non-profits, educational institutions,
+cooperatives and very small businesses; no use by military, police or intelligence agencies; changes must be
+published under the same license, also when the software is offered over a network. Governing law: Switzerland.
+This is **not** an OSI-approved open source license.
+
+Exceptions: the bundled Terminus font keeps its SIL Open Font License ([kernel/assets/README.md](kernel/assets/README.md));
+the Limine bootloader downloaded into `vendor/limine` keeps its own license.

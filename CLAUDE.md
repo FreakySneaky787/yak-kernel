@@ -14,6 +14,7 @@ The conversation with the user happens in German.
 ## Commands
 | Command | What |
 |---|---|
+| `make deps` | check host tools, print the install command for missing ones (first step of `make check`) |
 | `make build` | build the user programs and the kernel (`kernel/target/x86_64-unknown-none/debug/kernel`) |
 | `make user` | build the user programs (`user/`) into `build/user/bin` (installed into `/bin` on every disk image) |
 | `make run` | QEMU with a window (BIOS), serial output in the terminal |
@@ -21,7 +22,7 @@ The conversation with the user happens in German.
 | `make test` | all in-kernel tests headless in QEMU, exit status 0 = green |
 | `make e2e` | boot the real kernel and drive the shell over serial (`scripts/e2e-shell.py`) |
 | `make e2e-uefi` | same E2E test, booted through OVMF/UEFI |
-| `make check` | `make test` + `make e2e` + `make e2e-uefi` – run this before every commit |
+| `make check` | `make deps` + `make test` + `make e2e` + `make e2e-uefi` – run this before every commit |
 | `make fmt` | rustfmt over the kernel (commit formatting separately) |
 | `make disk` / `make disk-reset` | create / recreate the persistent FAT32 disk `build/disk.img` from `rootfs/` |
 | `make debug` + `make gdb` | QEMU waits for gdb on :1234 |
@@ -37,7 +38,7 @@ Interrupt problems: QEMU monitor `info pic`, `info lapic`, `info registers`.
 Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.sh` invocation.
 
 ## Toolchain
-- Rust nightly via rustup, target `x86_64-unknown-none` for the kernel; user programs use `user/x86_64-kerneltry-user.json`
+- Rust nightly via rustup, pinned in `rust-toolchain.toml` (update deliberately + `make check`), target `x86_64-unknown-none` for the kernel; user programs use `user/x86_64-kerneltry-user.json`
   with `-Zbuild-std` (needs the `rust-src` component and `gcc` as host linker – both installed).
 - **GNU tools preferred where they fit:** GNU ld (`ld.bfd`) links the kernel, GNU make drives everything,
   gdb for debugging, binutils (objdump, nm, readelf, addr2line) for inspection, gcc builds host helpers (Limine utility).
@@ -90,5 +91,6 @@ Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.s
   `fpu.rs` (x87/SSE/AVX enable, XSAVE/FXSAVE areas), `cpu.rs` also SMEP/SMAP + `user_access`, `smp.rs` (AP trampoline, INIT/SIPI, `run_on`), `tsc.rs` (µs clock), interrupt helpers in `mod.rs`
 - `kernel/tests/` – integration tests (each one is a separate kernel; `reclaim.rs` is the only one that reclaims bootloader memory, `smap.rs` checks SMEP/SMAP)
 - `kernel/linker.ld` – higher-half layout at `0xffffffff80000000`
-- `scripts/run-qemu.sh` – cargo runner: builds the ISO and starts QEMU
+- `scripts/run-qemu.sh` – cargo runner: builds the ISO and starts QEMU; `scripts/check-deps.sh` – host tool check (`make deps`)
+- `LICENSE` – ECPL v1.2 (the user's license); `README.md` – entry point for new readers
 - `vendor/limine` – Limine binaries (not in git, `make limine`)

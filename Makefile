@@ -13,7 +13,7 @@ USER_BIN   := build/user/bin
 OVMF       ?= $(firstword $(wildcard /usr/share/edk2/ovmf/OVMF_CODE.fd /usr/share/OVMF/OVMF_CODE_4M.fd \
                   /usr/share/OVMF/OVMF_CODE.fd) /usr/share/edk2/ovmf/OVMF_CODE.fd)
 
-.PHONY: all limine limine-tool user build run run-uefi debug gdb test e2e e2e-uefi check fmt \
+.PHONY: all deps limine limine-tool user build run run-uefi debug gdb test e2e e2e-uefi check fmt \
         disk disk-reset disasm symbols sections addr2line clean distclean
 
 all: build
@@ -64,8 +64,13 @@ e2e: build
 e2e-uefi: build
 	python3 -I scripts/e2e-shell.py $(KERNEL_ELF) -drive if=pflash,format=raw,readonly=on,file=$(OVMF)
 
-# Everything: unit + integration tests, then the end-to-end shell test (BIOS and UEFI)
-check: test e2e e2e-uefi
+# Host tools present? Prints the install command for missing ones (scripts/check-deps.sh)
+deps:
+	OVMF=$(OVMF) scripts/check-deps.sh
+	scripts/check-deps.sh --selftest
+
+# Everything: host tools, unit + integration tests, then the end-to-end shell test (BIOS and UEFI)
+check: deps test e2e e2e-uefi
 
 # Format all kernel code (rustfmt, see kernel/rustfmt.toml)
 fmt:
