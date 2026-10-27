@@ -122,7 +122,11 @@
 - **User layout**: ELF segments between `USER_IMAGE_START` (64 KiB, null page area stays unmapped) and `USER_IMAGE_END`;
   our programs link at `0x40_0000`. The heap starts at the first page after the image and is moved with `brk` (max 64 MiB). Stack: up to 1 MiB
   (`USER_STACK_MAX`) below `USER_STACK_TOP = 0x7FFF_FFFF_0000`, the top 4 pages mapped at start, the rest on demand (M35);
-  nothing is mapped below it (overflow → page fault → process killed). The argument block is copied to the stack top; `_start` gets pointer and length
+  nothing is mapped below it (overflow → page fault → process killed). Below that gap: 64 **thread stack slots**
+  (M52), each `[64 KiB guard][256 KiB stack]`; a slot belongs to a thread started with `thread_spawn(entry, 0, arg)`,
+  its stack pages are demand-paged, the guard never. A fault in a guard kills the process with "stack overflow in a
+  thread". Slots of ended threads are unmapped (TLB shoot-down first) at the next `thread_spawn` or `thread_join`.
+  `USER_IMAGE_END` leaves room for the largest heap plus a guard below the slots (bug #21). The argument block is copied to the stack top; `_start` gets pointer and length
   in RDI/RSI. Arguments inside the block are separated by NUL bytes (`ulib::Args`); the shell joins its words that way.
 - **ELF loader** (`process::elf`): static `ET_EXEC` x86_64 only, `PT_LOAD` segments with R/W/X → USER, WRITABLE, NO_EXECUTE.
   Every header field is bounds-checked; segments outside the user image area or an entry point outside an X segment are refused.
@@ -184,7 +188,7 @@
   | 37–43 | TCP, `shutdown`, `setenv`/`getenv`/`environ` | see `kernel/src/process/syscall.rs` |
   | 44 | `sigaction(sig, disposition, trampoline)` | `SIG_DFL` 0, `SIG_IGN` 1 or a handler; old disposition; SIGKILL → `-EINVAL` |
   | 45 | `sigreturn()` | called by the trampoline when a handler returns (unblocks the next one) |
-  | 46 | `thread_spawn(entry, stack, arg)` | tid; ≤ 64 running further threads (`-EAGAIN`); entry/stack must be user addresses |
+  | 46 | `thread_spawn(entry, stack, arg)` | tid; ≤ 64 running further threads (`-EAGAIN`); entry/stack must be user addresses; stack 0 = a kernel slot with a guard |
   | 47 | `thread_exit(code)` | ends the thread; in the main thread the process |
   | 48 | `thread_join(tid)` | exit code as u32; `-ESRCH` if not a further thread of the caller or already joined |
   | 49 | `futex_wait(addr, expected, timeout_ms)` | `-EAGAIN` if `*addr != expected`, `-ETIMEDOUT`, `-EINTR` |
@@ -215,7 +219,7 @@
   `with_current`, so no other thread can unmap it meanwhile), queues the thread under the key (pid << 47 | addr) and
   blocks (`Wait::Futex`, or `Wait::Until` with a timeout); `futex_wake(addr, n)` moves up to n waiters to the `woken`
   set and `task::wake`s them. `ulib::sync::RawLock` (0 free / 1 locked / 2 contended) only calls the kernel when
-  contended; the user heap uses it, `ulib::thread::spawn` gives every thread a 256 KiB stack from the heap.
+  contended; the user heap uses it, `ulib::thread::spawn` asks for a kernel stack slot (256 KiB with a guard, see "User layout").
 - **Signals** (M34, `process/signal.rs`): per process a disposition per signal (default = end, ignore, handler), a pending
   mask and an `in_handler` flag. `send_signal` sets the bit and `task::wake`s the target; blocking syscalls use abortable
   waits (`input::read_key_or_abort`, `task::join_or_abort`, `time::sleep_ms_or_abort`, pipes, sockets) that give up when

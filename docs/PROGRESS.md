@@ -113,6 +113,7 @@ documented limitation.
 | # | Milestone | Status | Tests |
 |---|---|---|---|
 | 51 | Docs: "File system" in `docs/DESIGN.md` contradicted the block cache (bug #20), the power-off guarantee is stated precisely, GOALS says YAK is not the base of a desktop OS; UDP checksums are verified on receipt (0 = none, accepted) | ✅ | `packet::tests::udp_checksums_are_verified_on_receipt` (wrong IP address, flipped bit, zero checksum, Ethernet padding); E2E UDP echo, DHCP and DNS still work |
+| 52 | Guard pages for thread stacks: 64 kernel stack slots `[64 KiB guard][256 KiB stack]` below the main stack, `thread_spawn` with stack 0, slots freed after the thread ended; `USER_IMAGE_END` lowered so the heap cannot reach the stacks (bug #21) | ✅ | `thread_stack_slots_have_guards` (layout, guards, bug #21); `fault thread-stack` killed with "stack overflow in a thread" in the page below slot 0; `threadtest`: 200 KiB on a thread stack, 100 threads in a row, 70 unjoined threads then one more; `make test` with 1, 2 and 4 CPUs |
 
 ## Log
 - **2026-10-24** – Setup: Rust nightly 1.101 (rustup), target `x86_64-unknown-none`, Limine v11.x-binary.
@@ -426,8 +427,8 @@ they make YAK smaller than a production system, but they do not break the promis
 - The kernel heap grows on demand but never shrinks.
 
 **User space**
-- No AVX-512; the ELF image is mapped eagerly (heap and stack on demand); no thread-local storage; no guard pages for
-  thread stacks; no SIGCHLD/SIGSTOP/alarm, no signal masks; a CPU exception cannot be caught as a signal.
+- No AVX-512; the ELF image is mapped eagerly (heap and stack on demand); no thread-local storage; thread stacks are
+  fixed at 256 KiB (64 slots); no SIGCHLD/SIGSTOP/alarm, no signal masks; a CPU exception cannot be caught as a signal.
 - `/bin/sh`: no `$(...)`, `case`, `local`, here-documents or `"$@"`; `&&`/`||`/`|`/`&` must be separate words;
   functions are not inherited by `sh -c` background shells; built-ins, functions and loops inside a pipeline must fit
   their output into one pipe (64 KiB) – more blocks until Ctrl+C; background jobs share the keyboard with the shell.

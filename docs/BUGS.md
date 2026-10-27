@@ -214,6 +214,18 @@ Format: number · date · title, then symptom → cause → fix → test.
 - **Remember:** a milestone that changes a layer must search the docs for every statement about that layer, not only
   edit its own section.
 
+### #21 · 2026-10-27 · The heap could grow into the stack
+- **Symptom:** none observed; found while placing the thread stack slots of M52 below the main stack.
+- **Cause:** `USER_IMAGE_END` only kept the ELF segments 64 KiB below the stack area. The heap starts right after the
+  image and may grow by `HEAP_MAX` (64 MiB) – a program whose image ended near `USER_IMAGE_END` could `brk` its heap
+  into the stack range, and both would demand-page the same addresses. Only the program itself was affected (memory
+  isolation between processes held), but it broke the stack guard.
+- **Fix:** `USER_IMAGE_END = THREAD_STACKS_BOTTOM - STACK_GUARD - HEAP_MAX`: the largest heap behind the highest
+  allowed image ends below a guard gap.
+- **Test:** `process::tests::thread_stack_slots_have_guards` asserts the layout (fails with the old constant).
+- **Remember:** a limit on one region (the image) is only safe together with the limits of the regions that grow out of
+  it (the heap).
+
 ## Known pitfalls (not bugs, but worth remembering)
 - **The Limine host utility (`limine bios-install`) needs a C compiler** (`gcc`). It is not required for booting the ISO
   in QEMU with `-cdrom`; it is only needed to make the ISO bootable as a hard disk / USB image.

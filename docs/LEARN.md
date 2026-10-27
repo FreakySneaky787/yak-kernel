@@ -377,6 +377,16 @@ Short explanations of every subsystem: what it is and why we need it.
 - **Stress** (`make stress`): the whole test suite N times with 1, 2 and 4 CPUs, with an old CPU model and under UEFI.
   A test that fails once in five runs is a bug, not bad luck.
 
+## M52 – A guard below every thread stack
+- A stack grows downwards. If nothing stops it, a thread that recurses too deeply simply keeps writing – into whatever
+  lies below its stack: the heap, another thread's stack. The program then fails much later, somewhere else, for no
+  visible reason.
+- A **guard** is a range of addresses that is deliberately never mapped. The first write into it is a page fault, and
+  the kernel knows at once what happened: the fault address is in a guard, so it is a stack overflow.
+- The kernel stacks have had guards since M9, and nothing is mapped below the main user stack. Thread stacks came from the heap, where there is
+  no room for a hole. Now the kernel hands out fixed **stack slots** – stack on top, guard below – and frees a slot once
+  its thread has ended.
+
 ## Tooling – GNU ld and binutils
 - rustc compiles our code into object files; a **linker** combines them into the final ELF according to `kernel/linker.ld`
   (load address, section order, segments). We use **GNU ld** (`ld.bfd`) for that.

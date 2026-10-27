@@ -101,11 +101,17 @@ extern "x86-interrupt" fn page_fault(frame: InterruptStackFrame, error_code: u64
         if crate::process::handle_page_fault(read_cr2(), error_code) {
             return; // demand paging: retry the instruction
         }
+        let hint = if crate::process::in_thread_stack_guard(read_cr2()) {
+            " - stack overflow in a thread"
+        } else {
+            ""
+        };
         crate::process::kill_current(format!(
-            "page fault at {:#x} ({}), rip={:#x}",
+            "page fault at {:#x} ({}), rip={:#x}{}",
             read_cr2(),
             PageFaultError(error_code),
-            frame.rip
+            frame.rip,
+            hint
         ));
     }
     panic!(

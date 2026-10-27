@@ -13,6 +13,9 @@
 //! - `USER_STACK_TOP - USER_STACK_MAX .. USER_STACK_TOP`: the stack. The top
 //!   `USER_STACK_PAGES` are mapped at start, the rest on first use (like the
 //!   heap); below it nothing is mapped (an overflow faults and kills the process)
+//! - below that, `MAX_THREADS` stack slots for further threads (M52): each is
+//!   `[guard][THREAD_STACK_SIZE stack]`, demand-paged while a thread uses it;
+//!   the guard is never mapped, so a thread's stack overflow faults too
 //! - the argument string sits at the top of the stack; `_start` receives a
 //!   pointer to it in RDI and its length in RSI (our own minimal ABI).
 //!
@@ -77,11 +80,33 @@ pub const USER_STACK_TOP: u64 = 0x0000_7FFF_FFFF_0000;
 pub const USER_STACK_PAGES: usize = 4;
 /// Largest stack: pages below the initial ones are mapped on first use.
 pub const USER_STACK_MAX: u64 = 1024 * 1024;
-/// ELF segments must end below the stack and its unmapped guard gap.
-pub const USER_IMAGE_END: u64 = USER_STACK_TOP - USER_STACK_MAX - 16 * PAGE_SIZE;
+/// Unmapped gap below every stack (the main stack and each thread stack).
+pub const STACK_GUARD: u64 = 16 * PAGE_SIZE;
+/// Stack of a further thread whose stack the kernel chose (`thread_spawn` with stack 0).
+pub const THREAD_STACK_SIZE: u64 = 256 * 1024;
+/// One thread stack slot: guard below, stack above.
+const THREAD_SLOT: u64 = STACK_GUARD + THREAD_STACK_SIZE;
+/// Top of slot 0; slot `i` ends at `THREAD_STACKS_TOP - i * THREAD_SLOT`.
+pub const THREAD_STACKS_TOP: u64 = USER_STACK_TOP - USER_STACK_MAX - STACK_GUARD;
+pub const THREAD_STACKS_BOTTOM: u64 = THREAD_STACKS_TOP - MAX_THREADS as u64 * THREAD_SLOT;
 pub const MAX_ARGS_LEN: usize = 4096;
 /// Largest heap a process may have.
 pub const HEAP_MAX: u64 = 64 * 1024 * 1024;
+/// ELF segments must end low enough that the heap behind them, at its largest, stays
+/// below the thread stacks and a guard gap (bug #21: it could grow into the stack).
+pub const USER_IMAGE_END: u64 = THREAD_STACKS_BOTTOM - STACK_GUARD - HEAP_MAX;
+
+/// The stack range `[bottom, top)` of thread stack slot `slot`.
+pub const fn thread_stack(slot: usize) -> (u64, u64) {
+    let top = THREAD_STACKS_TOP - slot as u64 * THREAD_SLOT;
+    (top - THREAD_STACK_SIZE, top)
+}
+
+/// Whether `addr` lies in the guard of a thread stack slot (a thread's stack overflow).
+pub fn in_thread_stack_guard(addr: u64) -> bool {
+    (THREAD_STACKS_BOTTOM..THREAD_STACKS_TOP).contains(&addr)
+        && (THREAD_STACKS_TOP - 1 - addr) % THREAD_SLOT >= THREAD_STACK_SIZE
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExitStatus {
@@ -221,6 +246,9 @@ pub struct Process {
     pub env: BTreeMap<String, String>,
     /// Further threads: `None` while running, the exit code until joined.
     threads: BTreeMap<Tid, Option<i64>>,
+    /// Thread stack slots in use (bit `i` = slot `i`) and which thread has which.
+    stack_slots: u64,
+    thread_slots: BTreeMap<Tid, usize>,
     /// The process is ending with this status (see `exit_current`).
     exiting: Option<ExitStatus>,
 }
@@ -244,10 +272,29 @@ impl Process {
     }
 
     /// Whether `addr` lies in a demand-paged range: the heap (below its end
-    /// rounded up to a page) or the stack area.
+    /// rounded up to a page), the stack area or the stack of a used thread
+    /// stack slot (never its guard).
     fn on_demand(&self, addr: u64) -> bool {
         let heap = addr >= self.heap_start && addr < crate::mem::align_up(self.heap_end, PAGE_SIZE);
-        heap || (USER_STACK_TOP - USER_STACK_MAX..USER_STACK_TOP).contains(&addr)
+        heap || (USER_STACK_TOP - USER_STACK_MAX..USER_STACK_TOP).contains(&addr) || self.in_used_thread_stack(addr)
+    }
+
+    fn in_used_thread_stack(&self, addr: u64) -> bool {
+        if !(THREAD_STACKS_BOTTOM..THREAD_STACKS_TOP).contains(&addr) || in_thread_stack_guard(addr) {
+            return false;
+        }
+        let slot = ((THREAD_STACKS_TOP - 1 - addr) / THREAD_SLOT) as usize;
+        self.stack_slots & (1 << slot) != 0
+    }
+
+    /// Takes a free thread stack slot; returns its number.
+    fn take_stack_slot(&mut self) -> Option<usize> {
+        let slot = (!self.stack_slots).trailing_zeros() as usize;
+        if slot >= MAX_THREADS {
+            return None;
+        }
+        self.stack_slots |= 1 << slot;
+        Some(slot)
     }
 
     /// Maps zeroed pages for every not yet used heap or stack page in
@@ -397,6 +444,8 @@ pub fn spawn_with(name: &str, elf: &[u8], args: &str, opts: Options) -> Result<P
         status: None,
         signals: opts.signals.unwrap_or_else(Signals::new),
         threads: BTreeMap::new(),
+        stack_slots: 0,
+        thread_slots: BTreeMap::new(),
         exiting: None,
         parent: opts.parent,
         orphan: false,
@@ -448,8 +497,11 @@ pub fn with_current<R>(f: impl FnOnce(&mut Process) -> R) -> Option<R> {
 pub const MAX_THREADS: usize = 64;
 
 /// Starts a further thread of the current process at `entry` with stack
-/// pointer `stack` and `arg` in RDI. Returns its id.
+/// pointer `stack` and `arg` in RDI. Returns its id. With `stack == 0` the
+/// kernel gives the thread a stack slot with a guard below it (freed when
+/// the thread is joined, or by a later `spawn_thread` once it has ended).
 pub fn spawn_thread(entry: u64, stack: u64, arg: u64) -> Option<Tid> {
+    release_thread_stacks();
     let pid = task::current_owner();
     without_interrupts(|| {
         let mut procs = PROCESSES.lock();
@@ -459,18 +511,57 @@ pub fn spawn_thread(entry: u64, stack: u64, arg: u64) -> Option<Tid> {
             return None;
         }
         let root = p.space.as_ref()?.root();
+        let slot = if stack == 0 { Some(p.take_stack_slot()?) } else { None };
         let name = alloc::format!("{}/t", p.name);
         let user = UserEntry {
             rip: entry,
-            rsp: stack,
+            rsp: slot.map_or(stack, |s| thread_stack(s).1),
             arg0: arg,
             arg1: 0,
         };
         // inserted before the lock is released: the thread cannot look itself up earlier
         let tid = task::spawn_user_thread(&name, root, user, pid);
         p.threads.insert(tid, None);
+        if let Some(slot) = slot {
+            p.thread_slots.insert(tid, slot);
+        }
         Some(tid)
     })
+}
+
+/// Frees the stack slots of the current process's threads that have ended:
+/// unmaps their pages (other threads may have them in their TLB: shoot down
+/// first) and makes the slots reusable. Returns the number of slots freed.
+fn release_thread_stacks() -> usize {
+    let Some((frames, slots, root, threads)) = with_current(|p| {
+        let ended: Vec<(Tid, usize)> = p
+            .thread_slots
+            .iter()
+            .filter(|&(t, _)| !matches!(p.threads.get(t), Some(None)))
+            .map(|(&t, &s)| (t, s))
+            .collect();
+        let mut frames = Vec::new();
+        for &(tid, slot) in &ended {
+            p.thread_slots.remove(&tid);
+            p.stack_slots &= !(1 << slot);
+            if let Some(space) = p.space.as_mut() {
+                let (bottom, _) = thread_stack(slot);
+                frames.extend(space.unmap_keeping_frames(VirtAddr(bottom), (THREAD_STACK_SIZE / PAGE_SIZE) as usize));
+            }
+        }
+        (frames, ended.len(), p.space.as_ref().map(|s| s.root()), p.thread_count())
+    }) else {
+        return 0;
+    };
+    if threads > 0 && !frames.is_empty() {
+        if let Some(root) = root {
+            paging::shoot_down(root);
+        }
+    }
+    for frame in frames {
+        crate::mem::pmm::free_frame(frame);
+    }
+    slots
 }
 
 /// Ends the current thread with `code`; for the main thread that is the
@@ -499,9 +590,9 @@ pub fn join_thread(tid: Tid) -> Option<Result<i64, WaitError>> {
         return Some(Err(WaitError::Interrupted));
     }
     // the thread is gone; its code is recorded unless it died with the process
-    with_current(|p| p.threads.remove(&tid))
-        .flatten()
-        .map(|code| Ok(code.unwrap_or(-1)))
+    let code = with_current(|p| p.threads.remove(&tid)).flatten();
+    release_thread_stacks();
+    code.map(|code| Ok(code.unwrap_or(-1)))
 }
 
 /// Ends the current process with `status` (if several threads end it, the
@@ -1048,6 +1139,21 @@ mod tests {
         assert!(!interrupt_foreground());
         assert!(kill(pid));
         assert_eq!(wait(pid), Some(ExitStatus::Killed(String::from("killed"))));
+    }
+
+    #[test_case]
+    fn thread_stack_slots_have_guards() {
+        for slot in [0, 1, MAX_THREADS - 1] {
+            let (bottom, top) = thread_stack(slot);
+            assert_eq!(top - bottom, THREAD_STACK_SIZE);
+            assert!(in_thread_stack_guard(bottom - 1) && in_thread_stack_guard(bottom - STACK_GUARD));
+            assert!(!in_thread_stack_guard(bottom) && !in_thread_stack_guard(top - 1));
+        }
+        assert_eq!(thread_stack(MAX_THREADS - 1).0 - STACK_GUARD, THREAD_STACKS_BOTTOM);
+        assert!(!in_thread_stack_guard(THREAD_STACKS_TOP) && !in_thread_stack_guard(THREAD_STACKS_BOTTOM - 1));
+        // bug #21: the largest heap behind the highest possible image ends below a guard gap
+        assert!(USER_IMAGE_END + HEAP_MAX + STACK_GUARD <= THREAD_STACKS_BOTTOM);
+        assert!(THREAD_STACKS_TOP + STACK_GUARD <= USER_STACK_TOP - USER_STACK_MAX);
     }
 
     #[test_case]
