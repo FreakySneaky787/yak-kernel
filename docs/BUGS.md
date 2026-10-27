@@ -238,6 +238,14 @@ Format: number · date · title, then symptom → cause → fix → test.
 - **Remember:** a test that waits for timeouts must be sized against the time limit of the machine it runs on, with
   room to spare – the CI uses 120 s, a developer machine 30 s.
 
+### #23 · 2026-10-27 · The DNS timeout E2E step expected an exact duration
+- **Symptom:** `make e2e-uefi` on the 1.0.0 commit: `time host silent.yak.test …` printed `real 5.152603 s`, the step
+  expected `real 4.`.
+- **Cause:** the test (M58). 3 tries of 1.5 s are at least 4.5 s; how much longer depends on the machine.
+- **Fix:** the step now only forbids giving up too early (`real 0.` … `real 3.`); the step's own timeout catches a hang.
+- **Test:** `make e2e` and `make e2e-uefi` green.
+- **Remember:** the same lesson as #22 – assert a lower bound for timeouts, never an exact time.
+
 ## Known pitfalls (not bugs, but worth remembering)
 - **The Limine host utility (`limine bios-install`) needs a C compiler** (`gcc`). It is not required for booting the ISO
   in QEMU with `-cdrom`; it is only needed to make the ISO bootable as a hard disk / USB image.

@@ -1,7 +1,8 @@
 # Project goals
 
 > **Status:** I (FreakySneaky787, the author of YAK) decided the direction on 2026-10-26 (learning platform, see "Direction" and `docs/ROADMAP.md`);
-> the release criteria below are still a proposal. Changes to this file need my agreement.
+> I released 1.0.0 on 2026-10-27 against the criteria below (the outside reader of "Understanding" was not yet found –
+> I decided not to wait for it; it stays open for 1.0.x). Changes to this file need my agreement.
 
 ## Name
 **YAK – Yet Another Kernel.** (My decision of 2026-10-26, replacing the earlier working name KernelTry; it matches

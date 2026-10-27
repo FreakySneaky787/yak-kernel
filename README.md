@@ -10,8 +10,8 @@ book with navigation and search.
 
 ![YAK shell running in QEMU: uname, cpu, netinfo, ps and df](docs/images/shell.png)
 
-> **Status:** pre-release **0.8.0** – a hobby / learning project, working towards release 1.0 (see [docs/GOALS.md](docs/GOALS.md) and
-> stage 8 in [docs/PROGRESS.md](docs/PROGRESS.md)). The project is developed together with an AI assistant.
+> **Status:** release **1.0.0** – a hobby / learning project (see [docs/GOALS.md](docs/GOALS.md) and
+> [docs/PROGRESS.md](docs/PROGRESS.md)); next comes the course. The project is developed together with an AI assistant.
 
 ## What is in it
 | Area | What YAK does |
@@ -100,7 +100,6 @@ the kernel starts. The in-kernel tests assume the default 256 MiB.
 | [docs/BUGS.md](docs/BUGS.md) | every bug found so far: symptom, cause, fix, test |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | where the project is going: a chapter-by-chapter course on its own website |
 | [docs/PROGRESS.md](docs/PROGRESS.md) | milestones, log, open items, next step |
-| [CLAUDE.md](CLAUDE.md) | all `make` targets, debugging helpers and the source layout |
 
 ## Tests
 - `make test` – unit tests and integration test kernels, headless in QEMU (each aborts after 30 s).

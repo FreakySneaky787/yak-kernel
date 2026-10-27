@@ -1,7 +1,7 @@
 # Extending YAK
 
 Recipes for the four most common changes. Each one ends with the tests that prove it works – a change without a test
-is not finished (see `CLAUDE.md`). Run `make check` before every commit.
+is not finished. Run `make check` before every commit.
 
 ## Add a system call
 Example in the tree: `uname` (syscall 52), added by following exactly these steps.
@@ -48,7 +48,6 @@ Example in the tree: `uname` (syscall 52), added by following exactly these step
    gets it in `/bin` (`scripts/mkdisk.sh`, `scripts/install-user.sh`). Type its name in the shell.
 3. Test it: a `run("<name>", "args")` with assertions in [`userspace.rs`](../kernel/tests/userspace.rs), and an E2E
    step in [`e2e-shell.py`](../scripts/e2e-shell.py) if it matters at the shell prompt.
-4. Add it to the program list in `CLAUDE.md` (layout section).
 
 ## Add a test
 | Kind | Where | Runs | Use it for |
