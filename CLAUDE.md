@@ -29,6 +29,7 @@ wanted / decided".
 | `make soak` | long mixed workload on a scratch disk (`SOAK_ROUNDS`, default 10, ~10 s per round) |
 | `make stress` | reliability gate: suite `STRESS_N` (5) times with 1/2/4 CPUs, `qemu64`, UEFI, then soak – about 30 min under TCG |
 | `make book` | build the website (mdBook over `docs/`, `book.toml`) into `build/book`; fails on broken links (needs `mdbook`, see `make deps`) |
+| `make release` | release files in `build/release` (ISO, disk image, `run-yak.sh`, `SHA256SUMS`), booted once with BIOS and UEFI; checklist in `docs/RELEASING.md` |
 | `make course` | course: static checks + `make test` in every chapter folder `course/NN-slug/` (`scripts/check-course.py`) |
 | `make fmt` | rustfmt over the kernel (commit formatting separately) |
 | `make disk` / `make disk-reset` | create / recreate the persistent FAT32 disk `build/disk.img` from `rootfs/` |
@@ -99,7 +100,8 @@ Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.s
   `fpu.rs` (x87/SSE/AVX enable, XSAVE/FXSAVE areas), `cpu.rs` also SMEP/SMAP + `user_access`, `smp.rs` (AP trampoline, INIT/SIPI, `run_on`), `tsc.rs` (µs clock), interrupt helpers in `mod.rs`
 - `kernel/tests/` – integration tests (each one is a separate kernel; `reclaim.rs` is the only one that reclaims bootloader memory, `smap.rs` checks SMEP/SMAP, `netfault.rs` TCP with lost packets)
 - `kernel/linker.ld` – higher-half layout at `0xffffffff80000000`
-- `scripts/run-qemu.sh` – cargo runner: builds the ISO and starts QEMU; `scripts/check-deps.sh` – host tool check (`make deps`)
+- `scripts/run-qemu.sh` – cargo runner: builds the ISO (`scripts/mkiso.sh`) and starts QEMU; `scripts/release.sh`,
+  `scripts/run-yak.sh` (start script shipped with a release), `scripts/check-release.py` – release files; `scripts/check-deps.sh` – host tool check (`make deps`)
 - `docs/` – also the website source: `docs/SUMMARY.md` (navigation), `docs/index.md` (home page); `scripts/build-book.py`
   builds it and points links to files outside `docs/` at GitHub; `.github/workflows/check.yml` (CI: `make check` on
   Ubuntu + Fedora, `make book`), `.github/workflows/pages.yml` (deploys the website from `main`)

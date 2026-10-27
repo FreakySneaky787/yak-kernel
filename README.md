@@ -29,6 +29,21 @@ Everything above is our own code. The only crates are `limine` (boot protocol) a
 
 What it is **not**: a Linux replacement, POSIX-compatible, a desktop system or a driver collection for real hardware.
 
+## Try it without building
+Every [GitHub release](https://github.com/FreakySneaky787/yak-kernel/releases) from 1.0 on carries ready-made
+files: `yak-<version>.iso` (kernel + bootloader, boots with BIOS and UEFI), `yak-<version>-disk.img.gz` (the
+FAT32 disk with `/bin` and the sample files), `run-yak.sh` and `SHA256SUMS`. Download the files of one release into
+a directory, install QEMU (package `qemu-system-x86` on Fedora, Debian and Ubuntu), then:
+```sh
+sha256sum -c SHA256SUMS     # the files arrived intact
+./run-yak.sh                # QEMU window; the serial console is in this terminal
+./run-yak.sh --headless     # no window: work in this terminal (Ctrl+A X quits QEMU)
+./run-yak.sh --uefi /usr/share/OVMF/OVMF_CODE_4M.fd   # through UEFI (Fedora: /usr/share/edk2/ovmf/OVMF_CODE.fd)
+```
+The disk image is unpacked on the first start and keeps what you write to it; delete `yak-<version>-disk.img` to
+start fresh. Every release's files were booted once before they were attached (BIOS and UEFI: shell, `uname`, the
+programs in `/bin`, `poweroff`). To change YAK you need the source: see "Quick start".
+
 ## Quick start
 Host packages (names for Fedora / Debian-Ubuntu):
 
