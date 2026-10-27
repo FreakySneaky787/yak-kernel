@@ -91,7 +91,7 @@ Still open: N for `make stress` (proposal: 5), whether CI is wanted (M40b), whet
 | # | Milestone | Status | Tests |
 |---|---|---|---|
 | 47 | CI: `.github/workflows/check.yml` runs `make check` on ubuntu-24.04 and in a `fedora:latest` container (QEMU TCG, pinned toolchain, 120 s per test kernel, `build/` uploaded on failure); CI badge in the README | ✅ | first run red on both (bug #17: shootdown test limit too strict for CI runners), then green on both: all kernel tests, all test disks fsck-clean, 127/127 E2E steps BIOS + UEFI |
-| 48 | Release prep for 1.0.0: `CHANGELOG.md` "Unreleased" section (CI, website, #17–#19); version, `make stress` and the tag follow when the outside-reader feedback is in (I create the tag) | 🔨 | – |
+| 48 | Release 1.0.0: version in both manifests, `CHANGELOG.md` section 1.0.0, release checklist `docs/RELEASING.md` followed; I decided not to wait for the outside reader (stays open) | ✅ | `make check`, `make course`, `make book`, `make release` (`yak-1.0.0.*` booted BIOS + UEFI), `make stress`; `uname` shows `YAK 1.0.0 x86_64` |
 
 ## Stage 10: course infrastructure (roadmap phase B)
 | # | Milestone | Status | Tests |
@@ -440,6 +440,8 @@ fault tests and a downloadable release. 1.0.0 itself still waits for the outside
   20 × E2E 135/135 with 1/2/4 CPUs and `qemu64`/UEFI, every `make test` green (TCP loss test ≤ 5.0 s), soak 10 rounds,
   about 33 min in total.
 
+- **2026-10-27** – M48: version 1.0.0. I decided to release without waiting for the outside reader.
+
 ## Known limitations of release 1.0 (sorted in M42)
 Release blockers were defined as "a program can crash, hang or exhaust the kernel" (`docs/GOALS.md`: isolated
 programs, reliability). All of those found so far are fixed (bugs #11–#16). The rest are **documented limitations**:
@@ -476,15 +478,13 @@ they make YAK smaller than a production system, but they do not break the promis
 - `ps` CPU percentages only cover threads that still exist (dead threads are reaped with their counters).
 - Under TCG (no KVM) `make check` takes about 2 minutes on a warm build, `make stress` (5 passes) about 30 minutes.
 
-## Missing for 1.0
-- **A first reader**: somebody who did not build YAK follows README → walkthrough 01 → one experiment and
-  reports where they got stuck. That is the real test of the "understandable" goal.
-- **`docs/GOALS.md`** is still marked "proposal" – I confirm it (or change it).
-- Decisions: CI (M40b); license headers (`SPDX-License-Identifier: GPL-3.0-or-later`) in every source file – optional,
-  the GPL's "How to Apply" recommends a notice per file.
+## Open after 1.0
+- **A first reader**: somebody who did not build YAK follows README → the course → one experiment and reports where
+  they got stuck. That is the real test of the "understandable" goal.
+- Optional: license headers (`SPDX-License-Identifier: GPL-3.0-or-later`) in every source file – the GPL's "How to
+  Apply" recommends a notice per file.
 
 ## Next step
-**Pilot complete – stop here for feedback** (agreed): I and at least one outside reader go through chapters
-1–4 (website https://freakysneaky787.github.io/yak-kernel/ or `docs/course/`) and report what was unclear. Then
-adjust the chapter format and continue with chapter 5 (interrupts and exceptions). Stage 11 (M51–M53, follow-up of
-the outside review) is done.
+**1.0.0 is prepared.** I create the tag `v1.0.0` on the merge commit and publish the GitHub release
+(`docs/RELEASING.md`, steps 6–8); the workflow attaches the files. Then: feedback on the pilot chapters 1–4 (me and
+an outside reader), adjust the chapter format, continue with chapter 5 (interrupts and exceptions).

@@ -285,7 +285,9 @@ STEPS = [
     (f"host fail.yak.test 10.0.2.2 {DNS_PORT}\r", ["host: fail.yak.test: server error 2"], ["has address"]),
     (f"host cname.yak.test 10.0.2.2 {DNS_PORT}\r", ["no address in the answer"], ["has address"]),
     (f"host noise.yak.test 10.0.2.2 {DNS_PORT}\r", ["noise.yak.test has address 10.0.2.2"], ["error", "malformed"]),
-    (f"time host silent.yak.test 10.0.2.2 {DNS_PORT}\r", ["host: silent.yak.test: timed out", "real 4."], ["has address"]),
+    (f"time host silent.yak.test 10.0.2.2 {DNS_PORT}\r", ["host: silent.yak.test: timed out", "real "],
+     # 3 tries of 1.5 s: never sooner than 4 s (later is fine on a busy machine, bug #23)
+     ["has address", "real 0.", "real 1.", "real 2.", "real 3."]),
     ("host --selftest\r", ["host selftest: all checks passed"], ["FAIL"]),
     (f"wget http://10.0.2.2:{HTTP_PORT}/hello\r", ["Hello from the host over HTTP", "200 OK"], ["error"]),
     (f"wget -O /fetched.txt http://10.0.2.2:{HTTP_PORT}/hello\r", ["200 OK"], ["error"]),

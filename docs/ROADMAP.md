@@ -3,7 +3,7 @@
 > Decided by me (FreakySneaky787, the author of YAK) on 2026-10-26. Phases are worked off as stages in `docs/PROGRESS.md`.
 
 ## Context
-YAK 0.8.0 is published (pre-release): a working x86-64 kernel (M1–M46) with tests, walkthroughs and
+YAK 0.8.0 was published as a pre-release: a working x86-64 kernel (M1–M46) with tests, walkthroughs and
 experiments. I decided the direction for the next 1–2 years:
 - **What:** a learning platform (not a feature-race hobby OS, not a lab).
 - **For whom:** self-learners and hobby kernel developers.
@@ -29,7 +29,7 @@ diff to the previous one.
 
 ## Roadmap
 
-### Phase A – finish 1.0 of the reference kernel (short)
+### Phase A – finish 1.0 of the reference kernel (short) – done, 1.0.0 on 2026-10-27
 1. **CI** (`.github/workflows/check.yml`): `make check` on Ubuntu and in a Fedora container under QEMU TCG
    – this also closes the open release criterion "fresh Fedora host". Reuse `make deps` for package names.
 2. I confirm `docs/GOALS.md` (rewritten for the learning-platform direction, see Phase B).
@@ -45,7 +45,7 @@ diff to the previous one.
    branch, every claim backed by a test or a recorded run – same honesty rule as `docs/EXPERIMENTS.md`).
 3. **Chapter branches:** naming `course/NN-slug`; a script that checks a chapter branch builds and passes its tests
    and that the book's code excerpts match the branch (extension of `check-doc-refs.py`); CI runs it for all chapters.
-4. Update `docs/GOALS.md` and `CLAUDE.md` (layout, workflow for chapters).
+4. Update `docs/GOALS.md` (layout, workflow for chapters).
 
 ### Phase C – pilot: Part I (chapters 1–4), then feedback
 Write chapters 1–4 fresh as a clean linear history (not cut out of today's mixed commits):

@@ -1,7 +1,7 @@
 # Changelog
 
-## Unreleased (towards 1.0.0)
-Stages 9 to 12 (`docs/ROADMAP.md`, phases A–C; `docs/PROGRESS.md`).
+## 1.0.0 (2026-10-27)
+The first stable release: a reliable, text-based x86-64 system for QEMU (`docs/GOALS.md`). Stages 9 to 12 (`docs/ROADMAP.md`, phases A–C; `docs/PROGRESS.md`).
 
 **Shell and console**
 - `/bin/sh`: command substitution `$(...)`, `"$@"` / `"$*"`, `case … esac`, `local` variables in functions; an

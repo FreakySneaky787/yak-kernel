@@ -1,4 +1,4 @@
-# YAK - entry point for all tasks. See CLAUDE.md.
+# YAK - entry point for all tasks. See README.md and docs/HACKING.md.
 SHELL      := /bin/bash
 CARGO      := source $$HOME/.cargo/env && cd kernel && cargo
 LIMINE_DIR := vendor/limine
