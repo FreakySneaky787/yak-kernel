@@ -1,7 +1,27 @@
 # Changelog
 
 ## Unreleased (towards 1.0.0)
-Stage 9 and the start of stage 10 (`docs/ROADMAP.md`, phases A and B).
+Stages 9 to 12 (`docs/ROADMAP.md`, phases A–C; `docs/PROGRESS.md`).
+
+**Shell and console**
+- `/bin/sh`: command substitution `$(...)`, `"$@"` / `"$*"`, `case … esac`, `local` variables in functions; an
+  assignment the environment cannot hold (> 4096 bytes) is an error instead of being lost.
+- Input lines up to 4096 characters, edited over several screen rows (was: 120 characters); the console understands
+  the cursor movement sequences `ESC[nA/B/C/D`.
+
+**Kernel**
+- Thread stacks have an unmapped guard below them: a thread's stack overflow kills the process instead of overwriting
+  the heap (`thread_spawn` with stack 0 = kernel-chosen slot).
+- UDP checksums are verified on receipt.
+
+**Release and tests**
+- Release files: a bootable ISO, the disk image, `run-yak.sh` – YAK runs with nothing but QEMU (README, "Try it
+  without building"); attached to every GitHub release by `.github/workflows/release.yml`; checklist
+  `docs/RELEASING.md`.
+- README "Supported environment" with measured RAM limits (BIOS from 24 MiB, UEFI from 160 MiB).
+- Fault tests: a disk that fails at every single I/O of seven file operations (FAT32 stays mountable, only
+  fsck-repairable damage); TCP with lost packets, a silent peer and connect timeouts (`kernel/tests/netfault.rs`);
+  a misbehaving DNS server.
 
 **Name**
 - The project is now called **YAK – Yet Another Kernel** (formerly KernelTry): boot banner, `uname`, disk label,
@@ -13,7 +33,9 @@ Stage 9 and the start of stage 10 (`docs/ROADMAP.md`, phases A and B).
 - Website: the documentation as a book (mdBook over `docs/`, `make book`), deployed to GitHub Pages from `main`.
 - `docs/ROADMAP.md`: the plan to turn YAK into a course that rebuilds the kernel chapter by chapter.
 
-**Fixed** (found by the new CI, see `docs/BUGS.md`)
+**Fixed** (see `docs/BUGS.md`)
+- #21: a program's heap could grow into its stack area.
+- #20: `docs/DESIGN.md` said there was no block cache (found by an outside review).
 - #19: a new process could run its first syscall before its process table entry existed (SMP race in `spawn_with`);
   the user-space panic handler needed the heap and recursed when an allocation failed.
 - #18: `sleep_ms` could end up to one tick early.

@@ -116,6 +116,20 @@ documented limitation.
 | 52 | Guard pages for thread stacks: 64 kernel stack slots `[64 KiB guard][256 KiB stack]` below the main stack, `thread_spawn` with stack 0, slots freed after the thread ended; `USER_IMAGE_END` lowered so the heap cannot reach the stacks (bug #21) | ✅ | `thread_stack_slots_have_guards` (layout, guards, bug #21); `fault thread-stack` killed with "stack overflow in a thread" in the page below slot 0; `threadtest`: 200 KiB on a thread stack, 100 threads in a row, 70 unjoined threads then one more; `make test` with 1, 2 and 4 CPUs |
 | 53 | Disk fault tests: `FaultyDisk` fails I/O number n (transient, or power loss with a torn write); a volume checker (lost clusters, cross-links, broken chains, chain vs. size, FAT copies); results written down in `docs/DESIGN.md` "File system" | ✅ | `fault_tests::every_failing_io_is_reported_and_leaves_a_mountable_volume` (7 operations × every I/O × 2 failure kinds: error reported, volume mounts, untouched files intact, target old or new, only fsck-repairable damage), `the_volume_stays_usable_after_a_failed_operation`, `the_checker_sees_damage` |
 
+## Stage 12: what 1.0 still needs (decided 2026-10-27)
+An outside recommendation for 1.0, checked against the repository: most of it exists. I decided to add the gaps it
+names before 1.0 – the supported environment written down, the missing shell constructs, long input lines, network
+fault tests and a downloadable release. 1.0.0 itself still waits for the outside reader (M48).
+
+| # | Milestone | Status | Tests |
+|---|---|---|---|
+| 54 | Supported environment: README section (QEMU q35/TCG, BIOS + UEFI, 1–4 cores, `max`/`qemu64`, devices, hosts), measured RAM limits, `KERNEL_MEM` in `run-qemu.sh` | ✅ | `make e2e` 127/127 at 24, 32, 48, 64, 96, 128 MiB, fails at 16 MiB; `make e2e-uefi` 127/127 at 160 MiB, fails at 64/96/128 MiB (bootloader out of memory under OVMF – the CPU never leaves firmware code, `-d int` log) |
+| 55 | Shell: `$(...)` (runs in the shell with subshell semantics, a thread drains the pipe) and `"$@"`/`"$*"`/`$@`; an assignment that does not fit the environment is an error instead of silently lost | ✅ | `/m55.sh` in the userspace integration test (fields, nesting, quotes inside, multi-line output, restored state, `exit` + `$?`, "$@" with spaces and without arguments, 1000 lines ≈ 81 KB through one substitution, too long a value); E2E step at the prompt |
+| 56 | Shell: `case … in … ;; esac` (alternatives, wildcards, quoted patterns literal) and `local` (dynamic scope, restored on return) | ✅ | `/m56.sh` in the userspace integration test (8 subjects incl. empty, `(pattern)` form, no match → status 0, nested functions, `local` without value, outside a function → error); E2E step `case $(uname) in …` |
+| 57 | Line editor: lines up to 4096 characters over several rows (row/column per position, `ESC[nA/B/C` across rows, pending-wrap safe), console understands `ESC[nA/B/C/D` | ✅ | 4 new editor tests on two simulated terminals (wrap, edit across rows, shorter line clears rows, Enter below a long line) – fail without the pending-wrap step; `console::tests::ansi_cursor_moves`; E2E: a 185-character line edited at its start; screenshot checked |
+| 58 | Network fault tests: loss injection on the loopback path (`net::set_loopback_loss`), TCP retry limit settable, retransmission counter; misbehaving fake name server in the E2E test | ✅ | `kernel/tests/netfault.rs`: 3 echoes of 8 KB with every 10th packet lost (5–14 retransmission timeouts, 2.7–6.1 s under full CPU load, data intact; first version with 20 KB / every 5th packet: bug #22), connect into silence → `TimedOut` after 1.5 s, silent peer → `TimedOut` after 3.0 s with 3 retries; E2E: NXDOMAIN, SERVFAIL, CNAME only, stray + truncated replies, silence (4.5 s, "timed out"); `host --selftest` +4 malformed-answer checks. No bug found |
+| 59 | Release files: `make release` (`scripts/release.sh`) builds `yak-<version>.iso` (`scripts/mkiso.sh`, shared with `run-qemu.sh`), the disk image with `/bin` (gzip), `run-yak.sh` and `SHA256SUMS` and boots them once (`scripts/check-release.py`); `.github/workflows/release.yml` attaches them to a published GitHub release; README "Try it without building"; checklist `docs/RELEASING.md` | ✅ | `make release`: BIOS and UEFI boot of the files with `run-yak.sh` (shell, `uname` = version, `/bin` ≥ 30 programs, `$(...)`, `poweroff`); negative check: a disk without `/bin` fails; `make check` green after moving the ISO build into `mkiso.sh` |
+
 ## Log
 - **2026-10-24** – Setup: Rust nightly 1.101 (rustup), target `x86_64-unknown-none`, Limine v11.x-binary.
   M1: kernel boots via BIOS and UEFI, prints "Hello from KernelTry!" on serial, colour bars on the framebuffer (1280×800×32).
@@ -421,6 +435,11 @@ documented limitation.
   while laying out the thread stacks. M53's fault tests found no bug, but two kinds of damage beyond lost clusters
   (chain longer than size, two names after rename) – both inherent to FAT32 without a journal, now documented.
 
+- **2026-10-27** – Stage 12 (M54–M59). `make stress` (5 passes) on the M59 commit: first red – the new TCP loss test
+  ran into the 30 s limit of its test kernel with 4 CPUs (bug #22, the test's size, not a hang); after the fix green:
+  20 × E2E 135/135 with 1/2/4 CPUs and `qemu64`/UEFI, every `make test` green (TCP loss test ≤ 5.0 s), soak 10 rounds,
+  about 33 min in total.
+
 ## Known limitations of release 1.0 (sorted in M42)
 Release blockers were defined as "a program can crash, hang or exhaust the kernel" (`docs/GOALS.md`: isolated
 programs, reliability). All of those found so far are fixed (bugs #11–#16). The rest are **documented limitations**:
@@ -435,10 +454,11 @@ they make YAK smaller than a production system, but they do not break the promis
 **User space**
 - No AVX-512; the ELF image is mapped eagerly (heap and stack on demand); no thread-local storage; thread stacks are
   fixed at 256 KiB (64 slots); no SIGCHLD/SIGSTOP/alarm, no signal masks; a CPU exception cannot be caught as a signal.
-- `/bin/sh`: no `$(...)`, `case`, `local`, here-documents or `"$@"`; `&&`/`||`/`|`/`&` must be separate words;
+- `/bin/sh`: no here-documents, no `[...]` character classes in patterns; variables hold up to 4096 bytes (256 of them); `&&`/`||`/`|`/`&` must be separate words;
   functions are not inherited by `sh -c` background shells; built-ins, functions and loops inside a pipeline must fit
   their output into one pipe (64 KiB) – more blocks until Ctrl+C; background jobs share the keyboard with the shell.
-- The line editor handles one console row (input capped at 120 characters).
+- Input lines up to 4096 characters; on a serial terminal they wrap correctly only if it is at least as wide as the
+  console (160 columns).
 - `kshell`/`kcommands` bridge the commands that are still kernel built-ins: cpu, acpi, lspci, disk, hexdump, memmap,
   layout, demo, colors, version, int3, panic, reboot, poweroff, write, append, echo, sleep, clear, help. Without `/bin`
   on the disk, the kernel shell has no `ls`/`cat`.

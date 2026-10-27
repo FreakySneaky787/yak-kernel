@@ -269,6 +269,20 @@
   `if`/`while` conditions and for all but the last pipeline of `&&`/`||`. Ctrl+C: the shell's SIGINT handler (and a
   child killed by SIGINT) sets `INTERRUPTED`, which every list and loop checks; at the prompt the line is cancelled.
   Wildcards: the expander marks unquoted `*`/`?` with private-use characters, `glob.rs` matches them per path component.
+- **Command substitution and `"$@"`** (M55): `$(...)` stays inside its word when tokenizing (`syntax::subst_end` skips
+  quotes and nested parentheses). At expansion `Shell::substitute` parses the text and runs it *in the shell* with
+  stdout on a pipe, while a second thread (`ulib::thread`) drains the pipe – so the output can exceed the 64 KiB pipe.
+  Afterwards variables, the directory, functions and `$@` are restored, which gives subshell semantics without a new
+  process (functions keep working inside); `exit` ends only the substitution, `$?` is its last status. Because expansion
+  produces text that `parser::split` splits again, substituted output and arguments are inserted *quoted*: in double
+  quotes as one escaped string, unquoted as one quoted word per field, after `NAME=` as one word (no splitting).
+  `"$@"` closes and reopens the quotes between the arguments; without arguments it produces no word. Variables live in
+  the kernel's per-process environment: values up to 4096 bytes, up to 256 variables – a larger assignment is an error.
+- **`case` and `local`** (M56): `;;` is its own token; a pattern is a raw word ending in `)` (an optional leading `(`,
+  alternatives split at unquoted `|`), its body a list ended by `;;` or `esac`. Subject and patterns are expanded without
+  splitting; unquoted `*`/`?` in a pattern are wildcards (`glob::matches`), no `[...]` classes. `local` records the
+  variable's old value in the running function's frame (`Shell::locals`); `call` restores the frame in reverse order when
+  the function returns, so nested functions see the caller's locals (dynamic scope, like bash).
 - **Files**: each process has a cwd (inherited from the spawner, paths are normalized against it) and up to 32 file descriptors
   (`process::Handle`): 0 stdin, 1/2 the process's `Output`, then files (path + one offset for reads and writes, shared
   with `dup`-ed and inherited copies like a POSIX open file description – the shell's save/restore of fds 0-2 depends
@@ -335,6 +349,16 @@
   to 3 requests. IPv4: no options sent, fragments dropped, DF set. ICMP: echo requests answered, replies with our id recorded.
   UDP: ports map to bounded queues (64 datagrams); checksums sent and verified on receipt (a datagram with a wrong
   checksum is dropped; checksum 0 = "none computed" is accepted, as RFC 768 allows for IPv4).
+- **Network faults** (M58): `net::set_loopback_loss(n, phase)` drops every n-th packet sent to ourselves (always compiled,
+  off by default – an atomic load per loopback packet); `tcp::set_max_retries` lowers the retry limit (default 8),
+  `tcp::retransmissions` counts expired retransmission timeouts. `kernel/tests/netfault.rs` checks with them: with every
+  10th packet lost (first loss = SYN, SYN-ACK or the first ACK) an echo of 8 KB comes back intact; a connect into
+  silence fails with `TimedOut` after its timeout; a peer that goes silent ends the connection after the retries
+  (measured 3.0 s for 3 retries from a 200 ms timeout: 0.2 + 0.4 + 0.8 + 1.6 s). Without an RTT sample (only the
+  handshake was acknowledged) the timeout starts at 1 s – with the default 8 retries a dead peer is noticed after about
+  a minute. DNS (`ulib::dns`) is checked against a name server that misbehaves (E2E): NXDOMAIN, server failure, an
+  answer without A record, a stray and a truncated reply before the real one, and silence (3 tries of 1.5 s, then
+  "timed out").
 - **User API**: `ping` (one echo, waits ≤ timeout), `udp_socket` → `Handle::Udp(Arc<UdpSocket>)` (port released when the last
   descriptor closes), `sendto` / `recvfrom` (timeout, abortable by kill), `net_info`. Small state locks are taken with
   interrupts off; the NIC lock with interrupts on (it is never needed by `wait_for` conditions).
@@ -406,8 +430,15 @@ One GDT and TSS per CPU (`gdt::init_cpu`), same layout everywhere. The user data
 ## Input and shell
 - Two input sources, one API: `input::read_key()` returns `KeyEvent`s from the PS/2 keyboard (scancode decoder) or from COM1
   (`TerminalDecoder`: UTF-8, CR/LF, DEL, Ctrl+letter, ANSI arrows/Home/End/Delete). It sleeps race-free with `sti; hlt`.
-- The line editor only emits a terminal-compatible byte stream (`\x08` = cursor left, characters overwrite), so the same output
-  works on the framebuffer console and on a serial terminal. No cursor-addressing escape sequences are needed.
+- The line editor only emits a terminal-compatible byte stream (`\x08` = cursor left, characters overwrite, `ESC[nA`/`B`/`C`
+  for up/down/right), so the same output works on the framebuffer console and on a serial terminal. Lines up to 4096
+  characters span several rows (M57): the editor knows the width (`set_width`: console columns, `termsize` in `/bin/sh`)
+  and the prompt's visible width, maps every buffer position to (row, column) and moves across rows with `ESC[nA`/`ESC[nB`
+  + `\r` + `ESC[nC` – a backspace never crosses a row. After a character in the last column, terminals keep the cursor
+  there ("pending wrap"); output that ends at a row boundary is followed by `" \r"`, which puts the cursor at the next
+  row's start on every terminal. The unit tests run every edit on two simulated terminals (our console's and xterm's
+  pending-wrap behaviour) and require the same picture. Limit: the width is the console's – a serial terminal narrower
+  than 160 columns shows lines longer than its width wrongly.
 - Commands are a static table (`shell::COMMANDS`) of `fn(&mut Shell, &[String], &mut dyn Write) -> Result<(), String>`;
   unit tests run them against a `String`. Errors are printed in red by the shell, not by the commands.
 - `poweroff`: ACPI PM1a control port 0x604 (QEMU q35), fallback isa-debug-exit. `reboot`: 8042 reset line, fallback triple fault.

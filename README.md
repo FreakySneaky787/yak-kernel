@@ -23,11 +23,26 @@ book with navigation and search.
 | Processes | ring 3, one address space per process, ELF loader, 53 syscalls, signals, pipes, environment variables |
 | Storage | PCI, AHCI SATA driver with MSI, sector cache, FAT32 with long file names – persistent across reboots |
 | Network | e1000, Ethernet/ARP/IPv4/ICMP/UDP/TCP, DHCP, DNS client, `wget` and `httpd` |
-| User space | `/bin/sh` (pipes, redirection, scripts, `if`/`while`/`for`, functions, jobs), a full-screen editor and 37 more programs (tools, network clients/servers, self-tests) |
+| User space | `/bin/sh` (pipes, redirection, scripts, `if`/`while`/`for`/`case`, functions with `local`, `$(...)`, jobs), a full-screen editor and 37 more programs (tools, network clients/servers, self-tests) |
 
 Everything above is our own code. The only crates are `limine` (boot protocol) and `spin` (locks).
 
 What it is **not**: a Linux replacement, POSIX-compatible, a desktop system or a driver collection for real hardware.
+
+## Try it without building
+Every [GitHub release](https://github.com/FreakySneaky787/yak-kernel/releases) from 1.0 on carries ready-made
+files: `yak-<version>.iso` (kernel + bootloader, boots with BIOS and UEFI), `yak-<version>-disk.img.gz` (the
+FAT32 disk with `/bin` and the sample files), `run-yak.sh` and `SHA256SUMS`. Download the files of one release into
+a directory, install QEMU (package `qemu-system-x86` on Fedora, Debian and Ubuntu), then:
+```sh
+sha256sum -c SHA256SUMS     # the files arrived intact
+./run-yak.sh                # QEMU window; the serial console is in this terminal
+./run-yak.sh --headless     # no window: work in this terminal (Ctrl+A X quits QEMU)
+./run-yak.sh --uefi /usr/share/OVMF/OVMF_CODE_4M.fd   # through UEFI (Fedora: /usr/share/edk2/ovmf/OVMF_CODE.fd)
+```
+The disk image is unpacked on the first start and keeps what you write to it; delete `yak-<version>-disk.img` to
+start fresh. Every release's files were booted once before they were attached (BIOS and UEFI: shell, `uname`, the
+programs in `/bin`, `poweroff`). To change YAK you need the source: see "Quick start".
 
 ## Quick start
 Host packages (names for Fedora / Debian-Ubuntu):
@@ -56,6 +71,22 @@ make check       # all tests: in-kernel tests, end-to-end shell sessions under B
 The first build downloads the Limine binaries into `vendor/limine`. The keyboard layout is German (QWERTZ) by default.
 
 Try in the shell: `help`, `ls /bin`, `cat /README.txt | wc`, `ps`, `cpu`, `ping 10.0.2.2`, `edit notes.txt`.
+
+## Supported environment
+YAK runs in QEMU only. "Supported" means: `make check` passes there, locally and in CI on every push.
+
+| | Supported (tested) | Not supported / untested |
+|---|---|---|
+| Emulator | QEMU, machine `q35`, TCG (no KVM needed); QEMU 8.2 (Ubuntu 24.04) and the version Fedora currently ships | KVM, other emulators, real hardware |
+| Firmware | BIOS (SeaBIOS, QEMU's default) and UEFI (OVMF / edk2) | |
+| CPU | 1 to 4 cores (`KERNEL_SMP`), CPU models `max` and `qemu64` (no SMEP/SMAP/XSAVE/AVX) | more than 4 cores |
+| RAM | 256 MiB (the default, `KERNEL_MEM`) | see below |
+| Devices | AHCI SATA disk with FAT32 (whole disk or first MBR partition, 512-byte sectors), e1000 with QEMU user networking, PS/2 keyboard, COM1, a 32-bit framebuffer from Limine | USB, NVMe, virtio, other network cards |
+| Host | Linux: Ubuntu 24.04 and Fedora (CI) | macOS, Windows (untested) |
+
+Measured RAM limits (2026-10-27, full end-to-end test, `KERNEL_MEM=… make e2e` / `make e2e-uefi`): BIOS works down to
+24 MiB (16 MiB fails); UEFI needs 160 MiB – with 128 MiB or less the bootloader runs out of memory under OVMF before
+the kernel starts. The in-kernel tests assume the default 256 MiB.
 
 ## Documentation
 | File | Read it for |

@@ -199,6 +199,20 @@ pub fn selftest() -> Vec<&'static str> {
         parse_response(&r[..r.len() - 2], 0x1234) == Err(DnsError::Malformed),
         "truncated answer",
     );
+    // M58: answers that lie about their own size must not be trusted
+    let mut many = r.clone();
+    many[6..8].copy_from_slice(&[0xFF, 0xFF]); // 65535 answers announced, 2 present
+    check(parse_response(&many, 0x1234) == Err(DnsError::Malformed), "answer count too large");
+    let mut long = r.clone();
+    let rdlen = long.len() - 6;
+    long[rdlen..rdlen + 2].copy_from_slice(&[0x01, 0x00]); // last record: 256 data bytes
+    check(parse_response(&long, 0x1234) == Err(DnsError::Malformed), "record longer than the packet");
+    let mut label = q.clone();
+    label[2] = 0x81;
+    label[3] = 0x80;
+    label[12] = 60; // the first label runs past the end
+    check(parse_response(&label, 0x1234) == Err(DnsError::Malformed), "label past the end");
+    check(parse_response(&r[..11], 0x1234) == Err(DnsError::Malformed), "shorter than a header");
     check(resolve("10.0.2.2", [0; 4], 53) == Ok([10, 0, 2, 2]), "IP literal");
     failed
 }

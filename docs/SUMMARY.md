@@ -31,3 +31,4 @@
 - [Goals](GOALS.md)
 - [Roadmap](ROADMAP.md)
 - [Progress](PROGRESS.md)
+- [Making a release](RELEASING.md)

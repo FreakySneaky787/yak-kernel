@@ -29,6 +29,7 @@ wanted / decided".
 | `make soak` | long mixed workload on a scratch disk (`SOAK_ROUNDS`, default 10, ~10 s per round) |
 | `make stress` | reliability gate: suite `STRESS_N` (5) times with 1/2/4 CPUs, `qemu64`, UEFI, then soak – about 30 min under TCG |
 | `make book` | build the website (mdBook over `docs/`, `book.toml`) into `build/book`; fails on broken links (needs `mdbook`, see `make deps`) |
+| `make release` | release files in `build/release` (ISO, disk image, `run-yak.sh`, `SHA256SUMS`), booted once with BIOS and UEFI; checklist in `docs/RELEASING.md` |
 | `make course` | course: static checks + `make test` in every chapter folder `course/NN-slug/` (`scripts/check-course.py`) |
 | `make fmt` | rustfmt over the kernel (commit formatting separately) |
 | `make disk` / `make disk-reset` | create / recreate the persistent FAT32 disk `build/disk.img` from `rootfs/` |
@@ -40,7 +41,8 @@ wanted / decided".
 
 Tests run headless and abort after 30 s (`KERNEL_TEST_TIMEOUT`), so Claude can run them unattended.
 QEMU runs with 4 cores and `-cpu max`; `KERNEL_SMP=1 make test` (or 2, …) checks other core counts – worth doing after scheduler changes;
-`KERNEL_CPU=qemu64 make test` runs without SMEP/SMAP/XSAVE/AVX (fallback paths).
+`KERNEL_CPU=qemu64 make test` runs without SMEP/SMAP/XSAVE/AVX (fallback paths); `KERNEL_MEM=160M` sets the RAM
+(default 256M; limits in README "Supported environment").
 Interrupt problems: QEMU monitor `info pic`, `info lapic`, `info registers`.
 Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.sh` invocation.
 
@@ -96,9 +98,10 @@ Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.s
 - `kernel/src/arch/x86_64/` – CPU specifics: `port.rs` (in/out), `gdt.rs` (GDT+TSS), `idt.rs` (IDT structure),
   `interrupts.rs` (exception handlers, kernel IDT), `syscall.rs` (syscall entry stub, MSRs, `enter_user`), `irq.rs` (IRQ routing + handlers), `lapic.rs` (local APIC + timer), `ioapic.rs`, `pic.rs` (legacy, masked), `pit.rs` (timer calibration), `msr.rs`, `cpu.rs` (cpuid), `power.rs` (reboot/poweroff),
   `fpu.rs` (x87/SSE/AVX enable, XSAVE/FXSAVE areas), `cpu.rs` also SMEP/SMAP + `user_access`, `smp.rs` (AP trampoline, INIT/SIPI, `run_on`), `tsc.rs` (µs clock), interrupt helpers in `mod.rs`
-- `kernel/tests/` – integration tests (each one is a separate kernel; `reclaim.rs` is the only one that reclaims bootloader memory, `smap.rs` checks SMEP/SMAP)
+- `kernel/tests/` – integration tests (each one is a separate kernel; `reclaim.rs` is the only one that reclaims bootloader memory, `smap.rs` checks SMEP/SMAP, `netfault.rs` TCP with lost packets)
 - `kernel/linker.ld` – higher-half layout at `0xffffffff80000000`
-- `scripts/run-qemu.sh` – cargo runner: builds the ISO and starts QEMU; `scripts/check-deps.sh` – host tool check (`make deps`)
+- `scripts/run-qemu.sh` – cargo runner: builds the ISO (`scripts/mkiso.sh`) and starts QEMU; `scripts/release.sh`,
+  `scripts/run-yak.sh` (start script shipped with a release), `scripts/check-release.py` – release files; `scripts/check-deps.sh` – host tool check (`make deps`)
 - `docs/` – also the website source: `docs/SUMMARY.md` (navigation), `docs/index.md` (home page); `scripts/build-book.py`
   builds it and points links to files outside `docs/` at GitHub; `.github/workflows/check.yml` (CI: `make check` on
   Ubuntu + Fedora, `make book`), `.github/workflows/pages.yml` (deploys the website from `main`)

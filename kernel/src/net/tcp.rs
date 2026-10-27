@@ -30,6 +30,7 @@ use crate::arch::x86_64::without_interrupts;
 use crate::time;
 use alloc::collections::{BTreeMap, VecDeque};
 use alloc::vec::Vec;
+use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use spin::Mutex;
 
 pub type ConnId = u64;
@@ -67,7 +68,10 @@ const MAX_IN_FLIGHT_SEGMENTS: usize = 128;
 /// Our window scale: advertised windows count in units of 2^3 bytes.
 const WSCALE_SHIFT: u8 = 3;
 const _: () = assert!(RECV_CAP >> WSCALE_SHIFT <= u16::MAX as usize);
-const MAX_RETRIES: u32 = 8;
+/// Retransmissions of the same data before the connection gives up (`set_max_retries`).
+static MAX_RETRIES: AtomicU32 = AtomicU32::new(8);
+/// Retransmission timeouts so far (all connections).
+static RETRANSMISSIONS: AtomicU64 = AtomicU64::new(0);
 const RTO_INITIAL_US: u64 = 1_000_000;
 const RTO_MIN_US: u64 = 200_000;
 const RTO_MAX_US: u64 = 8_000_000;
@@ -308,7 +312,8 @@ impl Conn {
             return;
         }
         self.retries += 1;
-        if self.retries > MAX_RETRIES {
+        RETRANSMISSIONS.fetch_add(1, Ordering::Relaxed);
+        if self.retries > MAX_RETRIES.load(Ordering::Relaxed) {
             self.segment(TCP_RST, self.snd_nxt, &[], out);
             self.error = Some(TcpError::TimedOut);
             self.state = State::Closed;
@@ -768,6 +773,17 @@ pub fn connections() -> Vec<(State, u16, Ipv4Addr, u16)> {
 }
 
 /// Ports with a listener.
+/// How many retransmission timeouts have expired (all connections, since boot).
+pub fn retransmissions() -> u64 {
+    RETRANSMISSIONS.load(Ordering::Relaxed)
+}
+
+/// For tests: how often unacknowledged data is sent again before the
+/// connection is reset with `TimedOut` (default 8: tens of seconds of silence, the timeout doubles).
+pub fn set_max_retries(n: u32) {
+    MAX_RETRIES.store(n, Ordering::Relaxed);
+}
+
 pub fn listening_ports() -> Vec<u16> {
     locked(|tcp| tcp.listeners.keys().copied().collect())
 }

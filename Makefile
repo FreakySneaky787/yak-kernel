@@ -13,7 +13,7 @@ USER_BIN   := build/user/bin
 OVMF       ?= $(firstword $(wildcard /usr/share/edk2/ovmf/OVMF_CODE.fd /usr/share/OVMF/OVMF_CODE_4M.fd \
                   /usr/share/OVMF/OVMF_CODE.fd) /usr/share/edk2/ovmf/OVMF_CODE.fd)
 
-.PHONY: all deps docs-check course book soak stress limine limine-tool user build run run-uefi debug gdb test e2e e2e-uefi check fmt \
+.PHONY: all deps docs-check course book release soak stress limine limine-tool user build run run-uefi debug gdb test e2e e2e-uefi check fmt \
         disk disk-reset disasm symbols sections addr2line clean distclean
 
 all: build
@@ -68,6 +68,10 @@ e2e-uefi: build
 book:
 	python3 -I scripts/build-book.py --selftest
 	python3 -I scripts/build-book.py
+
+# Release files in build/release: ISO, disk image, start script, SHA256SUMS - booted once before they count
+release: limine
+	scripts/release.sh
 
 # Long-running mix of files, pipes, processes, threads, signals, network and syscall abuse (scripts/soak.py)
 SOAK_ROUNDS ?= 10

@@ -382,6 +382,9 @@ impl Shell {
         let mut out = Stdout;
         loop {
             let prompt = prompt(&self.cwd);
+            if let Some((cols, _)) = crate::console::with_console(|c| c.size()) {
+                self.editor.set_width(cols);
+            }
             self.editor.start(&prompt, &mut out);
             loop {
                 let event = input::read_key();

@@ -95,6 +95,22 @@ static NEXT_IP_ID: AtomicU16 = AtomicU16::new(1);
 static NEXT_EPHEMERAL: AtomicU16 = AtomicU16::new(49152);
 /// IPv4 packets sent to ourselves, waiting for the net thread.
 static LOOPBACK: Mutex<VecDeque<Vec<u8>>> = Mutex::new(VecDeque::new());
+/// Fault injection (M58): drop every n-th loopback packet (0 = none), and the count so far.
+static LOOPBACK_LOSS: AtomicU32 = AtomicU32::new(0);
+static LOOPBACK_SENT: AtomicU32 = AtomicU32::new(0);
+
+/// For tests and experiments: from now on every `n`-th packet sent to
+/// ourselves is lost (0 = none); the first lost one is the `phase`-th next
+/// packet (1-based; 0 = the `n`-th). Packets to other hosts are never touched.
+pub fn set_loopback_loss(n: u32, phase: u32) {
+    LOOPBACK_SENT.store(n.saturating_sub(phase.min(n)), Ordering::SeqCst);
+    LOOPBACK_LOSS.store(n, Ordering::SeqCst);
+}
+
+fn loopback_lost() -> bool {
+    let n = LOOPBACK_LOSS.load(Ordering::Relaxed);
+    n != 0 && LOOPBACK_SENT.fetch_add(1, Ordering::Relaxed) % n == n - 1
+}
 /// The net thread, the card's I/O APIC input (0 = polling) and interrupt bookkeeping.
 static NET_THREAD: AtomicU64 = AtomicU64::new(0);
 static IRQ_GSI: AtomicU32 = AtomicU32::new(0);
@@ -393,6 +409,9 @@ pub fn resolve(ip: Ipv4Addr) -> Result<Mac, NetError> {
 pub fn send_ipv4(dst: Ipv4Addr, protocol: u8, payload: &[u8]) -> Result<(), NetError> {
     let cfg = config().ok_or(NetError::NoDevice)?;
     if dst == cfg.ip {
+        if loopback_lost() {
+            return Ok(()); // "sent", like a frame lost on the wire
+        }
         let id = NEXT_IP_ID.fetch_add(1, Ordering::Relaxed);
         let packet = build_ipv4(cfg.ip, cfg.ip, protocol, id, payload);
         without_interrupts(|| LOOPBACK.lock().push_back(packet));

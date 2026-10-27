@@ -332,6 +332,34 @@ Short explanations of every subsystem: what it is and why we need it.
   that handles them.
 - When a line is not finished (an open quote, an `if` without `fi`), the shell asks for more with the prompt `> `.
 
+## M55 – Using the output of a command
+- `$(command)` runs a command and puts what it printed in its place: `echo "today: $(date)"`, `for f in $(ls)`. The
+  shell connects the command's output to a pipe and reads it back – a second thread reads while the command writes,
+  because a pipe only holds 64 KiB and a writer with nobody reading would wait forever.
+- `"$@"` passes on a script's or function's arguments exactly as they came, each one a separate word even when it
+  contains spaces. `"$*"` glues them into one word; unquoted `$@` splits them again.
+
+## M56 – Choosing by pattern, and variables of your own
+- `case $file in *.txt) …;; *.md) …;; esac` compares one word with patterns in order and runs the first branch that
+  matches – the same `*` and `?` as for file names, applied to a string.
+- `local x=1` inside a function gives the function its own `x`: the old value is saved and put back when the function
+  returns. Functions it calls still see this `x` (*dynamic* scope) – unlike most programming languages.
+
+## M57 – A line longer than the screen
+- A terminal knows nothing about "lines you are editing": it has a cursor and rows. When the text reaches the right
+  edge it continues on the next row – so the editor must work out itself where position 170 of the line is (row 1,
+  column 10 on a 160-column screen) and move the cursor there with "up", "down" and "right" escape sequences.
+- A small trap: after writing in the last column, most terminals leave the cursor *in* that column until the next
+  character arrives. The editor writes a space and returns to the row's start in that case, so it always knows where
+  the cursor really is.
+
+## M58 – Losing packets on purpose
+- A network loses packets all the time; TCP's job is to hide that. The test makes the kernel throw away every tenth
+  packet it sends to itself – data, acknowledgements, even the very first SYN – and checks that the bytes still arrive
+  complete and in order. They do, because every unacknowledged segment is sent again when its timer runs out.
+- How long TCP keeps trying matters too: the wait doubles after each attempt, so a peer that has vanished is noticed
+  only after several attempts. The test measures exactly that time and compares it with the sum it should be.
+
 ## M36 – Threads and futexes
 - A **thread** is a second "line of execution" inside the same program: same memory, same files, own registers and stack.
   For the kernel it is just one more schedulable thread that happens to use the process's page tables.

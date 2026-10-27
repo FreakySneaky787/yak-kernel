@@ -7,7 +7,8 @@
 //! - `\x08` (backspace) moves the cursor one cell left **without** erasing
 //!   (erasing is done with "\x08 \x08", like on real terminals)
 //! - ANSI CSI sequences: `ESC[2J` clear screen, `ESC[H` cursor home,
-//!   `ESC[K` clear to end of line, `ESC[<n>m` colours (0, 1, 30-37, 90-97)
+//!   `ESC[K` clear to end of line, `ESC[<n>m` colours (0, 1, 30-37, 90-97),
+//!   `ESC[<n>A` / `B` / `C` / `D` cursor up / down / right / left (M57)
 //!
 //! The console only knows a `Surface` (pointer + dimensions), so it can be
 //! tested against a plain memory buffer instead of the real screen.
@@ -233,6 +234,16 @@ impl Console {
                 let col = (params.get(1).copied().unwrap_or(1).max(1) as usize - 1).min(self.cols - 1);
                 self.row = row;
                 self.col = col;
+            }
+            'A' | 'B' | 'C' | 'D' => {
+                let n = params[0].max(1) as usize;
+                self.col = self.col.min(self.cols - 1); // a pending wrap is dropped, like on terminals
+                match command {
+                    'A' => self.row = self.row.saturating_sub(n),
+                    'B' => self.row = (self.row + n).min(self.rows - 1),
+                    'C' => self.col = (self.col + n).min(self.cols - 1),
+                    _ => self.col = self.col.saturating_sub(n),
+                }
             }
             'K' => {
                 for col in self.col..self.cols {
@@ -525,6 +536,27 @@ mod tests {
         c.write_str("\x1b[2J").unwrap();
         assert_eq!(c.cursor(), (0, 0));
         assert_eq!(row_text(&c, 0).trim_end(), "");
+    }
+
+    #[test_case]
+    fn ansi_cursor_moves() {
+        let mut buf = [0u32; W * H];
+        let mut c = test_console(&mut buf);
+        c.write_str("0123456789abc").unwrap(); // the line editor's long line: two rows
+        c.write_str("\x1b[1A\r\x1b[4C").unwrap();
+        assert_eq!(c.cursor(), (4, 0));
+        c.write_str("X\x1b[1B\x1b[2D").unwrap();
+        assert_eq!(c.cursor(), (3, 1));
+        c.write_str("\x1b[99C\x1b[99B").unwrap(); // clamped to the screen
+        assert_eq!(c.cursor(), (9, 3));
+        c.write_str("\x1b[9A\x1b[9D").unwrap();
+        assert_eq!(c.cursor(), (0, 0));
+        assert_eq!(row_text(&c, 0), "0123X56789");
+        // after a character in the last column the wrap is pending; a move cancels it
+        c.write_str("\x1b[9C!").unwrap();
+        assert_eq!(c.cursor(), (10, 0));
+        c.write_str("\x1b[1D").unwrap();
+        assert_eq!(c.cursor(), (8, 0));
     }
 
     #[test_case]
