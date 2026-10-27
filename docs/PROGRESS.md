@@ -435,6 +435,11 @@ fault tests and a downloadable release. 1.0.0 itself still waits for the outside
   while laying out the thread stacks. M53's fault tests found no bug, but two kinds of damage beyond lost clusters
   (chain longer than size, two names after rename) – both inherent to FAT32 without a journal, now documented.
 
+- **2026-10-27** – Stage 12 (M54–M59). `make stress` (5 passes) on the M59 commit: first red – the new TCP loss test
+  ran into the 30 s limit of its test kernel with 4 CPUs (bug #22, the test's size, not a hang); after the fix green:
+  20 × E2E 135/135 with 1/2/4 CPUs and `qemu64`/UEFI, every `make test` green (TCP loss test ≤ 5.0 s), soak 10 rounds,
+  about 33 min in total.
+
 ## Known limitations of release 1.0 (sorted in M42)
 Release blockers were defined as "a program can crash, hang or exhaust the kernel" (`docs/GOALS.md`: isolated
 programs, reliability). All of those found so far are fixed (bugs #11–#16). The rest are **documented limitations**:
