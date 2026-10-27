@@ -268,6 +268,7 @@ impl Shell {
 
     /// Reads one line with the line editor; `None` if it was cancelled (Ctrl+C).
     fn read_line(&mut self, prompt: &str) -> Option<String> {
+        self.editor.set_width((sys::termsize() & 0xFFFF_FFFF) as usize);
         self.editor.start(prompt, &mut Stdout);
         loop {
             let mut buf = [0u8; 16];

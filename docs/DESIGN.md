@@ -420,8 +420,15 @@ One GDT and TSS per CPU (`gdt::init_cpu`), same layout everywhere. The user data
 ## Input and shell
 - Two input sources, one API: `input::read_key()` returns `KeyEvent`s from the PS/2 keyboard (scancode decoder) or from COM1
   (`TerminalDecoder`: UTF-8, CR/LF, DEL, Ctrl+letter, ANSI arrows/Home/End/Delete). It sleeps race-free with `sti; hlt`.
-- The line editor only emits a terminal-compatible byte stream (`\x08` = cursor left, characters overwrite), so the same output
-  works on the framebuffer console and on a serial terminal. No cursor-addressing escape sequences are needed.
+- The line editor only emits a terminal-compatible byte stream (`\x08` = cursor left, characters overwrite, `ESC[nA`/`B`/`C`
+  for up/down/right), so the same output works on the framebuffer console and on a serial terminal. Lines up to 4096
+  characters span several rows (M57): the editor knows the width (`set_width`: console columns, `termsize` in `/bin/sh`)
+  and the prompt's visible width, maps every buffer position to (row, column) and moves across rows with `ESC[nA`/`ESC[nB`
+  + `\r` + `ESC[nC` – a backspace never crosses a row. After a character in the last column, terminals keep the cursor
+  there ("pending wrap"); output that ends at a row boundary is followed by `" \r"`, which puts the cursor at the next
+  row's start on every terminal. The unit tests run every edit on two simulated terminals (our console's and xterm's
+  pending-wrap behaviour) and require the same picture. Limit: the width is the console's – a serial terminal narrower
+  than 160 columns shows lines longer than its width wrongly.
 - Commands are a static table (`shell::COMMANDS`) of `fn(&mut Shell, &[String], &mut dyn Write) -> Result<(), String>`;
   unit tests run them against a `String`. Errors are printed in red by the shell, not by the commands.
 - `poweroff`: ACPI PM1a control port 0x604 (QEMU q35), fallback isa-debug-exit. `reboot`: 8042 reset line, fallback triple fault.

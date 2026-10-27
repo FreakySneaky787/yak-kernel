@@ -345,6 +345,14 @@ Short explanations of every subsystem: what it is and why we need it.
 - `local x=1` inside a function gives the function its own `x`: the old value is saved and put back when the function
   returns. Functions it calls still see this `x` (*dynamic* scope) – unlike most programming languages.
 
+## M57 – A line longer than the screen
+- A terminal knows nothing about "lines you are editing": it has a cursor and rows. When the text reaches the right
+  edge it continues on the next row – so the editor must work out itself where position 170 of the line is (row 1,
+  column 10 on a 160-column screen) and move the cursor there with "up", "down" and "right" escape sequences.
+- A small trap: after writing in the last column, most terminals leave the cursor *in* that column until the next
+  character arrives. The editor writes a space and returns to the row's start in that case, so it always knows where
+  the cursor really is.
+
 ## M36 – Threads and futexes
 - A **thread** is a second "line of execution" inside the same program: same memory, same files, own registers and stack.
   For the kernel it is just one more schedulable thread that happens to use the process's page tables.

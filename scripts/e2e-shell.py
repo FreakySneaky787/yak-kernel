@@ -242,6 +242,8 @@ STEPS = [
     ("fault spin | cat\r" + PAUSE + CTRL_C, ["fault was killed: interrupted"], []),
     ("pipetest\r", ["pipetest: all checks passed"], ["FAIL"]),
     ("uname\r", ["YAK ", " x86_64"], ["error"]),
+    # M57: a line longer than a console row (160 columns), edited at its start
+    ("echo " + "long" * 45 + "\x1b[H\x1b[C\x1b[C\x1b[C\x1b[C\x1b[C" + "start-" + "\r", ["start-" + "long" * 45 + "\r\n"], ["error"]),
     # M56: case (and $(...) inside its word)
     ("case $(uname) in yak* | YAK*) echo is-yak ;; *) echo other ;; esac\r", ["\r\nis-yak\r\n"], ["other\r\n", "error"]),
     # M55: command substitution at the prompt
