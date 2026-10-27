@@ -116,6 +116,20 @@ documented limitation.
 | 52 | Guard pages for thread stacks: 64 kernel stack slots `[64 KiB guard][256 KiB stack]` below the main stack, `thread_spawn` with stack 0, slots freed after the thread ended; `USER_IMAGE_END` lowered so the heap cannot reach the stacks (bug #21) | ✅ | `thread_stack_slots_have_guards` (layout, guards, bug #21); `fault thread-stack` killed with "stack overflow in a thread" in the page below slot 0; `threadtest`: 200 KiB on a thread stack, 100 threads in a row, 70 unjoined threads then one more; `make test` with 1, 2 and 4 CPUs |
 | 53 | Disk fault tests: `FaultyDisk` fails I/O number n (transient, or power loss with a torn write); a volume checker (lost clusters, cross-links, broken chains, chain vs. size, FAT copies); results written down in `docs/DESIGN.md` "File system" | ✅ | `fault_tests::every_failing_io_is_reported_and_leaves_a_mountable_volume` (7 operations × every I/O × 2 failure kinds: error reported, volume mounts, untouched files intact, target old or new, only fsck-repairable damage), `the_volume_stays_usable_after_a_failed_operation`, `the_checker_sees_damage` |
 
+## Stage 12: what 1.0 still needs (decided 2026-10-27)
+An outside recommendation for 1.0, checked against the repository: most of it exists. I decided to add the gaps it
+names before 1.0 – the supported environment written down, the missing shell constructs, long input lines, network
+fault tests and a downloadable release. 1.0.0 itself still waits for the outside reader (M48).
+
+| # | Milestone | Status | Tests |
+|---|---|---|---|
+| 54 | Supported environment: README section (QEMU q35/TCG, BIOS + UEFI, 1–4 cores, `max`/`qemu64`, devices, hosts), measured RAM limits, `KERNEL_MEM` in `run-qemu.sh` | ✅ | `make e2e` 127/127 at 24, 32, 48, 64, 96, 128 MiB, fails at 16 MiB; `make e2e-uefi` 127/127 at 160 MiB, fails at 64/96/128 MiB (bootloader out of memory under OVMF – the CPU never leaves firmware code, `-d int` log) |
+| 55 | Shell: `$(...)` and `"$@"` | ⬜ | |
+| 56 | Shell: `case` and `local` | ⬜ | |
+| 57 | Line editor: input longer than one console row | ⬜ | |
+| 58 | Network fault tests: TCP with lost frames, DNS errors and timeouts | ⬜ | |
+| 59 | Release: workflow attaches ISO + disk image + start script to a GitHub release; "run without building" guide; release checklist; fresh `make stress` | ⬜ | |
+
 ## Log
 - **2026-10-24** – Setup: Rust nightly 1.101 (rustup), target `x86_64-unknown-none`, Limine v11.x-binary.
   M1: kernel boots via BIOS and UEFI, prints "Hello from KernelTry!" on serial, colour bars on the framebuffer (1280×800×32).

@@ -57,6 +57,22 @@ The first build downloads the Limine binaries into `vendor/limine`. The keyboard
 
 Try in the shell: `help`, `ls /bin`, `cat /README.txt | wc`, `ps`, `cpu`, `ping 10.0.2.2`, `edit notes.txt`.
 
+## Supported environment
+YAK runs in QEMU only. "Supported" means: `make check` passes there, locally and in CI on every push.
+
+| | Supported (tested) | Not supported / untested |
+|---|---|---|
+| Emulator | QEMU, machine `q35`, TCG (no KVM needed); QEMU 8.2 (Ubuntu 24.04) and the version Fedora currently ships | KVM, other emulators, real hardware |
+| Firmware | BIOS (SeaBIOS, QEMU's default) and UEFI (OVMF / edk2) | |
+| CPU | 1 to 4 cores (`KERNEL_SMP`), CPU models `max` and `qemu64` (no SMEP/SMAP/XSAVE/AVX) | more than 4 cores |
+| RAM | 256 MiB (the default, `KERNEL_MEM`) | see below |
+| Devices | AHCI SATA disk with FAT32 (whole disk or first MBR partition, 512-byte sectors), e1000 with QEMU user networking, PS/2 keyboard, COM1, a 32-bit framebuffer from Limine | USB, NVMe, virtio, other network cards |
+| Host | Linux: Ubuntu 24.04 and Fedora (CI) | macOS, Windows (untested) |
+
+Measured RAM limits (2026-10-27, full end-to-end test, `KERNEL_MEM=… make e2e` / `make e2e-uefi`): BIOS works down to
+24 MiB (16 MiB fails); UEFI needs 160 MiB – with 128 MiB or less the bootloader runs out of memory under OVMF before
+the kernel starts. The in-kernel tests assume the default 256 MiB.
+
 ## Documentation
 | File | Read it for |
 |---|---|

@@ -40,7 +40,8 @@ wanted / decided".
 
 Tests run headless and abort after 30 s (`KERNEL_TEST_TIMEOUT`), so Claude can run them unattended.
 QEMU runs with 4 cores and `-cpu max`; `KERNEL_SMP=1 make test` (or 2, …) checks other core counts – worth doing after scheduler changes;
-`KERNEL_CPU=qemu64 make test` runs without SMEP/SMAP/XSAVE/AVX (fallback paths).
+`KERNEL_CPU=qemu64 make test` runs without SMEP/SMAP/XSAVE/AVX (fallback paths); `KERNEL_MEM=160M` sets the RAM
+(default 256M; limits in README "Supported environment").
 Interrupt problems: QEMU monitor `info pic`, `info lapic`, `info registers`.
 Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.sh` invocation.
 

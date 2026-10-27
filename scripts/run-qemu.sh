@@ -10,6 +10,7 @@
 #   KERNEL_DISK=<img>  use this disk image instead of the default one
 #   KERNEL_SMP=<n>     number of CPU cores (default 4)
 #   KERNEL_CPU=<model> QEMU CPU model (default max; qemu64 has no SMEP/SMAP/XSAVE/AVX)
+#   KERNEL_MEM=<size>  RAM (default 256M; see "Supported environment" in README.md for the minimum)
 #   KERNEL_NETDEV_OPTS extra options for the user-mode network (e.g. hostfwd=udp::5555-:7)
 set -euo pipefail
 
@@ -72,7 +73,7 @@ fi
 
 QEMU_ARGS=(
     # "max": every feature TCG emulates (SMEP, SMAP, XSAVE, AVX/AVX2 ...)
-    -M q35 -m 256M -smp "${KERNEL_SMP:-4}" -cpu "${KERNEL_CPU:-max}"
+    -M q35 -m "${KERNEL_MEM:-256M}" -smp "${KERNEL_SMP:-4}" -cpu "${KERNEL_CPU:-max}"
     -cdrom "$ISO"
     -boot d
     -no-reboot
