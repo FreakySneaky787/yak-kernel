@@ -387,6 +387,17 @@ Short explanations of every subsystem: what it is and why we need it.
   no room for a hole. Now the kernel hands out fixed **stack slots** – stack on top, guard below – and frees a slot once
   its thread has ended.
 
+## M53 – When the disk fails in the middle
+- One file system command is many disk writes: the FAT (which clusters belong together), the data, the directory
+  entry (name, size, first cluster). If the power goes out after some of them, the disk holds a mix of old and new.
+- The order of the writes decides how bad that mix is. YAK writes new data and links it in the FAT *before* the
+  directory entry points to it, and frees old clusters only *after* nothing points to them any more. A cut then
+  leaves at worst clusters that are marked used but belong to no file ("lost clusters") – wasted space, no wrong data.
+- Real file systems (ext4, NTFS) add a **journal**: they first write down what they are about to do, so after a crash
+  they can finish or undo it. FAT32 has no journal; `fsck.fat` cleans up afterwards.
+- The test does not trust this reasoning: a fake disk fails at every single I/O of an operation, and a checker
+  (like a tiny `fsck`) looks at what is left.
+
 ## Tooling – GNU ld and binutils
 - rustc compiles our code into object files; a **linker** combines them into the final ELF according to `kernel/linker.ld`
   (load address, section order, segments). We use **GNU ld** (`ld.bfd`) for that.

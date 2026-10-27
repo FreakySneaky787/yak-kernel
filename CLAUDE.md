@@ -3,7 +3,9 @@
 A kernel written from scratch together with an AI. Runs in QEMU only.
 
 **Language rule:** everything in this repository (docs, code comments, kernel output, commit messages) is **English**.
-The conversation with the user happens in German.
+I talk to Claude in German.
+**Perspective rule:** the docs speak as the author (FreakySneaky787): "I decided …", "my choice" – never "the user
+wanted / decided".
 
 ## Read first
 1. `docs/GOALS.md` – purpose, audience, direction and release criteria
@@ -53,10 +55,10 @@ Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.s
 - Per step: implement → `make check` green → update docs → commit `M<n>: <what>` → push.
 - Every milestone gets at least one test. Every bug fix gets an entry in `docs/BUGS.md` and, if possible, a regression test.
 - At the end of a session, `docs/PROGRESS.md` must say under "Next step" where to continue.
-- Claude implements everything itself (the user decided this); new subsystems get a short explanation in `docs/LEARN.md`.
+- Claude implements everything itself (my decision); new subsystems get a short explanation in `docs/LEARN.md`.
 - "From scratch": GDT, IDT, paging, allocators and drivers are our own code.
   Allowed crates: `limine` (boot protocol), `spin` (locks). Ask before adding new crates.
-- `sudo` cannot be run by Claude (no TTY for the password) – ask the user to run installs in a separate terminal.
+- `sudo` cannot be run by Claude (no TTY for the password) – ask me to run installs in a separate terminal.
 
 ## Layout
 - `kernel/src/lib.rs` – kernel as a library, `init()`, unit test entry point
@@ -102,5 +104,5 @@ Triple faults: append `-d int,cpu_reset -D <logfile>` to the `scripts/run-qemu.s
   Ubuntu + Fedora, `make book`), `.github/workflows/pages.yml` (deploys the website from `main`)
 - `course/NN-slug/` – the course chapters, each a complete project (`make run`, `make test`); their pages are
   `docs/course/NN-slug.md`; code blocks with `file=` must match the folder (`scripts/check-course.py`, see `docs/HACKING.md`)
-- `LICENSE` – GNU GPL v3 (`GPL-3.0-or-later`, the user's choice); `README.md` – entry point for new readers
+- `LICENSE` – GNU GPL v3 (`GPL-3.0-or-later`, my choice); `README.md` – entry point for new readers
 - `vendor/limine` – Limine binaries (not in git, `make limine`)

@@ -1,15 +1,15 @@
 # Roadmap – from kernel to learning platform
 
-> Agreed with the user on 2026-10-26. Phases are worked off as stages in `docs/PROGRESS.md`.
+> Decided by me (FreakySneaky787, the author of YAK) on 2026-10-26. Phases are worked off as stages in `docs/PROGRESS.md`.
 
 ## Context
 YAK 0.8.0 is published (pre-release): a working x86-64 kernel (M1–M46) with tests, walkthroughs and
-experiments. The user decided the direction for the next 1–2 years:
+experiments. I decided the direction for the next 1–2 years:
 - **What:** a learning platform (not a feature-race hobby OS, not a lab).
 - **For whom:** self-learners and hobby kernel developers.
 - **How:** learners **rebuild the kernel chapter by chapter** (like blog_os), each chapter a runnable, tested state.
 - **Language:** English. **Where:** an own website (GitHub Pages), built by CI.
-- **Roles:** the user steers, Claude builds.
+- **Roles:** I steer, Claude builds.
 
 The existing kernel stays the **reference implementation**; the course is a second, cleanly ordered path to (almost)
 the same result.
@@ -32,9 +32,9 @@ diff to the previous one.
 ### Phase A – finish 1.0 of the reference kernel (short)
 1. **CI** (`.github/workflows/check.yml`): `make check` on Ubuntu and in a Fedora container under QEMU TCG
    – this also closes the open release criterion "fresh Fedora host". Reuse `make deps` for package names.
-2. User confirms `docs/GOALS.md` (rewritten for the learning-platform direction, see Phase B).
-3. First external reader tries README → walkthrough 01 → one experiment (user organises); fix what they report.
-4. Release 1.0.0 (M47): version, CHANGELOG, `make stress`, user creates tag + GitHub release (tags cannot be pushed
+2. I confirm `docs/GOALS.md` (rewritten for the learning-platform direction, see Phase B).
+3. First external reader tries README → walkthrough 01 → one experiment (I organise this); fix what they report.
+4. Release 1.0.0 (M47): version, CHANGELOG, `make stress`, I create the tag + GitHub release (tags cannot be pushed
    from the sandbox).
 
 ### Phase B – course infrastructure (no chapter content yet)
@@ -50,7 +50,7 @@ diff to the previous one.
 ### Phase C – pilot: Part I (chapters 1–4), then feedback
 Write chapters 1–4 fresh as a clean linear history (not cut out of today's mixed commits):
 1 Boot with Limine + serial output · 2 Testing without an OS · 3 Text on the screen · 4 GDT and TSS.
-→ The user and at least one outside reader go through them; adjust format before writing more.
+→ I and at least one outside reader go through them; adjust format before writing more.
 
 ### Phase D – the remaining course (parts, following the M1–M38 order, which already teaches evolution)
 | Part | Chapters (from milestones) |
@@ -87,7 +87,7 @@ Roughly 30 chapters; one chapter ≈ one milestone of work. Order of writing = o
   readers are irreplaceable – Claude cannot test "is this understandable?".
 - **Nightly Rust** breaks over time: the pinned toolchain must keep working; CI shows when it stops.
 
-## Decisions still needed from the user (later, not now)
+## Decisions I still have to make (later, not now)
 - Repository rename (`yak-kernel` → YAK) – before the website URL is published.
 - Website address (GitHub Pages default vs. own domain).
 

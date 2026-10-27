@@ -5,12 +5,12 @@
 |---|---|---|
 | Language | Rust nightly, `#![no_std]`, some inline assembly | memory safety; nightly is needed for `custom_test_frameworks` and `abi_x86_interrupt` |
 | Target | `x86_64-unknown-none` (built-in) | bare metal, soft-float (no SSE in the kernel) → no custom target JSON needed |
-| Linker | **GNU ld** (`ld.bfd`, binutils 2.46), flavor `ld` | user preference for GNU tools; linker script `kernel/linker.ld` |
+| Linker | **GNU ld** (`ld.bfd`, binutils 2.46), flavor `ld` | my preference for GNU tools; linker script `kernel/linker.ld` |
 | Architecture | x86_64 | matches the host PC, best documentation (OSDev, Intel SDM) |
 | Bootloader | Limine v11, boot protocol base revision 6, crate `limine` 0.6.5 | starts directly in long mode with paging, provides memory map, HHDM and framebuffer |
 | Boot medium | hybrid ISO (BIOS + UEFI) built with xorriso | boots in QEMU with `-cdrom`, both firmware paths testable |
 | External crates | only `limine`, `spin` | everything else is written from scratch |
-| Tools | GNU make, gdb, binutils (objdump/nm/readelf/addr2line), gcc for host helpers | user preference: Rust kernel, GNU tooling around it |
+| Tools | GNU make, gdb, binutils (objdump/nm/readelf/addr2line), gcc for host helpers | my preference: Rust kernel, GNU tooling around it |
 
 ## Memory layout
 - The kernel lives in the higher half at `0xffffffff80000000` (top 2 GiB), `code-model=kernel`, `relocation-model=static`.
@@ -105,7 +105,18 @@
   caching and interrupts"); `FatFs` itself keeps the FAT sector it used last, the last cluster chain and the last path
   lookup. FAT updates are written through to **every** FAT copy immediately. Every mutating operation ends with `sync`
   (FSInfo hints + disk flush), so a `poweroff` or reset right *after* a command never leaves the volume inconsistent.
-  A power loss or disk error *during* a command is a different case: it is not covered by this guarantee.
+  A power loss or disk error *during* a command is a different case. What holds then is measured (M53,
+  `fs::fat32::fault_tests`: every I/O of create, replace, append, `write_at`, mkdir, rename and remove made to fail
+  once, as a transient error and as a power loss with a torn write, then the volume re-mounted and checked):
+  - the command returns `FsError::Io`, never panics, and the volume mounts again;
+  - files the command did not touch are intact; its target is in the old or the new state (`write_at` may have
+    written part of its bytes);
+  - the damage is what `fsck.fat` repairs without losing data that was there before: lost clusters (new clusters not
+    yet in a directory entry, or old ones not yet freed), the two FAT copies differing in one sector, after
+    append/`write_at` a chain longer than the file size, after rename both names pointing to the same clusters
+    (the new entry is written before the old one is freed – the order Linux's vfat uses too);
+  - after a transient error the same mount keeps working (later writes do not damage the volume).
+  There is no journal: FAT32 has none, and the kernel does not run `fsck` at boot.
 - Names: a name that fits 8.3 in one case per part (`hello.txt`, `README`) is stored as a plain short entry with the NT
   lower-case flags, like Windows/Linux do. Everything else gets LFN entries plus a unique 8.3 alias (`MYNOTE~1`).
   Lookup is case-insensitive on long and short names.

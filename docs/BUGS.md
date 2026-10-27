@@ -229,7 +229,7 @@ Format: number · date · title, then symptom → cause → fix → test.
 ## Known pitfalls (not bugs, but worth remembering)
 - **The Limine host utility (`limine bios-install`) needs a C compiler** (`gcc`). It is not required for booting the ISO
   in QEMU with `-cdrom`; it is only needed to make the ISO bootable as a hard disk / USB image.
-- **`sudo` does not work through `!` in Claude Code** because there is no TTY for the password prompt. The user runs installs in a separate terminal.
+- **`sudo` does not work through `!` in Claude Code** because there is no TTY for the password prompt. I run installs in a separate terminal.
 - **`cargo fmt -- <file>` formats the whole crate**, not just the file. Format deliberately with `make fmt`, and commit pure
   formatting separately from functional changes.
 - **Limine sets the USER bit on its upper-half page tables** (PML4/PDPT/PD entries; the leaf entries are supervisor-only).

@@ -1,10 +1,10 @@
 # Project goals
 
-> **Status:** direction decided by the user on 2026-10-26 (learning platform, see "Direction" and `docs/ROADMAP.md`);
-> the release criteria below are still a proposal. Changes to this file are agreed with the user.
+> **Status:** I (FreakySneaky787, the author of YAK) decided the direction on 2026-10-26 (learning platform, see "Direction" and `docs/ROADMAP.md`);
+> the release criteria below are still a proposal. Changes to this file need my agreement.
 
 ## Name
-**YAK – Yet Another Kernel.** (User decision 2026-10-26, replacing the earlier working name KernelTry; it matches
+**YAK – Yet Another Kernel.** (My decision of 2026-10-26, replacing the earlier working name KernelTry; it matches
 the repository name `yak-kernel`.)
 
 ## Purpose
@@ -12,7 +12,7 @@ YAK is a self-contained operating system for **studying how a modern operating s
 hands-on, and for developing it further. It runs in QEMU (BIOS and UEFI).
 
 ## Audience
-Primarily **self-learners** and **hobby kernel developers** (user decision 2026-10-26); computer science students and
+Primarily **self-learners** and **hobby kernel developers** (my decision of 2026-10-26); computer science students and
 anyone interested in operating system architecture are welcome too.
 
 ## Direction (1–2 years)
@@ -48,7 +48,7 @@ experience of a first-time reader**, not about new features. Stage 8 in `docs/PR
 | Area | Criterion |
 |---|---|
 | Entry point | `README.md` explains what YAK is, shows a screenshot, lists host packages and gets a new reader from clone to a running shell |
-| Legal | `LICENSE` (GNU GPL v3 or later, chosen by the user on 2026-10-26, replacing ECPL v1.2) applies to the whole repository except third-party assets |
+| Legal | `LICENSE` (GNU GPL v3 or later, chosen by me on 2026-10-26, replacing ECPL v1.2) applies to the whole repository except third-party assets |
 | Reproducibility | the Rust toolchain is pinned; a dependency check names missing host tools; `make check` passes on a fresh Fedora and Ubuntu host (checked by CI on every push, M47) |
 | Reliability | `make check` passes N times in a row (N agreed in stage 8) with 1, 2 and 4 CPUs and with `KERNEL_CPU=qemu64`; a soak test runs for a fixed time without failure; every syscall rejects invalid arguments without crashing the kernel |
 | Known limits | every open item is either fixed or listed as a documented limitation |

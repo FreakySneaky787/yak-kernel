@@ -1489,3 +1489,217 @@ mod tests {
         assert_eq!(fs.lookup("/huge").err(), Some(FsError::NotFound));
     }
 }
+
+/// M53: the file system on a disk that fails in the middle of an operation.
+#[cfg(test)]
+mod fault_tests {
+    use super::*;
+    use crate::drivers::block::{BlockCache, FaultyDisk, RamDisk};
+    use alloc::collections::BTreeSet;
+
+    type Fs = FatFs<BlockCache<FaultyDisk>>;
+
+    /// What a consistency check of a volume found (like `fsck.fat` would).
+    #[derive(Debug, Default, PartialEq, Eq)]
+    pub struct Report {
+        /// Clusters marked used in the FAT that no directory entry reaches.
+        lost: usize,
+        /// Clusters reached from two entries (two files sharing data).
+        cross_linked: usize,
+        /// Chains that leave the volume or loop.
+        broken_chains: usize,
+        /// Files whose chain is longer or shorter than their size needs.
+        size_mismatch: usize,
+        /// FAT sectors in which the two copies differ.
+        fat_copies_differ: usize,
+    }
+
+    pub fn check<D: BlockDevice>(fs: &mut FatFs<D>) -> Report {
+        let mut r = Report::default();
+        let mut seen = BTreeSet::new();
+        let mut dirs = alloc::vec![fs.root_cluster];
+        let root = fs.walk_chain(fs.root_cluster).unwrap_or_default();
+        seen.extend(root);
+        while let Some(dir) = dirs.pop() {
+            let Ok(entries) = fs.read_dir_cluster(dir) else {
+                r.broken_chains += 1;
+                continue;
+            };
+            for e in entries {
+                let Ok(chain) = fs.walk_chain(e.cluster) else {
+                    r.broken_chains += 1;
+                    continue;
+                };
+                for &c in &chain {
+                    if !seen.insert(c) {
+                        r.cross_linked += 1;
+                    }
+                }
+                if e.is_dir() {
+                    dirs.push(e.cluster);
+                } else if chain.len() != (e.size as usize).div_ceil(fs.bytes_per_cluster) {
+                    r.size_mismatch += 1;
+                }
+            }
+        }
+        for c in 2..fs.cluster_count + 2 {
+            if fs.fat_get(c).unwrap_or(0) != 0 && !seen.contains(&c) {
+                r.lost += 1;
+            }
+        }
+        let (mut a, mut b) = ([0u8; SECTOR_SIZE], [0u8; SECTOR_SIZE]);
+        for s in 0..fs.fat_sectors {
+            fs.read_sectors(fs.reserved_sectors + s, &mut a).unwrap();
+            fs.read_sectors(fs.reserved_sectors + fs.fat_sectors + s, &mut b).unwrap();
+            r.fat_copies_differ += (a != b) as usize;
+        }
+        r
+    }
+
+    fn pattern(len: usize, seed: u8) -> Vec<u8> {
+        (0..len).map(|i| (i as u8).wrapping_mul(31).wrapping_add(seed)).collect()
+    }
+
+    /// The disk every test starts from: a few files in two directories.
+    fn base_disk() -> RamDisk {
+        let mut disk = RamDisk::new(8192);
+        format(&mut disk, "FAULT").unwrap();
+        let mut fs = FatFs::mount(disk).unwrap();
+        fs.write_file("/keep.txt", &pattern(1500, 1)).unwrap();
+        fs.write_file("/big.bin", &pattern(3000, 2)).unwrap();
+        fs.create_dir("/dir").unwrap();
+        fs.write_file("/dir/a.txt", &pattern(700, 3)).unwrap();
+        fs.into_device()
+    }
+
+    fn mount(disk: RamDisk) -> Fs {
+        FatFs::mount(BlockCache::new(FaultyDisk::new(disk), 1024)).unwrap()
+    }
+
+    /// The operations under test; each returns its result.
+    const OPS: [(&str, fn(&mut Fs) -> Result<()>); 7] = [
+        ("create", |fs| fs.write_file("/new.txt", &pattern(2000, 4))),
+        ("replace", |fs| fs.write_file("/big.bin", &pattern(2500, 5))),
+        ("append", |fs| fs.append_file("/dir/a.txt", &pattern(900, 6))),
+        ("write_at", |fs| fs.write_at("/big.bin", 2900, &pattern(300, 7))),
+        ("mkdir", |fs| fs.create_dir("/dir/sub")),
+        ("rename", |fs| fs.rename("/dir/a.txt", "/moved.txt")),
+        ("remove", |fs| fs.remove("/big.bin")),
+    ];
+
+    /// Runs `op` with I/O number `n` failing, then "reboots" (mounts what
+    /// reached the disk) and returns the result, the check and the volume.
+    fn run_failing(op: fn(&mut Fs) -> Result<()>, n: u64, power_loss: bool) -> (Result<()>, Report, FatFs<RamDisk>) {
+        let mut fs = mount(base_disk());
+        fs.dev.device_mut().fail_in(n, power_loss);
+        let result = op(&mut fs);
+        let disk = fs.into_device().into_device().disk;
+        let mut after = FatFs::mount(disk).expect("the volume must mount after the failure");
+        let report = check(&mut after);
+        (result, report, after)
+    }
+
+    /// Number of device I/Os `op` does on the base disk (and that it leaves a clean volume).
+    fn io_count(op: fn(&mut Fs) -> Result<()>) -> u64 {
+        let mut fs = mount(base_disk());
+        let before = fs.dev.device_mut().ios;
+        op(&mut fs).unwrap();
+        let ios = fs.dev.device_mut().ios - before;
+        let mut after = FatFs::mount(fs.into_device().into_device().disk).unwrap();
+        assert_eq!(check(&mut after), Report::default(), "the operation itself is clean");
+        ios
+    }
+
+    #[test_case]
+    fn the_checker_sees_damage() {
+        let mut fs = FatFs::mount(base_disk()).unwrap();
+        assert_eq!(check(&mut fs), Report::default());
+        let a = fs.lookup("/keep.txt").unwrap().cluster;
+        let b = fs.lookup("/big.bin").unwrap().cluster;
+        fs.fat_set(a, b).unwrap(); // keep.txt now runs into big.bin's clusters
+        let r = check(&mut fs);
+        assert!(r.cross_linked > 0 && r.size_mismatch > 0, "{:?}", r);
+        let free = (2..fs.cluster_count + 2).rev().find(|&c| fs.fat_get(c).unwrap() == 0).unwrap();
+        fs.fat_set(free, FAT_EOC).unwrap();
+        assert_eq!(check(&mut fs).lost, 1 + 2, "the marked cluster + keep.txt's cut-off rest");
+    }
+
+    /// What a volume may look like after `op` failed: the operation's target is in its old or its new
+    /// state (or, for `write_at`, partly overwritten - a failed write may have written some bytes).
+    fn target_is_old_or_new(name: &str, fs: &mut FatFs<RamDisk>) -> bool {
+        let big = || pattern(3000, 2);
+        let a = || pattern(700, 3);
+        match name {
+            "create" => fs.read_file("/new.txt").map_or(true, |d| d == pattern(2000, 4)),
+            "replace" => matches!(fs.read_file("/big.bin"), Ok(d) if d == big() || d == pattern(2500, 5)),
+            "append" => matches!(fs.read_file("/dir/a.txt"), Ok(d) if d == a() || d == [a(), pattern(900, 6)].concat()),
+            "write_at" => {
+                let mut partly = big();
+                partly[2900..].copy_from_slice(&pattern(300, 7)[..100]);
+                let full = [partly.clone(), pattern(300, 7)[100..].to_vec()].concat();
+                matches!(fs.read_file("/big.bin"), Ok(d) if d == big() || d == partly || d == full)
+            }
+            "mkdir" => fs.read_dir("/dir/sub").map_or(true, |e| e.is_empty()),
+            "rename" => [fs.read_file("/dir/a.txt"), fs.read_file("/moved.txt")]
+                .iter()
+                .any(|r| r.as_ref().is_ok_and(|d| *d == a())),
+            "remove" => fs.read_file("/big.bin").map_or(true, |d| d == big()),
+            _ => unreachable!(),
+        }
+    }
+
+    #[test_case]
+    fn every_failing_io_is_reported_and_leaves_a_mountable_volume() {
+        for (name, op) in OPS {
+            let ios = io_count(op);
+            for power_loss in [false, true] {
+                let mut lost = 0;
+                for n in 0..ios {
+                    let (result, report, mut fs) = run_failing(op, n, power_loss);
+                    let what = alloc::format!("{} with I/O {} of {} failing (power loss: {})", name, n, ios, power_loss);
+                    assert!(matches!(result, Err(FsError::Io(_))), "{}: result {:?}", what, result);
+                    // files the operation does not touch survive every failure
+                    assert_eq!(fs.read_file("/keep.txt").unwrap(), pattern(1500, 1), "{}", what);
+                    assert!(target_is_old_or_new(name, &mut fs), "{}", what);
+                    assert_eq!(report.broken_chains, 0, "{}: {:?}", what, report);
+                    // linking new clusters and recording the new size are two writes: in between the
+                    // chain is longer than the size (fsck.fat cuts it; the data within the size is intact)
+                    if !matches!(name, "append" | "write_at") {
+                        assert_eq!(report.size_mismatch, 0, "{}: {:?}", what, report);
+                    }
+                    // rename writes the new entry before it frees the old one: in between both names
+                    // share the file's clusters (Linux's vfat does the same; fsck.fat reports it)
+                    if name != "rename" {
+                        assert_eq!(report.cross_linked, 0, "{}: {:?}", what, report);
+                    }
+                    lost = lost.max(report.lost);
+                }
+                crate::serial_println!("      {}: {} I/Os, power loss {}: at most {} lost clusters", name, ios, power_loss, lost);
+            }
+        }
+    }
+
+    #[test_case]
+    fn the_volume_stays_usable_after_a_failed_operation() {
+        // a transient error (the disk works again afterwards): what the file system kept in
+        // memory (cached FAT sector, free count) must not damage the volume on later writes
+        for (name, op) in OPS {
+            for n in 0..io_count(op) {
+                let mut fs = mount(base_disk());
+                fs.dev.device_mut().fail_in(n, false);
+                assert!(op(&mut fs).is_err());
+                fs.write_file("/after.txt", &pattern(4000, 9)).unwrap();
+                fs.create_dir("/after").unwrap();
+                let mut after = FatFs::mount(fs.into_device().into_device().disk).unwrap();
+                let report = check(&mut after);
+                let what = alloc::format!("{} with I/O {} failing, then more writes: {:?}", name, n, report);
+                assert_eq!(after.read_file("/after.txt").unwrap(), pattern(4000, 9), "{}", what);
+                assert_eq!(after.read_file("/keep.txt").unwrap(), pattern(1500, 1), "{}", what);
+                assert_eq!(report.broken_chains, 0, "{}", what);
+                if name != "rename" {
+                    assert_eq!(report.cross_linked, 0, "{}", what);
+                }
+            }
+        }
+    }
+}
