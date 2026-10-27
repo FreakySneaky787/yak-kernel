@@ -242,6 +242,8 @@ STEPS = [
     ("fault spin | cat\r" + PAUSE + CTRL_C, ["fault was killed: interrupted"], []),
     ("pipetest\r", ["pipetest: all checks passed"], ["FAIL"]),
     ("uname\r", ["YAK ", " x86_64"], ["error"]),
+    # M56: case (and $(...) inside its word)
+    ("case $(uname) in yak* | YAK*) echo is-yak ;; *) echo other ;; esac\r", ["\r\nis-yak\r\n"], ["other\r\n", "error"]),
     # M55: command substitution at the prompt
     ('echo "files: $(ls /docs) sys: $(uname | wc)"\r', ["files:  ", "hello.txt\r\n", "My Notes/ sys:       1       3"], ["error"]),
     # M41: every syscall with bad pointers, lengths, descriptors and numbers - the kernel must survive

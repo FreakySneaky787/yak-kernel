@@ -398,6 +398,12 @@ extern "C" fn kmain() -> ! {
     assert_eq!(status, ExitStatus::Exited(0), "{}", out);
     assert_eq!(out, EXPECTED_M55);
 
+    // M56: case and local
+    fs::with_root(|fs| fs.write_file("/m56.sh", SCRIPT_M56.as_bytes())).unwrap();
+    let (status, out) = run("sh", "/m56.sh");
+    assert_eq!(status, ExitStatus::Exited(0), "{}", out);
+    assert_eq!(out, EXPECTED_M56);
+
     // M32: disk speed (informational: prints the time; checks the result)
     let data: Vec<u8> = (0..300_000u32).map(|i| b"abcdefghij\n"[(i % 11) as usize]).collect();
     fs::with_root(|fs| fs.write_file("/bench.txt", &data)).unwrap();
@@ -486,6 +492,57 @@ script args: 2 a b
 1000 lines through one pipe
 \x1b[91merror:\x1b[0m long: cannot set (values up to 4096 bytes, up to 256 variables)
 too long for a variable
+";
+
+const SCRIPT_M56: &str = r#"#!/bin/sh
+# M56: case and local
+kind() {
+  case $1 in
+    *.txt | *.md) echo "$1: text" ;;
+    [0-9]*) echo "never: no character classes" ;;
+    ?) echo "$1: one character" ;;
+    "a*b") echo "$1: the literal a*b" ;;
+    a*b) echo "$1: a...b" ;;
+    '') echo "empty" ;;
+    *) echo "$1: something else"
+  esac
+}
+for w in notes.txt README.md x a*b axxb "" other; do kind "$w"; done
+case yes in
+  (y*)
+    echo "first branch wins"
+    ;;
+  yes) echo never ;;
+esac
+case nothing in a) echo never ;; esac
+echo "no match: status $?"
+x=global
+f() {
+  local x=inside y
+  echo "in f: x=$x y=[$y]"
+  y=set
+  g
+}
+g() { local x; echo "in g: x=[$x]"; x=from-g; }
+f
+echo "after f: x=$x y=[$y]"
+local z=1 || echo "local outside a function fails"
+"#;
+
+const EXPECTED_M56: &str = "notes.txt: text
+README.md: text
+x: one character
+a*b: the literal a*b
+axxb: a...b
+empty
+other: something else
+first branch wins
+no match: status 0
+in f: x=inside y=[]
+in g: x=[]
+after f: x=global y=[]
+\x1b[91merror:\x1b[0m local: only inside a function
+local outside a function fails
 ";
 
 const SCRIPT_M35: &str = r#"#!/bin/sh

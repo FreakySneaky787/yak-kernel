@@ -13,6 +13,7 @@
 //!           | ('while' | 'until') list 'do' list 'done'
 //!           | 'for' NAME ['in' words] (';' | '\n') 'do' list 'done'
 //!           | '{' list '}'
+//!           | 'case' word 'in' (['('] pattern ('|' pattern)* ')' list [';;'])* 'esac'
 //! ```
 //!
 //! Keywords count only at the start of a command (`echo fi` prints "fi").
@@ -28,6 +29,8 @@ use alloc::vec::Vec;
 pub enum Token {
     Word(String),
     Semi,
+    /// `;;` (ends a `case` branch)
+    DoubleSemi,
     Newline,
     Amp,
 }
@@ -70,6 +73,11 @@ pub fn tokenize(text: &str) -> Result<Vec<Token>, SyntaxError> {
             '\n' => {
                 end_word(&mut word, &mut in_word, &mut tokens);
                 tokens.push(Token::Newline);
+            }
+            ';' if chars.get(i + 1) == Some(&';') => {
+                end_word(&mut word, &mut in_word, &mut tokens);
+                tokens.push(Token::DoubleSemi);
+                i += 1;
             }
             ';' => {
                 end_word(&mut word, &mut in_word, &mut tokens);
@@ -167,6 +175,28 @@ pub fn tokenize(text: &str) -> Result<Vec<Token>, SyntaxError> {
     Ok(tokens)
 }
 
+/// The alternatives of a case pattern: split at `|` outside quotes.
+fn split_patterns(pattern: &str) -> Vec<String> {
+    let mut parts = alloc::vec![String::new()];
+    let mut quote = None;
+    let mut escaped = false;
+    for c in pattern.chars() {
+        match c {
+            _ if escaped => escaped = false,
+            '\\' => escaped = true,
+            '\'' | '"' if quote.is_none() => quote = Some(c),
+            q if quote == Some(q) => quote = None,
+            '|' if quote.is_none() => {
+                parts.push(String::new());
+                continue;
+            }
+            _ => {}
+        }
+        parts.last_mut().unwrap().push(c);
+    }
+    parts
+}
+
 /// The index of the `)` that closes a `$(` whose text starts at `start`;
 /// quotes, backslashes and nested parentheses are skipped. `None`: not closed.
 pub fn subst_end(chars: &[char], start: usize) -> Option<usize> {
@@ -243,9 +273,15 @@ pub enum Compound {
         body: List,
     },
     Group(List),
+    Case {
+        /// The raw word that is matched.
+        word: String,
+        /// (raw patterns, body) in order; the first branch with a matching pattern runs.
+        branches: Vec<(Vec<String>, List)>,
+    },
 }
 
-const TERMINATORS: &[&str] = &["then", "elif", "else", "fi", "do", "done", "}"];
+const TERMINATORS: &[&str] = &["then", "elif", "else", "fi", "do", "done", "}", "esac"];
 
 pub fn is_name(s: &str) -> bool {
     let mut chars = s.chars();
@@ -270,6 +306,7 @@ fn describe(t: &Token) -> String {
     match t {
         Token::Word(w) => w.clone(),
         Token::Semi => String::from(";"),
+        Token::DoubleSemi => String::from(";;"),
         Token::Newline => String::from("newline"),
         Token::Amp => String::from("&"),
     }
@@ -320,6 +357,7 @@ impl Parser {
                 None if terms.is_empty() => return Ok(list),
                 None => return Err(SyntaxError::Incomplete),
                 Some(Token::Amp) => return Err(SyntaxError::Unexpected(String::from("&"))),
+                Some(Token::DoubleSemi) if terms.contains(&";;") => return Ok(list),
                 Some(Token::Word(w)) if TERMINATORS.contains(&w.as_str()) => {
                     return if terms.contains(&w.as_str()) {
                         Ok(list)
@@ -336,6 +374,7 @@ impl Parser {
                     self.pos += 1;
                 }
                 Some(Token::Semi | Token::Newline) => self.pos += 1,
+                Some(Token::DoubleSemi) if terms.contains(&";;") => {} // the next round ends the list
                 None => {}
                 Some(t) => return Err(SyntaxError::Unexpected(describe(t))),
             }
@@ -403,6 +442,7 @@ impl Parser {
                 Compound::Loop { until, condition, body }
             }
             Some("for") => self.for_command()?,
+            Some("case") => self.case_command()?,
             Some("{") => {
                 self.pos += 1;
                 let body = self.list(&["}"])?;
@@ -464,6 +504,54 @@ impl Parser {
             }
         }
         Ok(Compound::If { branches, otherwise })
+    }
+
+    fn case_command(&mut self) -> Result<Compound, SyntaxError> {
+        self.pos += 1; // case
+        let word = match self.peek() {
+            Some(Token::Word(w)) => w.clone(),
+            None => return Err(SyntaxError::Incomplete),
+            Some(t) => return Err(SyntaxError::Unexpected(describe(t))),
+        };
+        self.pos += 1;
+        self.skip_newlines();
+        self.expect("in")?;
+        let mut branches = Vec::new();
+        loop {
+            while matches!(self.peek(), Some(Token::Semi | Token::Newline)) {
+                self.pos += 1;
+            }
+            let mut pattern = match self.peek() {
+                None => return Err(SyntaxError::Incomplete),
+                Some(Token::Word(w)) if w == "esac" => {
+                    self.pos += 1;
+                    break;
+                }
+                Some(Token::Word(w)) => w.clone(),
+                Some(t) => return Err(SyntaxError::Unexpected(describe(t))),
+            };
+            self.pos += 1;
+            // `a|b)` is one word; `a | b )` several
+            while !pattern.ends_with(')') {
+                match self.peek_word() {
+                    Some(w) => {
+                        pattern.push_str(w);
+                        self.pos += 1;
+                    }
+                    None if self.peek().is_none() => return Err(SyntaxError::Incomplete),
+                    None => return Err(SyntaxError::Message("a case pattern ends with ')'")),
+                }
+            }
+            pattern.pop();
+            let pattern = pattern.strip_prefix('(').unwrap_or(&pattern);
+            let patterns = split_patterns(pattern);
+            let body = self.list(&[";;", "esac"])?;
+            if self.peek() == Some(&Token::DoubleSemi) {
+                self.pos += 1;
+            }
+            branches.push((patterns, body));
+        }
+        Ok(Compound::Case { word, branches })
     }
 
     fn for_command(&mut self) -> Result<Compound, SyntaxError> {

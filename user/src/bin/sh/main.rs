@@ -120,6 +120,7 @@ const BUILTINS: &[(&str, &str, &str)] = &[
     ("break", "break [n]", "leave the innermost (n-th) loop"),
     ("continue", "continue [n]", "next round of the innermost (n-th) loop"),
     ("return", "return [code]", "leave a function"),
+    ("local", "local NAME[=value]...", "variables of the running function (restored when it returns)"),
     ("shift", "shift [n]", "drop the first n arguments ($1 ...)"),
     ("true", "true (or :)", "do nothing, successfully"),
     ("false", "false", "do nothing, unsuccessfully"),
@@ -171,6 +172,8 @@ struct Shell {
     /// > 0 while an `if`/`while` condition runs (`set -e` does not apply).
     condition_depth: usize,
     call_depth: usize,
+    /// One frame per running function: the variables it made `local`, with their old values.
+    locals: Vec<Vec<(String, Option<String>)>>,
 }
 
 /// Errors go to stderr: they must not end up in a pipe or file.
@@ -259,6 +262,7 @@ impl Shell {
             functions: BTreeMap::new(),
             condition_depth: 0,
             call_depth: 0,
+            locals: Vec::new(),
         }
     }
 
@@ -597,6 +601,12 @@ impl Shell {
         Ok(out)
     }
 
+    /// Expands one raw word without splitting it (case subjects and patterns).
+    fn expand_one(&mut self, raw: &str, glob: bool) -> Result<String, String> {
+        let expanded = self.expand(raw, glob)?;
+        Ok(parser::split(&expanded).map_err(|e| e.to_string())?.join(" "))
+    }
+
     /// Runs one stage with the already prepared fds 0-2.
     fn run_command(&mut self, command: &Command) -> Stage {
         match command {
@@ -723,6 +733,34 @@ impl Shell {
                 Flow::Next
             }
             Compound::Group(list) => self.run_list(list),
+            Compound::Case { word, branches } => {
+                let subject = match self.expand_one(word, false) {
+                    Ok(w) => w.chars().collect::<Vec<char>>(),
+                    Err(e) => {
+                        error(&e);
+                        self.status = 1;
+                        return Flow::Next;
+                    }
+                };
+                for (patterns, body) in branches {
+                    for pattern in patterns {
+                        // unquoted `*` and `?` are wildcards, quoted ones plain characters
+                        let pattern = match self.expand_one(pattern, true) {
+                            Ok(p) => p.chars().collect::<Vec<char>>(),
+                            Err(e) => {
+                                error(&e);
+                                self.status = 1;
+                                return Flow::Next;
+                            }
+                        };
+                        if glob::matches(&pattern, &subject) {
+                            return self.run_list(body);
+                        }
+                    }
+                }
+                self.status = 0;
+                Flow::Next
+            }
         }
     }
 
@@ -978,6 +1016,28 @@ impl Shell {
                     Err(e) => Stage::Failed(alloc::format!("{}: {}", name, e)),
                 };
             }
+            "local" => {
+                let Some(frame) = self.locals.last_mut() else {
+                    return Stage::Failed(String::from("local: only inside a function"));
+                };
+                for a in args {
+                    let (name, value) = match assignment(a) {
+                        Some((n, v)) => (n, Some(v)),
+                        None if is_name(a) => (a.as_str(), None),
+                        None => return Stage::Failed(alloc::format!("local: '{}' is not a valid name", a)),
+                    };
+                    if !frame.iter().any(|(n, _)| n == name) {
+                        frame.push((String::from(name), env::var(name)));
+                    }
+                    match value {
+                        Some(v) if !env::set_var(name, v) => {
+                            return Stage::Failed(alloc::format!("{}: cannot set", name));
+                        }
+                        Some(_) => {}
+                        None => env::remove_var(name),
+                    }
+                }
+            }
             "return" => {
                 let code = args.first().and_then(|c| c.parse().ok()).unwrap_or(self.status);
                 self.status = code;
@@ -1020,7 +1080,17 @@ impl Shell {
             .collect();
         let saved = core::mem::replace(&mut self.positional, positional);
         self.call_depth += 1;
+        self.locals.push(Vec::new());
         let flow = self.run_list(&body);
+        for (name, old) in self.locals.pop().unwrap_or_default().into_iter().rev() {
+            match old {
+                Some(value) => env::set_var(&name, &value),
+                None => {
+                    env::remove_var(&name);
+                    true
+                }
+            };
+        }
         self.call_depth -= 1;
         self.positional = saved;
         match flow {

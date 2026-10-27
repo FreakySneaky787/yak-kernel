@@ -339,6 +339,12 @@ Short explanations of every subsystem: what it is and why we need it.
 - `"$@"` passes on a script's or function's arguments exactly as they came, each one a separate word even when it
   contains spaces. `"$*"` glues them into one word; unquoted `$@` splits them again.
 
+## M56 – Choosing by pattern, and variables of your own
+- `case $file in *.txt) …;; *.md) …;; esac` compares one word with patterns in order and runs the first branch that
+  matches – the same `*` and `?` as for file names, applied to a string.
+- `local x=1` inside a function gives the function its own `x`: the old value is saved and put back when the function
+  returns. Functions it calls still see this `x` (*dynamic* scope) – unlike most programming languages.
+
 ## M36 – Threads and futexes
 - A **thread** is a second "line of execution" inside the same program: same memory, same files, own registers and stack.
   For the kernel it is just one more schedulable thread that happens to use the process's page tables.

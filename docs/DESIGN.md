@@ -278,6 +278,11 @@
   quotes as one escaped string, unquoted as one quoted word per field, after `NAME=` as one word (no splitting).
   `"$@"` closes and reopens the quotes between the arguments; without arguments it produces no word. Variables live in
   the kernel's per-process environment: values up to 4096 bytes, up to 256 variables – a larger assignment is an error.
+- **`case` and `local`** (M56): `;;` is its own token; a pattern is a raw word ending in `)` (an optional leading `(`,
+  alternatives split at unquoted `|`), its body a list ended by `;;` or `esac`. Subject and patterns are expanded without
+  splitting; unquoted `*`/`?` in a pattern are wildcards (`glob::matches`), no `[...]` classes. `local` records the
+  variable's old value in the running function's frame (`Shell::locals`); `call` restores the frame in reverse order when
+  the function returns, so nested functions see the caller's locals (dynamic scope, like bash).
 - **Files**: each process has a cwd (inherited from the spawner, paths are normalized against it) and up to 32 file descriptors
   (`process::Handle`): 0 stdin, 1/2 the process's `Output`, then files (path + one offset for reads and writes, shared
   with `dup`-ed and inherited copies like a POSIX open file description – the shell's save/restore of fds 0-2 depends
