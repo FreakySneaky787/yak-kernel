@@ -57,9 +57,13 @@ mod testcmd;
 
 use alloc::collections::BTreeMap;
 use alloc::rc::Rc;
+use alloc::sync::Arc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, Ordering};
+
+/// `read` was interrupted by a signal.
+const EINTR: i64 = -4;
 use line_editor::{EditResult, LineEditor};
 use syntax::{AndOr, Command, Compound, List, Pipeline, SyntaxError, is_name};
 use ulib::fs::{self, Dir, File};
@@ -329,6 +333,70 @@ impl Shell {
         }
     }
 
+    /// Command substitution: runs `text` with stdout into a pipe and returns
+    /// what it printed. Like a subshell, it cannot change the shell itself:
+    /// variables, the directory, functions and `$@` are restored afterwards
+    /// (`exit` only ends the substitution). `$?` is the status of its last command.
+    /// A second thread drains the pipe, so the output may be larger than the pipe.
+    fn substitute(&mut self, text: &str) -> String {
+        let list = match syntax::parse(text) {
+            Ok(list) => list,
+            Err(e) => {
+                error(&e.to_string());
+                self.status = 2;
+                return String::new();
+            }
+        };
+        let mut fds = [0u32; 2];
+        if sys::pipe(&mut fds) < 0 {
+            error("cannot create a pipe");
+            self.status = 1;
+            return String::new();
+        }
+        let (read_end, write_end) = (fds[0] as u64, fds[1] as u64);
+        let output = Arc::new(ulib::sync::Mutex::new(Vec::new()));
+        let sink = output.clone();
+        let reader = ulib::thread::spawn(move || {
+            let mut buf = [0u8; 4096];
+            loop {
+                match sys::read(read_end, &mut buf) {
+                    n if n > 0 => sink.lock().extend_from_slice(&buf[..n as usize]),
+                    EINTR => continue,
+                    _ => return 0,
+                }
+            }
+        });
+        let saved_stdout = sys::dup(sys::STDOUT) as u64;
+        sys::dup2(write_end, sys::STDOUT);
+        sys::close(write_end);
+        let (vars, dir, functions, positional) = (env::vars(), cwd(), self.functions.clone(), self.positional.clone());
+        if let Flow::Exit(code) = self.run_list(&list) {
+            self.status = code; // `exit` ends only the substitution
+        }
+        // restore: the pipe's last writer goes away with our stdout
+        sys::dup2(saved_stdout, sys::STDOUT);
+        sys::close(saved_stdout);
+        for (name, _) in env::vars() {
+            if !vars.iter().any(|(n, _)| *n == name) {
+                env::remove_var(&name);
+            }
+        }
+        for (name, value) in &vars {
+            env::set_var(name, value);
+        }
+        let _ = fs::chdir(&dir);
+        (self.functions, self.positional) = (functions, positional);
+        match reader {
+            Ok(handle) => {
+                let _ = handle.join();
+            }
+            Err(_) => error("cannot start a thread for $(...)"),
+        }
+        sys::close(read_end);
+        let bytes = core::mem::take(&mut *output.lock());
+        String::from_utf8_lossy(&bytes).into_owned()
+    }
+
     /// The exit code of a script or `sh -c` that ended with `flow`.
     fn exit_code(&self, flow: Flow) -> i32 {
         match flow {
@@ -510,7 +578,7 @@ impl Shell {
 
     /// Expands raw words (variables, arithmetic), splits the result and
     /// replaces words with wildcards by the matching file names.
-    fn expand_words(&self, raw: &[String]) -> Result<Vec<String>, String> {
+    fn expand_words(&mut self, raw: &[String]) -> Result<Vec<String>, String> {
         let expanded = self.expand(&raw.join(" "), true)?;
         let words = parser::split(&expanded).map_err(|e| e.to_string())?;
         let mut out = Vec::new();
@@ -539,9 +607,16 @@ impl Shell {
                 };
                 if !words.is_empty() && words.iter().all(|w| assignment(w).is_some()) {
                     for (name, value) in words.iter().filter_map(|w| assignment(w)) {
-                        env::set_var(name, value);
+                        if !env::set_var(name, value) {
+                            return Stage::Failed(alloc::format!(
+                                "{}: cannot set (values up to 4096 bytes, up to 256 variables)",
+                                name
+                            ));
+                        }
                     }
-                    return Stage::Done(0);
+                    // `x=$(false)` fails like the command inside it
+                    let substituted = raw.iter().any(|w| w.contains("$("));
+                    return Stage::Done(if substituted { self.status } else { 0 });
                 }
                 let cmd = match parse_redirections(&words) {
                     Ok(c) => c,
@@ -676,7 +751,9 @@ impl Shell {
 
     /// Replaces `$...` outside single quotes and drops `#` comments. With
     /// `glob`, unquoted `*` and `?` become `glob::STAR` / `glob::ANY`.
-    fn expand(&self, line: &str, glob: bool) -> Result<String, String> {
+    /// The result is split into words by `parser::split` afterwards, so
+    /// text that must stay literal is inserted quoted (`$(...)`, `"$@"`).
+    fn expand(&mut self, line: &str, glob: bool) -> Result<String, String> {
         let chars: Vec<char> = line.chars().collect();
         let mut out = String::new();
         let (mut single, mut double) = (false, false);
@@ -713,6 +790,50 @@ impl Shell {
                     let value = arith::eval(&self.expand(&inner, false)?, &|name| self.value(name))?;
                     out.push_str(&alloc::format!("{}", value));
                     i = end + 1; // the second ')'
+                }
+                '$' if chars.get(i + 1) == Some(&'(') => {
+                    let end = syntax::subst_end(&chars, i + 2).ok_or("missing ')' after '$('")?;
+                    let text: String = chars[i + 2..end].iter().collect();
+                    let output = self.substitute(&text);
+                    let output = output.trim_end_matches('\n');
+                    if double {
+                        out.push_str(&quoted(output));
+                    } else if assignment_so_far(&out) {
+                        // `x=$(...)`: the value of an assignment is not split
+                        out.push_str(&alloc::format!("\"{}\"", quoted(output)));
+                    } else {
+                        // unquoted: split into fields, each inserted as one quoted word
+                        let fields: Vec<String> = output
+                            .split_whitespace()
+                            .map(|f| alloc::format!("\"{}\"", quoted(f)))
+                            .collect();
+                        out.push_str(&fields.join(" "));
+                    }
+                    i = end;
+                }
+                '$' if matches!(chars.get(i + 1), Some('@' | '*')) => {
+                    let args = &self.positional[1.min(self.positional.len())..];
+                    if !double {
+                        // unquoted: every argument is split into fields again (like POSIX)
+                        let words: Vec<String> = args
+                            .iter()
+                            .flat_map(|a| a.split_whitespace())
+                            .map(|f| alloc::format!("\"{}\"", quoted(f)))
+                            .collect();
+                        out.push_str(&words.join(" "));
+                    } else if chars[i + 1] == '*' {
+                        out.push_str(&quoted(&args.join(" "))); // "$*": one word
+                    } else if args.is_empty() && out.ends_with('"') && chars.get(i + 2) == Some(&'"') {
+                        // a bare "$@" without arguments is no word at all, not an empty one
+                        out.pop();
+                        double = false;
+                        i += 1; // with the two steps below: past the closing quote
+                    } else {
+                        // "$@": every argument its own word - close and reopen the quotes between them
+                        let words: Vec<String> = args.iter().map(|a| quoted(a)).collect();
+                        out.push_str(&words.join("\" \""));
+                    }
+                    i += 1;
                 }
                 '$' => {
                     let (name, used) = match chars.get(i + 1) {
@@ -1071,6 +1192,24 @@ impl Shell {
 
 /// Index of the first ')' of the "))" that closes a `$((` whose contents
 /// start at `start`.
+/// Whether the word that `out` ends with is `NAME=` (an assignment's value follows).
+fn assignment_so_far(out: &str) -> bool {
+    let word = out.rsplit(char::is_whitespace).next().unwrap_or("");
+    word.strip_suffix('=').is_some_and(is_name)
+}
+
+/// `text` escaped for the inside of double quotes (`\` and `"`).
+fn quoted(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if c == '\\' || c == '"' {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
 fn arith_end(chars: &[char], start: usize) -> Option<usize> {
     let mut depth = 0;
     let mut i = start;

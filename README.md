@@ -23,7 +23,7 @@ book with navigation and search.
 | Processes | ring 3, one address space per process, ELF loader, 53 syscalls, signals, pipes, environment variables |
 | Storage | PCI, AHCI SATA driver with MSI, sector cache, FAT32 with long file names – persistent across reboots |
 | Network | e1000, Ethernet/ARP/IPv4/ICMP/UDP/TCP, DHCP, DNS client, `wget` and `httpd` |
-| User space | `/bin/sh` (pipes, redirection, scripts, `if`/`while`/`for`, functions, jobs), a full-screen editor and 37 more programs (tools, network clients/servers, self-tests) |
+| User space | `/bin/sh` (pipes, redirection, scripts, `if`/`while`/`for`, functions, `$(...)`, jobs), a full-screen editor and 37 more programs (tools, network clients/servers, self-tests) |
 
 Everything above is our own code. The only crates are `limine` (boot protocol) and `spin` (locks).
 

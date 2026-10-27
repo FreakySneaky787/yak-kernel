@@ -332,6 +332,13 @@ Short explanations of every subsystem: what it is and why we need it.
   that handles them.
 - When a line is not finished (an open quote, an `if` without `fi`), the shell asks for more with the prompt `> `.
 
+## M55 – Using the output of a command
+- `$(command)` runs a command and puts what it printed in its place: `echo "today: $(date)"`, `for f in $(ls)`. The
+  shell connects the command's output to a pipe and reads it back – a second thread reads while the command writes,
+  because a pipe only holds 64 KiB and a writer with nobody reading would wait forever.
+- `"$@"` passes on a script's or function's arguments exactly as they came, each one a separate word even when it
+  contains spaces. `"$*"` glues them into one word; unquoted `$@` splits them again.
+
 ## M36 – Threads and futexes
 - A **thread** is a second "line of execution" inside the same program: same memory, same files, own registers and stack.
   For the kernel it is just one more schedulable thread that happens to use the process's page tables.

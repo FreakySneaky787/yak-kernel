@@ -124,7 +124,7 @@ fault tests and a downloadable release. 1.0.0 itself still waits for the outside
 | # | Milestone | Status | Tests |
 |---|---|---|---|
 | 54 | Supported environment: README section (QEMU q35/TCG, BIOS + UEFI, 1–4 cores, `max`/`qemu64`, devices, hosts), measured RAM limits, `KERNEL_MEM` in `run-qemu.sh` | ✅ | `make e2e` 127/127 at 24, 32, 48, 64, 96, 128 MiB, fails at 16 MiB; `make e2e-uefi` 127/127 at 160 MiB, fails at 64/96/128 MiB (bootloader out of memory under OVMF – the CPU never leaves firmware code, `-d int` log) |
-| 55 | Shell: `$(...)` and `"$@"` | ⬜ | |
+| 55 | Shell: `$(...)` (runs in the shell with subshell semantics, a thread drains the pipe) and `"$@"`/`"$*"`/`$@`; an assignment that does not fit the environment is an error instead of silently lost | ✅ | `/m55.sh` in the userspace integration test (fields, nesting, quotes inside, multi-line output, restored state, `exit` + `$?`, "$@" with spaces and without arguments, 1000 lines ≈ 81 KB through one substitution, too long a value); E2E step at the prompt |
 | 56 | Shell: `case` and `local` | ⬜ | |
 | 57 | Line editor: input longer than one console row | ⬜ | |
 | 58 | Network fault tests: TCP with lost frames, DNS errors and timeouts | ⬜ | |
@@ -449,7 +449,7 @@ they make YAK smaller than a production system, but they do not break the promis
 **User space**
 - No AVX-512; the ELF image is mapped eagerly (heap and stack on demand); no thread-local storage; thread stacks are
   fixed at 256 KiB (64 slots); no SIGCHLD/SIGSTOP/alarm, no signal masks; a CPU exception cannot be caught as a signal.
-- `/bin/sh`: no `$(...)`, `case`, `local`, here-documents or `"$@"`; `&&`/`||`/`|`/`&` must be separate words;
+- `/bin/sh`: no `case`, `local` or here-documents; variables hold up to 4096 bytes (256 of them); `&&`/`||`/`|`/`&` must be separate words;
   functions are not inherited by `sh -c` background shells; built-ins, functions and loops inside a pipeline must fit
   their output into one pipe (64 KiB) – more blocks until Ctrl+C; background jobs share the keyboard with the shell.
 - The line editor handles one console row (input capped at 120 characters).

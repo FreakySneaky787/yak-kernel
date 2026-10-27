@@ -269,6 +269,15 @@
   `if`/`while` conditions and for all but the last pipeline of `&&`/`||`. Ctrl+C: the shell's SIGINT handler (and a
   child killed by SIGINT) sets `INTERRUPTED`, which every list and loop checks; at the prompt the line is cancelled.
   Wildcards: the expander marks unquoted `*`/`?` with private-use characters, `glob.rs` matches them per path component.
+- **Command substitution and `"$@"`** (M55): `$(...)` stays inside its word when tokenizing (`syntax::subst_end` skips
+  quotes and nested parentheses). At expansion `Shell::substitute` parses the text and runs it *in the shell* with
+  stdout on a pipe, while a second thread (`ulib::thread`) drains the pipe – so the output can exceed the 64 KiB pipe.
+  Afterwards variables, the directory, functions and `$@` are restored, which gives subshell semantics without a new
+  process (functions keep working inside); `exit` ends only the substitution, `$?` is its last status. Because expansion
+  produces text that `parser::split` splits again, substituted output and arguments are inserted *quoted*: in double
+  quotes as one escaped string, unquoted as one quoted word per field, after `NAME=` as one word (no splitting).
+  `"$@"` closes and reopens the quotes between the arguments; without arguments it produces no word. Variables live in
+  the kernel's per-process environment: values up to 4096 bytes, up to 256 variables – a larger assignment is an error.
 - **Files**: each process has a cwd (inherited from the spawner, paths are normalized against it) and up to 32 file descriptors
   (`process::Handle`): 0 stdin, 1/2 the process's `Output`, then files (path + one offset for reads and writes, shared
   with `dup`-ed and inherited copies like a POSIX open file description – the shell's save/restore of fds 0-2 depends

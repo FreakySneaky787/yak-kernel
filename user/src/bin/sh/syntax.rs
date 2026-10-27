@@ -17,7 +17,8 @@
 //!
 //! Keywords count only at the start of a command (`echo fi` prints "fi").
 //! `;`, newlines and `#` comments work anywhere outside quotes; `&`, `&&`,
-//! `||` and `|` must be separate words. `$((...))` is always one word.
+//! `||` and `|` must be separate words. `$((...))` and `$(...)` (command
+//! substitution, M55) are always part of one word.
 
 use alloc::rc::Rc;
 use alloc::string::String;
@@ -112,6 +113,12 @@ pub fn tokenize(text: &str) -> Result<Vec<Token>, SyntaxError> {
                                 None => return Err(SyntaxError::Incomplete),
                             }
                         }
+                        Some('$') if c == '"' && chars.get(i + 1) == Some(&'(') => {
+                            // "...$(...)...": quotes inside the command do not end ours
+                            let end = subst_end(&chars, i + 2).ok_or(SyntaxError::Incomplete)?;
+                            word.extend(&chars[i..=end]);
+                            i = end;
+                        }
                         Some(&other) => word.push(other),
                     }
                 }
@@ -142,6 +149,13 @@ pub fn tokenize(text: &str) -> Result<Vec<Token>, SyntaxError> {
                     i += 1;
                 }
             }
+            '$' if chars.get(i + 1) == Some(&'(') => {
+                // `$(...)`: the command text stays in the word, expanded when the command runs
+                let end = subst_end(&chars, i + 2).ok_or(SyntaxError::Incomplete)?;
+                word.extend(&chars[i..=end]);
+                in_word = true;
+                i = end;
+            }
             _ => {
                 word.push(c);
                 in_word = true;
@@ -151,6 +165,33 @@ pub fn tokenize(text: &str) -> Result<Vec<Token>, SyntaxError> {
     }
     end_word(&mut word, &mut in_word, &mut tokens);
     Ok(tokens)
+}
+
+/// The index of the `)` that closes a `$(` whose text starts at `start`;
+/// quotes, backslashes and nested parentheses are skipped. `None`: not closed.
+pub fn subst_end(chars: &[char], start: usize) -> Option<usize> {
+    let mut depth = 0;
+    let mut i = start;
+    while i < chars.len() {
+        match chars[i] {
+            '\\' => i += 1,
+            q @ ('\'' | '"') => {
+                i += 1;
+                while *chars.get(i)? != q {
+                    if q == '"' && chars[i] == '\\' {
+                        i += 1;
+                    }
+                    i += 1;
+                }
+            }
+            '(' => depth += 1,
+            ')' if depth == 0 => return Some(i),
+            ')' => depth -= 1,
+            _ => {}
+        }
+        i += 1;
+    }
+    None
 }
 
 pub type List = Vec<AndOr>;

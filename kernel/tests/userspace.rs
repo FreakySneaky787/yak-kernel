@@ -392,6 +392,12 @@ extern "C" fn kmain() -> ! {
         assert!(out.contains(expected), "missing {:?} in:\n{}", expected, out);
     }
 
+    // M55: command substitution and "$@"
+    fs::with_root(|fs| fs.write_file("/m55.sh", SCRIPT_M55.as_bytes())).unwrap();
+    let (status, out) = run("sh", "/m55.sh a b");
+    assert_eq!(status, ExitStatus::Exited(0), "{}", out);
+    assert_eq!(out, EXPECTED_M55);
+
     // M32: disk speed (informational: prints the time; checks the result)
     let data: Vec<u8> = (0..300_000u32).map(|i| b"abcdefghij\n"[(i % 11) as usize]).collect();
     fs::with_root(|fs| fs.write_file("/bench.txt", &data)).unwrap();
@@ -424,6 +430,63 @@ extern "C" fn kmain() -> ! {
 fn panic(info: &core::panic::PanicInfo) -> ! {
     kernel::testing::test_panic_handler(info)
 }
+
+const SCRIPT_M55: &str = r#"#!/bin/sh
+# M55: command substitution and "$@"
+echo "now: $(echo one   two)"
+words=$(echo a   b c)
+echo "[$words]"
+for w in $(echo x y); do echo "w=$w"; done
+echo "nested: $(echo $(echo inner) outer)"
+echo "quotes survive: $(echo 'a"b\c')"
+echo "lines: $(for i in 1 2 3; do echo $i; done)"
+x=keep; y=$(x=changed; cd /docs; pwd; echo $x; exit 4; echo never); echo "$? / $y / $x / $(pwd)"
+s=$(false); echo "status $?"
+count() { echo "$# args"; }
+args() { for a in "$@"; do echo "arg <$a>"; done; }
+forward() {
+  count "$@"
+  count "$*"
+  count $@
+  count "$@" extra
+  args "$@"
+  args "with $1 inside" "$2"
+}
+forward one "two words" three
+args
+echo "script args: $# $@"
+n=0
+for l in $(i=0; while [ $i -lt 1000 ]; do echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx; i=$((i + 1)); done); do n=$((n + 1)); done
+echo "$n lines through one pipe"
+long=$(i=0; while [ $i -lt 100 ]; do echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx; i=$((i + 1)); done) || echo "too long for a variable"
+"#;
+
+const EXPECTED_M55: &str = "now: one two
+[a b c]
+w=x
+w=y
+nested: inner outer
+quotes survive: a\"b\\c
+lines: 1
+2
+3
+4 / /docs
+changed / keep / /
+status 1
+3 args
+1 args
+4 args
+4 args
+arg <one>
+arg <two words>
+arg <three>
+arg <with one inside>
+arg <two words>
+script args: 2 a b
+1000 lines through one pipe
+\x1b[91merror:\x1b[0m long: cannot set (values up to 4096 bytes, up to 256 variables)
+too long for a variable
+";
 
 const SCRIPT_M35: &str = r#"#!/bin/sh
 # M35: control flow, functions, arithmetic

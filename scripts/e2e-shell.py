@@ -242,6 +242,8 @@ STEPS = [
     ("fault spin | cat\r" + PAUSE + CTRL_C, ["fault was killed: interrupted"], []),
     ("pipetest\r", ["pipetest: all checks passed"], ["FAIL"]),
     ("uname\r", ["YAK ", " x86_64"], ["error"]),
+    # M55: command substitution at the prompt
+    ('echo "files: $(ls /docs) sys: $(uname | wc)"\r', ["files:  ", "hello.txt\r\n", "My Notes/ sys:       1       3"], ["error"]),
     # M41: every syscall with bad pointers, lengths, descriptors and numbers - the kernel must survive
     ("syscheck\r", ["syscheck: all checks passed"], ["FAIL", "PANIC", "killed"]),
     ("netinfo\r", ["IPv4     10.0.2.15", "link up", "DNS      10.0.2.3", "config   DHCP"], ["error"]),  # M27, M30
