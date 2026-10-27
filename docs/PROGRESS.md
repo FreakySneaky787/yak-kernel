@@ -18,7 +18,7 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 | 10 | Kernel heap → `alloc` | ✅ | 9 tests: allocator core on a fixed arena + Box/Vec/String/BTreeMap, growth, reuse |
 | 11 | Shell | ✅ | 37 unit tests (console, input, parser, line editor, commands) + 19-step E2E over serial |
 
-## Stage 2: multitasking, files, user space (agreed with the user on 2026-10-24)
+## Stage 2: multitasking, files, user space (decided 2026-10-24)
 | # | Milestone | Status | Tests |
 |---|---|---|---|
 | 12 | APIC: ACPI/MADT, local APIC + timer, I/O APIC, 8259 masked | ✅ | 10 tests + E2E on BIOS and UEFI, timer vs. wall clock checked |
@@ -27,7 +27,7 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 | 15 | FAT32 file system (read/write, long names), persistent across reboots | ✅ | 30 tests + `fsck.fat`/mtools check of all test disks + 45-step E2E incl. reboot (BIOS + UEFI) |
 | 16 | User space: ring 3, syscalls, ELF loader | ✅ | 26 new unit tests (hand-assembled programs) + integration test `userspace` (real programs from disk) + 7 E2E steps |
 
-## Stage 3: a real user space (agreed with the user on 2026-10-24)
+## Stage 3: a real user space (decided 2026-10-24)
 | # | Milestone | Status | Tests |
 |---|---|---|---|
 | 17 | Files for programs: fd table, `open`/`close`/`readdir`/`stat`/`getcwd`/`unlink`/`mkdir`, `cat`/`ls`/`cp` as programs | ✅ | `read_at` unit test, `fstest` (25 syscall checks incl. errors), integration test, mtools check of a `cp` copy, 6 E2E steps |
@@ -35,14 +35,14 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 | 19 | Processes from processes: `spawn`/`wait`/`kill` syscalls, Ctrl+C | ✅ | Ctrl+C unit tests (foreground, ignore, raw scancode tracker), `spawntest` (17 checks incl. orphans), 6 E2E steps (Ctrl+C over serial), PS/2 Ctrl+C checked via `sendkey` |
 | 20 | Shell as a user program (`/bin/sh` started as `init`, kernel shell as fallback) | ✅ | `builtins_for_user_space`, scripted `/bin/sh` session in the integration test (injected serial input), whole E2E suite (72 steps) now against `/bin/sh` + `exit` fallback |
 
-## Stage 4: a usable system (agreed with the user on 2026-10-24)
+## Stage 4: a usable system (decided 2026-10-24)
 | # | Milestone | Status | Tests |
 |---|---|---|---|
 | 21 | Pipes and redirection (`a \| b`, `>`, `>>`, `<`) | ✅ | 4 pipe unit tests (EOF, EPIPE, full pipe with a writer thread, abort), `pipetest` (17 checks incl. 200 KB from a child), scripted `sh` pipeline session, 8 E2E steps |
 | 22 | System information as syscalls (replace `kshell`), `ps`/`mem`/... as programs, `rename` + seek | ✅ | `write_at` unit test, `fstest` +17 checks (seek, gaps, APPEND, rename, ESPIPE), integration test for all 10 programs, 5 E2E steps |
 | 23 | Full-screen text editor as a user program | ✅ | `edit --selftest` (19 buffer checks), console SGR 7 test, 3 scripted editor sessions in the integration test, 5 E2E steps, screenshot |
 
-## Stage 5: hardware (agreed with the user on 2026-10-24)
+## Stage 5: hardware (decided 2026-10-24)
 | # | Milestone | Status | Tests |
 |---|---|---|---|
 | 24 | FPU/SSE state per thread; user programs built with SSE2 hardware floating point | ✅ | 3 FPU unit tests (CR0/CR4, initial state, save/restore), `fputest` (4 preempted workers checking XMM0–15 + MXCSR, pi with f64) in integration + E2E; verified that it fails without the switch |
@@ -50,7 +50,7 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 | 26 | SMP part 2: scheduler on all cores (per-CPU current/idle thread, lock held across switches, no lost wake-ups, `swapgs` in the syscall stub) | ✅ | new test: spinning threads seen on ≥ 2 CPUs; whole suite green with `KERNEL_SMP=1`, `2` and `4`; `demo 4`: 760 ms on 1 core → 200 ms on 4 |
 | 27 | Network: e1000 driver, Ethernet/ARP/IPv4/ICMP/UDP, `ping`, `netinfo`, `udpecho` | ✅ | 4 packet unit tests (checksum, IPv4/ARP/ICMP/UDP round trips), 4 network tests (config, ARP + ping to the gateway, UDP ports, receive path), integration test (ping/netinfo/unreachable), E2E: ping + UDP echo through a host server |
 
-## Stage 6: a complete small system (agreed with the user on 2026-10-24: "all of it")
+## Stage 6: a complete small system (decided 2026-10-24: "all of it")
 | # | Milestone | Status | Tests |
 |---|---|---|---|
 | 28 | Microsecond clock from the TSC, `time` program, ping in µs | ✅ | 2 TSC unit tests (calibration, agreement with the tick clock), `time hello` in integration test + E2E |
@@ -60,7 +60,7 @@ Legend: ✅ done · 🔨 in progress · ⬜ open
 | 32 | Storage speed: sector cache for FAT32, AHCI completion interrupts (MSI) | ✅ | BlockCache unit test (hits, runs, write-through, eviction), lookup-cache invalidation test, MSI test (≥ 1 interrupt per command), benchmark line in the integration test; suite green with 1 and 4 CPUs |
 | 33 | Memory: reclaim bootloader memory, demand paging for user heaps | ✅ | `tests/reclaim.rs` (≥ 1 MiB gained, former bootloader frames are handed out and survive being overwritten, threads + a program afterwards), demand-paging unit test (32 MiB heap, 3 touched pages, < 100 frames), existing brk/heaptest checks; suite green with 1 and 4 CPUs |
 
-## Stage 7: a more Unix-like system (agreed with the user on 2026-10-25: "alle")
+## Stage 7: a more Unix-like system (decided 2026-10-25: "all of it")
 | # | Milestone | Status | Tests |
 |---|---|---|---|
 | 34 | Signals: handlers in user space, `kill -SIG`, Ctrl+C as SIGINT, interrupted blocking calls | ✅ | 2 signal unit tests (dispositions, pending order, blocking during a handler, reasons ↔ numbers), `sigtest` (23 checks incl. all GPRs + XMM0–15 kept when a handler interrupts a loop without syscalls, EINTR from sleep, no nesting, SIG_IGN inherited), sh `kill` session, E2E: Ctrl+C caught by a handler, `kill -USR1 %1` |
@@ -75,7 +75,7 @@ No new kernel features: this stage makes the existing system meet the release cr
 |---|---|---|---|
 | 39 | Front door: `README.md` with screenshot and host packages, `docs/GOALS.md`, OVMF path found on Fedora and Debian/Ubuntu | ✅ | `make check` green on Ubuntu 24.04 with the detected OVMF path |
 | 40 | Reproducible setup: toolchain pinned (`rust-toolchain.toml`, nightly-2026-10-26), `make deps` checks host tools and prints the dnf/apt command, `make check` runs it first; LICENSE (ECPL v1.2) | ✅ | `check-deps.sh --selftest` (hidden tool reported, exit 1) in `make check`; manual run with a reduced PATH; `make check` green with the pinned toolchain on Ubuntu 24.04 |
-| 40b | Optional CI (GitHub Actions running `make check` under TCG) – only if the user wants it | ⬜ | a green run on a push |
+| 40b | Optional CI (GitHub Actions running `make check` under TCG) – only if I want it | ⬜ | a green run on a push |
 | 41 | Reliability gate: `/bin/syscheck` (bad pointers/lengths/fds/numbers for every syscall, 20 000 seeded random calls, `race` mode), `make soak` (`rootfs/soak.sh` via `scripts/soak.py`), `make stress` (suite N× with 1/2/4 CPUs, `qemu64`, UEFI, then soak); TLB shootdown by IPI | ✅ | `syscheck` + `syscheck race` in integration test, `syscheck` E2E step, shootdown unit test (old code: hangs), soak negative check (an injected failure is reported); bugs #11–#15 found and fixed |
 | 42 | Known limits: "Open items" sorted into documented limitations (no open release blocker); found and fixed on the way: #16 (one `write` grew the kernel heap by its whole buffer) | ✅ | `syscheck`: 16 MiB into a pipe without reader → EPIPE with < 1 MiB heap growth (old kernel: +16 388 KiB), oversized `sendto` → EMSGSIZE |
 | 43 | Walkthroughs (`docs/walkthrough/`): boot to `/bin/sh`, a key press, `cat \| wc`, a page fault – with links to the functions | ✅ | `scripts/check-doc-refs.py` (`make docs-check`, part of `make check`, with self-test): every \[`symbol`\](file) link must name a symbol in an existing file; "things to try" checked in the running system |
@@ -83,21 +83,21 @@ No new kernel features: this stage makes the existing system meet the release cr
 | 45 | Extending guides (`docs/HACKING.md`): syscall, user program, test, shell built-in | ✅ | the syscall + program guide followed once: syscall 52 `uname` + `/bin/uname` (integration test, E2E step, `syscheck` bad pointers, `SYSCALL_COUNT`) |
 | 46 | Pre-release 0.8.0: GPL-3.0-or-later (`LICENSE` = FSF text, SHA-256 `3972dc97…`), version in both manifests and the boot banner, `CHANGELOG.md`, new screenshot | ✅ | `make check` green; `uname` shows `YAK 0.8.0 x86_64` |
 
-Decided 2026-10-26: name KernelTry, renamed the same evening to **YAK – Yet Another Kernel** (user); license first ECPL v1.2, then (same day) **GNU GPL v3 or later** (copyright
-FreakySneaky787 and contributors); 1.0 is preceded by the pre-release **0.8.0** (user decision, first prepared as `1.0.0-rc.1`).
+Decided 2026-10-26: name KernelTry, renamed the same evening to **YAK – Yet Another Kernel** (my decision); license first ECPL v1.2, then (same day) **GNU GPL v3 or later** (copyright
+FreakySneaky787 and contributors); 1.0 is preceded by the pre-release **0.8.0** (my decision, first prepared as `1.0.0-rc.1`).
 Still open: N for `make stress` (proposal: 5), whether CI is wanted (M40b), whether experiments may add build switches to the kernel (M44).
 
 ## Stage 9: CI and release 1.0 (roadmap phase A, agreed 2026-10-26)
 | # | Milestone | Status | Tests |
 |---|---|---|---|
 | 47 | CI: `.github/workflows/check.yml` runs `make check` on ubuntu-24.04 and in a `fedora:latest` container (QEMU TCG, pinned toolchain, 120 s per test kernel, `build/` uploaded on failure); CI badge in the README | ✅ | first run red on both (bug #17: shootdown test limit too strict for CI runners), then green on both: all kernel tests, all test disks fsck-clean, 127/127 E2E steps BIOS + UEFI |
-| 48 | Release prep for 1.0.0: `CHANGELOG.md` "Unreleased" section (CI, website, #17–#19); version, `make stress` and the tag follow when the outside-reader feedback is in (user) | 🔨 | – |
+| 48 | Release prep for 1.0.0: `CHANGELOG.md` "Unreleased" section (CI, website, #17–#19); version, `make stress` and the tag follow when the outside-reader feedback is in (I create the tag) | 🔨 | – |
 
 ## Stage 10: course infrastructure (roadmap phase B)
 | # | Milestone | Status | Tests |
 |---|---|---|---|
 | 49 | Website: mdBook over `docs/` (`book.toml`, `docs/SUMMARY.md`, home page `docs/index.md`), `make book` via `scripts/build-book.py` (links to files outside `docs/` point at GitHub; build fails on broken links), CI builds it, `.github/workflows/pages.yml` deploys `main` to GitHub Pages | ✅ | `build-book.py --selftest`; 17 pages, 0 broken links; rendered pages checked in a headless browser; CI step "Website builds without broken links" |
-| 50 | Chapter infrastructure: chapters are folders `course/NN-slug/` in `main` (user decision 2026-10-26, instead of branches), pages `docs/course/`, `scripts/check-course.py` (folder/page pairs, numbering, toolchain copy, every `file=` code block must match the folder; `--build` runs each chapter's `make test`), `make course`, CI job `course`, authoring rules in `docs/HACKING.md` | ✅ | `check-course.py --selftest`; static check in `make docs-check`; `make course` green |
+| 50 | Chapter infrastructure: chapters are folders `course/NN-slug/` in `main` (my decision of 2026-10-26, instead of branches), pages `docs/course/`, `scripts/check-course.py` (folder/page pairs, numbering, toolchain copy, every `file=` code block must match the folder; `--build` runs each chapter's `make test`), `make course`, CI job `course`, authoring rules in `docs/HACKING.md` | ✅ | `check-course.py --selftest`; static check in `make docs-check`; `make course` green |
 | C1 | Pilot chapter 1 – Booting with Limine (serial output) | ✅ | `make test`: serial output matches `expected.txt`; fails when the greeting is removed |
 | C2 | Pilot chapter 2 – Testing without an operating system (custom test framework, isa-debug-exit, cargo runner) | ✅ | 3 in-kernel tests; a broken assertion makes `make test` fail with QEMU status 35 |
 | C3 | Pilot chapter 3 – Text on the screen (PSF2 font, framebuffer console, `println!`) | ✅ | 12 in-kernel tests incl. drawing into an in-memory screen with stride ≠ width; screenshot on the page |
@@ -105,12 +105,23 @@ Still open: N for `make stress` (proposal: 5), whether CI is wanted (M40b), whet
 
 Then: phase C (pilot chapters 1–4 + feedback), phases D/E – see `docs/ROADMAP.md`.
 
+## Stage 11: follow-up of an outside review (agreed 2026-10-27)
+An outside review of the docs listed risks and one contradiction; I chose what to do before 1.0: fix the docs,
+verify UDP checksums, guard pages for thread stacks, tests with a failing disk. Everything else it named stays a
+documented limitation.
+
+| # | Milestone | Status | Tests |
+|---|---|---|---|
+| 51 | Docs: "File system" in `docs/DESIGN.md` contradicted the block cache (bug #20), the power-off guarantee is stated precisely, GOALS says YAK is not the base of a desktop OS; UDP checksums are verified on receipt (0 = none, accepted) | ✅ | `packet::tests::udp_checksums_are_verified_on_receipt` (wrong IP address, flipped bit, zero checksum, Ethernet padding); E2E UDP echo, DHCP and DNS still work |
+| 52 | Guard pages for thread stacks: 64 kernel stack slots `[64 KiB guard][256 KiB stack]` below the main stack, `thread_spawn` with stack 0, slots freed after the thread ended; `USER_IMAGE_END` lowered so the heap cannot reach the stacks (bug #21) | ✅ | `thread_stack_slots_have_guards` (layout, guards, bug #21); `fault thread-stack` killed with "stack overflow in a thread" in the page below slot 0; `threadtest`: 200 KiB on a thread stack, 100 threads in a row, 70 unjoined threads then one more; `make test` with 1, 2 and 4 CPUs |
+| 53 | Disk fault tests: `FaultyDisk` fails I/O number n (transient, or power loss with a torn write); a volume checker (lost clusters, cross-links, broken chains, chain vs. size, FAT copies); results written down in `docs/DESIGN.md` "File system" | ✅ | `fault_tests::every_failing_io_is_reported_and_leaves_a_mountable_volume` (7 operations × every I/O × 2 failure kinds: error reported, volume mounts, untouched files intact, target old or new, only fsck-repairable damage), `the_volume_stays_usable_after_a_failed_operation`, `the_checker_sees_damage` |
+
 ## Log
 - **2026-10-24** – Setup: Rust nightly 1.101 (rustup), target `x86_64-unknown-none`, Limine v11.x-binary.
   M1: kernel boots via BIOS and UEFI, prints "Hello from KernelTry!" on serial, colour bars on the framebuffer (1280×800×32).
 - **2026-10-24** – M2: kernel split into library + binary. Custom test framework in `kernel/src/testing.rs`.
   Integration tests `tests/boot.rs` (Limine responses) and `tests/should_panic.rs`. Bug #1 found and fixed (runner did not detect test mode).
-- **2026-10-24** – The user decided that Claude implements everything itself (no user exercises).
+- **2026-10-24** – I decided that Claude implements everything itself (no exercises for me).
 - **2026-10-24** – M3: own PSF2 parser (`font.rs`, Terminus 8×16, OFL) and text console (`console.rs`) with wrapping, tab, backspace, scrolling.
   `print!`/`println!` write to screen and serial. `without_interrupts` prepared. Added `scripts/screenshot.py` for visual checks.
 - **2026-10-24** – M4: own GDT (null, kernel code 0x08, kernel data 0x10, TSS 0x18) and TSS with IST1 = 20 KiB double fault stack. CS reloaded via `retfq`.
@@ -121,7 +132,7 @@ Then: phase C (pilot chapters 1–4 + feedback), phases D/E – see `docs/ROADMA
 - **2026-10-24** – M7: PS/2 keyboard on IRQ1. Ring buffer in the handler, `scancode::Decoder` (set 1, Shift, Caps, Ctrl, Alt, AltGr, E0/E1).
   Layouts DE (default) and US. `keyboard::read_key()` sleeps race-free with `sti; hlt`. `main.rs` has an echo mode until the shell exists.
   New: `scripts/qemu-monitor.py` for QEMU monitor queries.
-- **2026-10-24** – Repository translated to English (user request). Kernel now linked with **GNU ld** (`ld.bfd`) instead of rust-lld;
+- **2026-10-24** – Repository translated to English (my request). Kernel now linked with **GNU ld** (`ld.bfd`) instead of rust-lld;
   added binutils make targets (`disasm`, `symbols`, `sections`, `addr2line`).
 - **2026-10-24** – M8: `mem/` module with `PhysAddr`/`VirtAddr`, HHDM offset, bitmap frame allocator (`mem/pmm.rs`).
   Bitmap logic is independent of Limine and unit-tested with fake memory maps. 253 MiB usable with `-m 256M`.
@@ -142,7 +153,7 @@ Then: phase C (pilot chapters 1–4 + feedback), phases D/E – see `docs/ROADMA
   Panics are now also shown on screen. `scripts/e2e-shell.py` drives the real kernel over the serial port (`make e2e`, `make check`).
   **Stage 1 complete: 99 in-kernel tests + 19 E2E steps green.**
 
-- **2026-10-24** – User confirmed stage 2 in the proposed order (M12–M15) and asked to be consulted on open questions.
+- **2026-10-24** – I confirmed stage 2 in the proposed order (M12–M15) and asked to be consulted on open questions.
 - **2026-10-24** – M12: ACPI parser (`acpi.rs`: RSDP → XSDT/RSDT → MADT with CPUs, I/O APICs, overrides).
   `paging::ensure_hhdm_mapped` maps ACPI tables / MMIO missing from Limine's HHDM. Local APIC enabled (`lapic.rs`), its timer
   calibrated against PIT channel 2 (polled, no IRQ) and running periodic at 100 Hz on vector 32. I/O APIC (`ioapic.rs`) routes
@@ -155,7 +166,7 @@ Then: phase C (pilot chapters 1–4 + feedback), phases D/E – see `docs/ROADMA
   instead of spinning. Timer handler sends EOI *before* calling `task::on_tick` (which may switch threads).
   Shell: `ps` and `demo [n]` (parallel prime-counting workers).
 
-- **2026-10-24** – User decided: the file system must be a **real persistent disk** (not a RAM fs). Roadmap changed:
+- **2026-10-24** – I decided: the file system must be a **real persistent disk** (not a RAM fs). Roadmap changed:
   M14 = storage driver, M15 = FAT32, M16 = user space.
 - **2026-10-24** – Code base formatted with rustfmt (`kernel/rustfmt.toml`, max_width 120) in a separate commit.
 - **2026-10-24** – M14: PCI config space enumeration (`drivers/pci.rs`), AHCI driver (`drivers/ahci.rs`: port init, IDENTIFY,
@@ -184,7 +195,7 @@ Then: phase C (pilot chapters 1–4 + feedback), phases D/E – see `docs/ROADMA
   Found: Limine sets USER on its upper-half intermediate page tables – cleared in `paging::init` (BUGS.md pitfalls).
   **Stage 2 complete: 156 in-kernel tests + 6 test kernels + 52 E2E steps green (BIOS and UEFI).**
 
-- **2026-10-24** – User agreed to stage 3 (M17–M19) as proposed.
+- **2026-10-24** – I agreed to stage 3 (M17–M19) as proposed.
 - **2026-10-24** – M17: per-process file descriptor table (`process::Handle`: stdin, stdout, file with offset, directory snapshot;
   max 32) and current directory (inherited from the shell). New syscalls 7–13: `open` (READ/WRITE/CREATE/TRUNCATE, writes append),
   `close`, `readdir`, `stat`, `getcwd`, `unlink`, `mkdir`; `read`/`write` work on files. `FatFs::read_at` reads at an offset.
@@ -217,7 +228,7 @@ Then: phase C (pilot chapters 1–4 + feedback), phases D/E – see `docs/ROADMA
   E2E test and fixed: the console is lent to a child only while its parent waits for it.
   **Stage 3 complete: 163 in-kernel tests + 6 test kernels + 72 E2E steps green (BIOS and UEFI), init is /bin/sh.**
 
-- **2026-10-24** – User agreed to stage 4 (M21–M23) as proposed.
+- **2026-10-24** – I agreed to stage 4 (M21–M23) as proposed.
 - **2026-10-24** – M21: pipes (`process/pipe.rs`: 64 KiB queue, reader/writer counts kept by cloning/dropping `PipeEnd`s,
   blocking with `Wait::Pipe(id)` + `task::notify`, EOF and EPIPE). Syscalls 21–24 `pipe`, `dup`, `dup2`, `isatty`; children
   inherit fds 0–2 at `spawn`; `kshell` output follows fd 1. `/bin/sh`: `a | b | c`, `>`, `>>`, `<` via `dup2` around each stage,
@@ -236,14 +247,14 @@ Then: phase C (pilot chapters 1–4 + feedback), phases D/E – see `docs/ROADMA
   Kernel: syscalls 29 `termsize` and 30 `ignore_interrupt` (the editor takes Ctrl+C itself), console SGR 7/27 (inverse video).
   **Stage 4 complete: 169 in-kernel tests + 6 test kernels + 90 E2E steps green (BIOS and UEFI), 26 programs in /bin.**
 
-- **2026-10-24** – User agreed to stage 5 (M24–M26) and installed `gcc` (needed as host linker for `-Zbuild-std`).
+- **2026-10-24** – I agreed to stage 5 (M24–M26) and installed `gcc` (needed as host linker for `-Zbuild-std`).
 - **2026-10-24** – M24: `arch/x86_64/fpu.rs` enables x87/SSE (CR0.EM/TS off, MP/NE on, CR4.OSFXSR/OSXMMEXCPT) and records a
   clean initial FXSAVE image. Every thread owns a 512-byte `FxState`; `schedule()` does `fxsave64` for the outgoing and
   `fxrstor64` for the incoming thread (eager). The kernel stays soft-float. User programs now use their own target
   `user/x86_64-kerneltry-user.json` (SSE2, hard-float ABI, static, small code model, red zone allowed) with
   `-Zbuild-std=core,alloc`. New program `fputest`. Check: with the save/restore removed, all 4 workers report corrupted XMM.
 
-- **2026-10-24** – User chose our own INIT/SIPI start (not Limine's MP feature). M25 was split: M25 = starting the cores,
+- **2026-10-24** – I chose our own INIT/SIPI start (not Limine's MP feature). M25 was split: M25 = starting the cores,
   M26 = scheduling on them, M27 = network.
 - **2026-10-24** – M25: `arch/x86_64/smp.rs`. `pmm` reserves one frame below 1 MiB before anything else; the trampoline
   (`global_asm!`, 16 → 32 → 64 bit, data accesses hand-encoded because the assembler rejects label differences in memory
@@ -268,7 +279,7 @@ Then: phase C (pilot chapters 1–4 + feedback), phases D/E – see `docs/ROADMA
   `udpecho`. QEMU gets `-netdev user -device e1000` (`KERNEL_NETDEV_OPTS` for extras). Bug #5 (`run_on` could starve the
   target CPU's idle thread) fixed. **Stage 5 complete: 185 in-kernel tests + 6 test kernels + 94 E2E steps (BIOS + UEFI).**
 
-- **2026-10-24** – User wants all of the stage 6 ideas; order M28–M33 chosen by dependencies.
+- **2026-10-24** – I want all of the stage 6 ideas; order M28–M33 chosen by dependencies.
 - **2026-10-24** – M28: `arch/x86_64/tsc.rs` calibrates the time stamp counter against PIT channel 2 (50 ms, after the LAPIC
   calibration); `time::uptime_us`. Syscall 36 `clock_us`. Ping replies are time-stamped in µs (`ping` prints ms with three
   decimals – the receive time is still when the net thread polls, i.e. up to 10 ms late). New program `time <program>`.
@@ -348,7 +359,7 @@ Then: phase C (pilot chapters 1–4 + feedback), phases D/E – see `docs/ROADMA
   (`OVMF ?=`, override with `make OVMF=<file>`). Found while setting up a fresh Ubuntu container: no toolchain pin
   (stable rustc fails on the user target), hard-coded Fedora OVMF path – both feed M40.
 
-- **2026-10-26** – User chose the license (ECPL v1.2, their own text) and the name KernelTry. M40: `rust-toolchain.toml`
+- **2026-10-26** – I chose the license (ECPL v1.2, my own text) and the name KernelTry. M40: `rust-toolchain.toml`
   pins nightly-2026-10-26 (rustc 1.101.0-nightly 76456a688) with rust-src, rustfmt and the `x86_64-unknown-none` target;
   `scripts/check-deps.sh` / `make deps` (Fedora/Debian package names, OVMF, rustup) is the first step of `make check`.
   `license-file` set in both Cargo manifests.
@@ -371,14 +382,14 @@ Then: phase C (pilot chapters 1–4 + feedback), phases D/E – see `docs/ROADMA
   wording) and wants a pre-release before 1.0. M46: `LICENSE` from Ubuntu's `base-files` (`/usr/share/common-licenses/GPL-3`,
   identical to the FSF's `gpl-3.0.txt` – gnu.org itself is blocked by the sandbox proxy), dependency licenses checked
   (limine, lock_api, scopeguard: MIT OR Apache-2.0; spin: MIT; Limine bootloader: BSD-2-Clause – all GPLv3-compatible),
-  version 1.0.0-rc.1 – renamed to **0.8.0** at the user's request (0.x = not yet stable, as SemVer intends).
+  version 1.0.0-rc.1 – renamed to **0.8.0** at my request (0.x = not yet stable, as SemVer intends).
 
-- **2026-10-26** – Stage 8 merged into `main` (FreakySneaky787/yak-kernel#1, merge commit `a75812b`). The user
+- **2026-10-26** – Stage 8 merged into `main` (FreakySneaky787/yak-kernel#1, merge commit `a75812b`). I
   published the GitHub pre-release **v0.8.0** on that commit (tag pushes are not possible from Claude's sandbox).
 
-- **2026-10-26** – Direction for the next 1–2 years decided by the user: a learning platform for self-learners and
+- **2026-10-26** – I decided the direction for the next 1–2 years: a learning platform for self-learners and
   hobby kernel developers; an English course in which learners rebuild the kernel chapter by chapter (one branch per
-  chapter), published as a website; the user steers, Claude builds. Written down in `docs/ROADMAP.md`; `docs/GOALS.md`
+  chapter), published as a website; I steer, Claude builds. Written down in `docs/ROADMAP.md`; `docs/GOALS.md`
   updated; stages 9 (CI, 1.0) and 10 (course infrastructure) planned.
 
 - **2026-10-26** – M47: CI on GitHub Actions (FreakySneaky787/yak-kernel#2). Fedora was tested for the first time
@@ -394,16 +405,21 @@ Then: phase C (pilot chapters 1–4 + feedback), phases D/E – see `docs/ROADMA
 
 - **2026-10-26** – M47 merged (FreakySneaky787/yak-kernel#2, `7f8f5b2`). M49: the website is mdBook over `docs/`
   (no copy of the docs); mdBook 0.4.52 is a host tool (`cargo install`), not a kernel dependency. GitHub Pages must be
-  switched to "GitHub Actions" by the user before the first deploy.
+  switched to "GitHub Actions" by me before the first deploy.
 
 - **2026-10-26** – M50 + pilot chapters 1–3. Chapters live as folders in `main` (the sandbox cannot push other
-  branches; the user chose folders). Every code block on a chapter page that names a file is checked against the
+  branches; I chose folders). Every code block on a chapter page that names a file is checked against the
   chapter folder, so the text cannot drift from the code. Found while writing chapter 3: a dash (U+2013) is drawn as
   `?` by a Latin-1 font table – kept as a "what can go wrong" note.
 
-- **2026-10-26** – The project is called **YAK – Yet Another Kernel** (user decision; "KernelTry" was the working
+- **2026-10-26** – The project is called **YAK – Yet Another Kernel** (my decision; "KernelTry" was the working
   name). Renamed everywhere except in this log: boot banner, `uname`, disk label `YAK`, user target
   `user/x86_64-yak-user.json`, the course chapters, website and docs.
+
+- **2026-10-27** – Stage 11 after an outside review of the docs. Checked every point against the code: the
+  block-cache contradiction was real (bug #20), "the purpose is undecided" was not (GOALS fixes it). M52 found bug #21
+  while laying out the thread stacks. M53's fault tests found no bug, but two kinds of damage beyond lost clusters
+  (chain longer than size, two names after rename) – both inherent to FAT32 without a journal, now documented.
 
 ## Known limitations of release 1.0 (sorted in M42)
 Release blockers were defined as "a program can crash, hang or exhaust the kernel" (`docs/GOALS.md`: isolated
@@ -417,8 +433,8 @@ they make YAK smaller than a production system, but they do not break the promis
 - The kernel heap grows on demand but never shrinks.
 
 **User space**
-- No AVX-512; the ELF image is mapped eagerly (heap and stack on demand); no thread-local storage; no guard pages for
-  thread stacks; no SIGCHLD/SIGSTOP/alarm, no signal masks; a CPU exception cannot be caught as a signal.
+- No AVX-512; the ELF image is mapped eagerly (heap and stack on demand); no thread-local storage; thread stacks are
+  fixed at 256 KiB (64 slots); no SIGCHLD/SIGSTOP/alarm, no signal masks; a CPU exception cannot be caught as a signal.
 - `/bin/sh`: no `$(...)`, `case`, `local`, here-documents or `"$@"`; `&&`/`||`/`|`/`&` must be separate words;
   functions are not inherited by `sh -c` background shells; built-ins, functions and loops inside a pipeline must fit
   their output into one pipe (64 KiB) – more blocks until Ctrl+C; background jobs share the keyboard with the shell.
@@ -428,6 +444,8 @@ they make YAK smaller than a production system, but they do not break the promis
   on the disk, the kernel shell has no `ls`/`cat`.
 
 **Files and network**
+- FAT32 without a journal: a power loss or disk error in the middle of a command can leave lost clusters, a chain
+  longer than its file or (rename) two names for one file – `fsck.fat` repairs it, nothing runs it at boot (M53).
 - FAT32 only; `read`/`write_at` re-walk the cluster chain per call; directory handles are snapshots; no truncate-to-length.
 - IPv4 only: no fragmentation, no SACK / persist timer, DNS A records only; the e1000 interrupt line is found by
   probing (no AML interpreter).
@@ -441,12 +459,12 @@ they make YAK smaller than a production system, but they do not break the promis
 ## Missing for 1.0
 - **A first reader**: somebody who did not build YAK follows README → walkthrough 01 → one experiment and
   reports where they got stuck. That is the real test of the "understandable" goal.
-- **`docs/GOALS.md`** is still marked "proposal" – the user confirms it (or changes it).
+- **`docs/GOALS.md`** is still marked "proposal" – I confirm it (or change it).
 - Decisions: CI (M40b); license headers (`SPDX-License-Identifier: GPL-3.0-or-later`) in every source file – optional,
   the GPL's "How to Apply" recommends a notice per file.
 
 ## Next step
-**Pilot complete – stop here for feedback** (agreed): the user and at least one outside reader go through chapters
-1–4 (website or `docs/course/`) and report what was unclear. Then adjust the chapter format and continue with
-chapter 5 (interrupts and exceptions). GitHub Pages still needs "Settings → Pages → Source: GitHub Actions" (user);
-then re-run the `pages` workflow.
+**Pilot complete – stop here for feedback** (agreed): I and at least one outside reader go through chapters
+1–4 (website https://freakysneaky787.github.io/yak-kernel/ or `docs/course/`) and report what was unclear. Then
+adjust the chapter format and continue with chapter 5 (interrupts and exceptions). Stage 11 (M51–M53, follow-up of
+the outside review) is done.

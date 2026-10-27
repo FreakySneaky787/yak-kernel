@@ -202,10 +202,34 @@ Format: number · date · title, then symptom → cause → fix → test.
 - **Remember:** "interrupts off" protects against *this* CPU only – on SMP, anything a new thread may look at must
   exist before the thread becomes runnable.
 
+### #20 · 2026-10-27 · DESIGN.md said there was no block cache
+- **Symptom:** an outside review of the docs found two contradicting statements: "Disk caching and interrupts" says the
+  root file system runs on a 1024-sector `BlockCache`, "File system" said "No block cache: data clusters are
+  read/written directly".
+- **Cause:** documentation only. The "File system" text was written at M15; M32 added `BlockCache` and updated its own
+  section but not the older one. The code (`fs::RootDisk = BlockCache<SystemDisk>`) was right.
+- **Fix:** the "File system" section now describes the caches as they are and states the limit of the power-off
+  guarantee (after a command, not during one).
+- **Test:** none possible for prose; `scripts/check-doc-refs.py` only checks that named symbols exist.
+- **Remember:** a milestone that changes a layer must search the docs for every statement about that layer, not only
+  edit its own section.
+
+### #21 · 2026-10-27 · The heap could grow into the stack
+- **Symptom:** none observed; found while placing the thread stack slots of M52 below the main stack.
+- **Cause:** `USER_IMAGE_END` only kept the ELF segments 64 KiB below the stack area. The heap starts right after the
+  image and may grow by `HEAP_MAX` (64 MiB) – a program whose image ended near `USER_IMAGE_END` could `brk` its heap
+  into the stack range, and both would demand-page the same addresses. Only the program itself was affected (memory
+  isolation between processes held), but it broke the stack guard.
+- **Fix:** `USER_IMAGE_END = THREAD_STACKS_BOTTOM - STACK_GUARD - HEAP_MAX`: the largest heap behind the highest
+  allowed image ends below a guard gap.
+- **Test:** `process::tests::thread_stack_slots_have_guards` asserts the layout (fails with the old constant).
+- **Remember:** a limit on one region (the image) is only safe together with the limits of the regions that grow out of
+  it (the heap).
+
 ## Known pitfalls (not bugs, but worth remembering)
 - **The Limine host utility (`limine bios-install`) needs a C compiler** (`gcc`). It is not required for booting the ISO
   in QEMU with `-cdrom`; it is only needed to make the ISO bootable as a hard disk / USB image.
-- **`sudo` does not work through `!` in Claude Code** because there is no TTY for the password prompt. The user runs installs in a separate terminal.
+- **`sudo` does not work through `!` in Claude Code** because there is no TTY for the password prompt. I run installs in a separate terminal.
 - **`cargo fmt -- <file>` formats the whole crate**, not just the file. Format deliberately with `make fmt`, and commit pure
   formatting separately from functional changes.
 - **Limine sets the USER bit on its upper-half page tables** (PML4/PDPT/PD entries; the leaf entries are supervisor-only).

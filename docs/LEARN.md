@@ -377,6 +377,27 @@ Short explanations of every subsystem: what it is and why we need it.
 - **Stress** (`make stress`): the whole test suite N times with 1, 2 and 4 CPUs, with an old CPU model and under UEFI.
   A test that fails once in five runs is a bug, not bad luck.
 
+## M52 – A guard below every thread stack
+- A stack grows downwards. If nothing stops it, a thread that recurses too deeply simply keeps writing – into whatever
+  lies below its stack: the heap, another thread's stack. The program then fails much later, somewhere else, for no
+  visible reason.
+- A **guard** is a range of addresses that is deliberately never mapped. The first write into it is a page fault, and
+  the kernel knows at once what happened: the fault address is in a guard, so it is a stack overflow.
+- The kernel stacks have had guards since M9, and nothing is mapped below the main user stack. Thread stacks came from the heap, where there is
+  no room for a hole. Now the kernel hands out fixed **stack slots** – stack on top, guard below – and frees a slot once
+  its thread has ended.
+
+## M53 – When the disk fails in the middle
+- One file system command is many disk writes: the FAT (which clusters belong together), the data, the directory
+  entry (name, size, first cluster). If the power goes out after some of them, the disk holds a mix of old and new.
+- The order of the writes decides how bad that mix is. YAK writes new data and links it in the FAT *before* the
+  directory entry points to it, and frees old clusters only *after* nothing points to them any more. A cut then
+  leaves at worst clusters that are marked used but belong to no file ("lost clusters") – wasted space, no wrong data.
+- Real file systems (ext4, NTFS) add a **journal**: they first write down what they are about to do, so after a crash
+  they can finish or undo it. FAT32 has no journal; `fsck.fat` cleans up afterwards.
+- The test does not trust this reasoning: a fake disk fails at every single I/O of an operation, and a checker
+  (like a tiny `fsck`) looks at what is left.
+
 ## Tooling – GNU ld and binutils
 - rustc compiles our code into object files; a **linker** combines them into the final ELF according to `kernel/linker.ld`
   (load address, section order, segments). We use **GNU ld** (`ld.bfd`) for that.

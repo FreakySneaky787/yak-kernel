@@ -1,5 +1,5 @@
 //! Misbehaves on purpose, to show that the kernel only kills the process.
-//! Usage: fault null | kernel | cli | stack | panic | oom | spin | sleep | exit <code>
+//! Usage: fault null | kernel | cli | stack | thread-stack | panic | oom | spin | sleep | exit <code>
 
 #![no_std]
 #![no_main]
@@ -38,6 +38,13 @@ fn main(mut words: ulib::Args) -> i32 {
             println!("recursing forever ...");
             black_box(recurse(0));
         }
+        Some("thread-stack") => {
+            // the thread's stack has an unmapped guard below it (M52): the overflow must fault
+            // there instead of running into other memory
+            println!("recursing forever in a thread ...");
+            let t = ulib::thread::spawn(|| black_box(recurse(0)) as i32).expect("thread");
+            let _ = t.join();
+        }
         Some("panic") => panic!("fault was asked to panic"),
         Some("oom") => {
             // Fill the heap (64 MiB) down to the last byte, then ask for more: the allocation
@@ -66,7 +73,7 @@ fn main(mut words: ulib::Args) -> i32 {
             }
         }
         Some("exit") => return words.next().and_then(|c| c.parse().ok()).unwrap_or(1),
-        _ => eprintln!("usage: fault null | kernel | cli | stack | panic | spin | sleep | exit <code>"),
+        _ => eprintln!("usage: fault null | kernel | cli | stack | thread-stack | panic | oom | spin | sleep | exit <code>"),
     }
     1
 }

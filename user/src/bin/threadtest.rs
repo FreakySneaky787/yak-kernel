@@ -153,6 +153,24 @@ fn main(mut args: ulib::Args) -> i32 {
     sys::futex_wake(&word, 1);
     check(waiter.and_then(|h| h.join()) == Ok(9), "futex wake");
 
+    // M52: thread stacks are kernel slots with a guard, freed after the thread ended
+    let deep = thread::spawn(|| {
+        let frame = core::hint::black_box([7u8; 200 * 1024]); // most of the 256 KiB stack
+        frame.iter().map(|&b| b as usize).sum::<usize>() as i32 / 7 / 1024
+    });
+    check(deep.and_then(|h| h.join()) == Ok(200), "a thread uses 200 KiB of its stack");
+    let joined = (0..100).all(|i| thread::spawn(move || i).and_then(|h| h.join()) == Ok(i));
+    check(joined, "100 threads one after another (more than the 64 stack slots)");
+    for _ in 0..70 {
+        drop(thread::spawn(|| 0)); // not joined: the slot comes back once the thread has ended
+        sys::sleep_ms(1);
+    }
+    sys::sleep_ms(20);
+    check(
+        thread::spawn(|| 5).and_then(|h| h.join()) == Ok(5),
+        "slots of threads nobody joined are reused",
+    );
+
     // joining something that is not our thread
     check(
         sys::thread_join(sys::getpid()) == -ESRCH,

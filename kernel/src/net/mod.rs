@@ -340,7 +340,7 @@ fn handle_icmp(cfg: &Config, from_mac: Mac, ip: &Ipv4Packet) {
 }
 
 fn handle_udp(ip: &Ipv4Packet) {
-    let Some(udp) = parse_udp(ip.payload) else { return };
+    let Some(udp) = parse_udp(ip.src, ip.dst, ip.payload) else { return };
     let queue = without_interrupts(|| SOCKETS.lock().get(&udp.dst_port).cloned());
     if let Some(queue) = queue {
         without_interrupts(|| {

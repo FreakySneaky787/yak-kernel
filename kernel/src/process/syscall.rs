@@ -120,6 +120,7 @@ pub mod nr {
     /// sigreturn() -> 0: the signal handler has finished (called by the trampoline)
     pub const SIGRETURN: u32 = 45;
     /// thread_spawn(entry, stack_top, arg) -> tid: a further thread, starts at `entry` with RDI = arg
+    /// (stack_top 0 = a kernel-chosen stack with a guard below it)
     pub const THREAD_SPAWN: u32 = 46;
     /// thread_exit(code) -> never returns (in the main thread: the process ends)
     pub const THREAD_EXIT: u32 = 47;
@@ -811,17 +812,18 @@ fn sys_mkdir(path: u64, path_len: u64) -> SysResult {
     Ok(0)
 }
 
-/// Moves the end of the heap to `new_end` (mapping zeroed pages or freeing
-/// them). Fails with ENOMEM outside `[heap_start, heap_start + HEAP_MAX]`
-/// or when memory runs out.
+/// `stack == 0`: the kernel picks a stack slot with a guard (M52).
 fn sys_thread_spawn(entry: u64, stack: u64, arg: u64) -> SysResult {
     // both end up in `iretq` to ring 3: user addresses only
-    if entry == 0 || entry >= USER_END || stack == 0 || stack >= USER_END {
+    if entry == 0 || entry >= USER_END || stack >= USER_END {
         return Err(errno::EINVAL);
     }
     super::spawn_thread(entry, stack, arg).ok_or(errno::EAGAIN)
 }
 
+/// Moves the end of the heap to `new_end` (mapping zeroed pages or freeing
+/// them). Fails with ENOMEM outside `[heap_start, heap_start + HEAP_MAX]`
+/// or when memory runs out.
 fn sys_brk(new_end: u64) -> SysResult {
     use crate::mem::{PAGE_SIZE, VirtAddr, align_up};
     let (start, end) = with_current(|p| (p.heap_start, p.heap_end)).ok_or(errno::EBADF)?;

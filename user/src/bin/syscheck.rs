@@ -177,6 +177,9 @@ fn main(mut args: ulib::Args) -> i32 {
         expect_error(sys::WAIT, [0, p, 0, 0, 0], "wait");
         if p >= 0x0000_8000_0000_0000 || p == 0 {
             expect_error(sys::THREAD_SPAWN, [p, hp + 4096, 0, 0, 0], "thread_spawn entry");
+        }
+        if p >= 0x0000_8000_0000_0000 {
+            // (stack 0 is valid: the kernel picks a stack, M52)
             expect_error(sys::THREAD_SPAWN, [code, p, 0, 0, 0], "thread_spawn stack");
         }
     }

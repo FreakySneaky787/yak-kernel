@@ -5,12 +5,12 @@
 |---|---|---|
 | Language | Rust nightly, `#![no_std]`, some inline assembly | memory safety; nightly is needed for `custom_test_frameworks` and `abi_x86_interrupt` |
 | Target | `x86_64-unknown-none` (built-in) | bare metal, soft-float (no SSE in the kernel) → no custom target JSON needed |
-| Linker | **GNU ld** (`ld.bfd`, binutils 2.46), flavor `ld` | user preference for GNU tools; linker script `kernel/linker.ld` |
+| Linker | **GNU ld** (`ld.bfd`, binutils 2.46), flavor `ld` | my preference for GNU tools; linker script `kernel/linker.ld` |
 | Architecture | x86_64 | matches the host PC, best documentation (OSDev, Intel SDM) |
 | Bootloader | Limine v11, boot protocol base revision 6, crate `limine` 0.6.5 | starts directly in long mode with paging, provides memory map, HHDM and framebuffer |
 | Boot medium | hybrid ISO (BIOS + UEFI) built with xorriso | boots in QEMU with `-cdrom`, both firmware paths testable |
 | External crates | only `limine`, `spin` | everything else is written from scratch |
-| Tools | GNU make, gdb, binutils (objdump/nm/readelf/addr2line), gcc for host helpers | user preference: Rust kernel, GNU tooling around it |
+| Tools | GNU make, gdb, binutils (objdump/nm/readelf/addr2line), gcc for host helpers | my preference: Rust kernel, GNU tooling around it |
 
 ## Memory layout
 - The kernel lives in the higher half at `0xffffffff80000000` (top 2 GiB), `code-model=kernel`, `relocation-model=static`.
@@ -101,9 +101,22 @@
 - One FAT32 volume on the system disk, mounted at boot as `fs::ROOT` (a spin lock like `DISK`: never from interrupt handlers).
   `FatFs<D: BlockDevice>` is generic, so the same code runs on `SystemDisk` (adapter for `drivers::DISK`) and on `RamDisk` in tests.
 - Mount: FAT32 boot sector at LBA 0 (superfloppy), otherwise the first MBR partition of type 0x0B/0x0C. Only 512-byte sectors.
-- No block cache: data clusters are read/written directly. Only one FAT sector is cached; FAT updates are written through to
-  **every** FAT copy immediately. Every mutating operation ends with `sync` (FSInfo hints + disk flush), so a `poweroff` or reset
-  right after a command never leaves the volume inconsistent. Simple and safe, slow for big files – fine for now.
+- Caching: every sector – FAT and data – goes through the write-through `BlockCache` below the file system (see "Disk
+  caching and interrupts"); `FatFs` itself keeps the FAT sector it used last, the last cluster chain and the last path
+  lookup. FAT updates are written through to **every** FAT copy immediately. Every mutating operation ends with `sync`
+  (FSInfo hints + disk flush), so a `poweroff` or reset right *after* a command never leaves the volume inconsistent.
+  A power loss or disk error *during* a command is a different case. What holds then is measured (M53,
+  `fs::fat32::fault_tests`: every I/O of create, replace, append, `write_at`, mkdir, rename and remove made to fail
+  once, as a transient error and as a power loss with a torn write, then the volume re-mounted and checked):
+  - the command returns `FsError::Io`, never panics, and the volume mounts again;
+  - files the command did not touch are intact; its target is in the old or the new state (`write_at` may have
+    written part of its bytes);
+  - the damage is what `fsck.fat` repairs without losing data that was there before: lost clusters (new clusters not
+    yet in a directory entry, or old ones not yet freed), the two FAT copies differing in one sector, after
+    append/`write_at` a chain longer than the file size, after rename both names pointing to the same clusters
+    (the new entry is written before the old one is freed – the order Linux's vfat uses too);
+  - after a transient error the same mount keeps working (later writes do not damage the volume).
+  There is no journal: FAT32 has none, and the kernel does not run `fsck` at boot.
 - Names: a name that fits 8.3 in one case per part (`hello.txt`, `README`) is stored as a plain short entry with the NT
   lower-case flags, like Windows/Linux do. Everything else gets LFN entries plus a unique 8.3 alias (`MYNOTE~1`).
   Lookup is case-insensitive on long and short names.
@@ -120,7 +133,11 @@
 - **User layout**: ELF segments between `USER_IMAGE_START` (64 KiB, null page area stays unmapped) and `USER_IMAGE_END`;
   our programs link at `0x40_0000`. The heap starts at the first page after the image and is moved with `brk` (max 64 MiB). Stack: up to 1 MiB
   (`USER_STACK_MAX`) below `USER_STACK_TOP = 0x7FFF_FFFF_0000`, the top 4 pages mapped at start, the rest on demand (M35);
-  nothing is mapped below it (overflow → page fault → process killed). The argument block is copied to the stack top; `_start` gets pointer and length
+  nothing is mapped below it (overflow → page fault → process killed). Below that gap: 64 **thread stack slots**
+  (M52), each `[64 KiB guard][256 KiB stack]`; a slot belongs to a thread started with `thread_spawn(entry, 0, arg)`,
+  its stack pages are demand-paged, the guard never. A fault in a guard kills the process with "stack overflow in a
+  thread". Slots of ended threads are unmapped (TLB shoot-down first) at the next `thread_spawn` or `thread_join`.
+  `USER_IMAGE_END` leaves room for the largest heap plus a guard below the slots (bug #21). The argument block is copied to the stack top; `_start` gets pointer and length
   in RDI/RSI. Arguments inside the block are separated by NUL bytes (`ulib::Args`); the shell joins its words that way.
 - **ELF loader** (`process::elf`): static `ET_EXEC` x86_64 only, `PT_LOAD` segments with R/W/X → USER, WRITABLE, NO_EXECUTE.
   Every header field is bounds-checked; segments outside the user image area or an entry point outside an X segment are refused.
@@ -182,7 +199,7 @@
   | 37–43 | TCP, `shutdown`, `setenv`/`getenv`/`environ` | see `kernel/src/process/syscall.rs` |
   | 44 | `sigaction(sig, disposition, trampoline)` | `SIG_DFL` 0, `SIG_IGN` 1 or a handler; old disposition; SIGKILL → `-EINVAL` |
   | 45 | `sigreturn()` | called by the trampoline when a handler returns (unblocks the next one) |
-  | 46 | `thread_spawn(entry, stack, arg)` | tid; ≤ 64 running further threads (`-EAGAIN`); entry/stack must be user addresses |
+  | 46 | `thread_spawn(entry, stack, arg)` | tid; ≤ 64 running further threads (`-EAGAIN`); entry/stack must be user addresses; stack 0 = a kernel slot with a guard |
   | 47 | `thread_exit(code)` | ends the thread; in the main thread the process |
   | 48 | `thread_join(tid)` | exit code as u32; `-ESRCH` if not a further thread of the caller or already joined |
   | 49 | `futex_wait(addr, expected, timeout_ms)` | `-EAGAIN` if `*addr != expected`, `-ETIMEDOUT`, `-EINTR` |
@@ -213,7 +230,7 @@
   `with_current`, so no other thread can unmap it meanwhile), queues the thread under the key (pid << 47 | addr) and
   blocks (`Wait::Futex`, or `Wait::Until` with a timeout); `futex_wake(addr, n)` moves up to n waiters to the `woken`
   set and `task::wake`s them. `ulib::sync::RawLock` (0 free / 1 locked / 2 contended) only calls the kernel when
-  contended; the user heap uses it, `ulib::thread::spawn` gives every thread a 256 KiB stack from the heap.
+  contended; the user heap uses it, `ulib::thread::spawn` asks for a kernel stack slot (256 KiB with a guard, see "User layout").
 - **Signals** (M34, `process/signal.rs`): per process a disposition per signal (default = end, ignore, handler), a pending
   mask and an `in_handler` flag. `send_signal` sets the bit and `task::wake`s the target; blocking syscalls use abortable
   waits (`input::read_key_or_abort`, `task::join_or_abort`, `time::sleep_ms_or_abort`, pipes, sockets) that give up when
@@ -316,7 +333,8 @@
 - **TCP windows** (M38): window scaling (RFC 7323, shift 3) when both SYNs carry the option; receive and send buffers
   256 KiB, up to 128 segments in flight. ARP: cache learned from requests/replies addressed to us and from IPv4 packets of on-link hosts; `resolve` sends up
   to 3 requests. IPv4: no options sent, fragments dropped, DF set. ICMP: echo requests answered, replies with our id recorded.
-  UDP: ports map to bounded queues (64 datagrams); checksums sent, not verified on receipt.
+  UDP: ports map to bounded queues (64 datagrams); checksums sent and verified on receipt (a datagram with a wrong
+  checksum is dropped; checksum 0 = "none computed" is accepted, as RFC 768 allows for IPv4).
 - **User API**: `ping` (one echo, waits ≤ timeout), `udp_socket` → `Handle::Udp(Arc<UdpSocket>)` (port released when the last
   descriptor closes), `sendto` / `recvfrom` (timeout, abortable by kill), `net_info`. Small state locks are taken with
   interrupts off; the NIC lock with interrupts on (it is never needed by `wait_for` conditions).

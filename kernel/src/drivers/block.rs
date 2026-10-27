@@ -42,6 +42,7 @@ pub fn check_request(sector_count: u64, lba: u64, len: usize) -> Result<u64, Blo
 }
 
 /// A block device in RAM (used by file system tests).
+#[derive(Clone)]
 pub struct RamDisk {
     data: alloc::vec::Vec<u8>,
 }
@@ -75,6 +76,78 @@ impl BlockDevice for RamDisk {
         check_request(self.sector_count(), lba, buf.len())?;
         let start = lba as usize * SECTOR_SIZE;
         self.data[start..start + buf.len()].copy_from_slice(buf);
+        Ok(())
+    }
+}
+
+/// A RAM disk that fails on purpose (tests, M53): every read, write and
+/// flush counts as one I/O; I/O number `fail_at` fails with
+/// `BlockError::Device`. With `power_loss`, every later I/O fails too and
+/// the failing write is torn (only its first half reaches the disk) - what a
+/// power cut in the middle of a request looks like to the file system.
+#[cfg(test)]
+pub struct FaultyDisk {
+    pub disk: RamDisk,
+    /// I/Os so far.
+    pub ios: u64,
+    fail_at: u64,
+    power_loss: bool,
+}
+
+#[cfg(test)]
+impl FaultyDisk {
+    pub fn new(disk: RamDisk) -> FaultyDisk {
+        FaultyDisk {
+            disk,
+            ios: 0,
+            fail_at: u64::MAX,
+            power_loss: false,
+        }
+    }
+
+    /// Makes the I/O `n` from now fail (0 = the next one).
+    pub fn fail_in(&mut self, n: u64, power_loss: bool) {
+        self.fail_at = self.ios + n;
+        self.power_loss = power_loss;
+    }
+
+    /// Counts one I/O; true if it must fail.
+    fn fails(&mut self) -> bool {
+        let n = self.ios;
+        self.ios += 1;
+        n == self.fail_at || (self.power_loss && n > self.fail_at)
+    }
+}
+
+#[cfg(test)]
+impl BlockDevice for FaultyDisk {
+    fn sector_count(&self) -> u64 {
+        self.disk.sector_count()
+    }
+
+    fn read(&mut self, lba: u64, buf: &mut [u8]) -> Result<(), BlockError> {
+        if self.fails() {
+            return Err(BlockError::Device);
+        }
+        self.disk.read(lba, buf)
+    }
+
+    fn write(&mut self, lba: u64, buf: &[u8]) -> Result<(), BlockError> {
+        let torn = self.power_loss && self.ios == self.fail_at && buf.len() > SECTOR_SIZE;
+        if self.fails() {
+            if torn {
+                let half = buf.len() / SECTOR_SIZE / 2 * SECTOR_SIZE;
+                self.disk.write(lba, &buf[..half])?;
+            }
+            return Err(BlockError::Device);
+        }
+        self.disk.write(lba, buf)
+    }
+
+    fn flush(&mut self) -> Result<(), BlockError> {
+        if self.fails() {
+            return Err(BlockError::Device);
+        }
         Ok(())
     }
 }
@@ -188,6 +261,17 @@ impl<D: BlockDevice> BlockDevice for BlockCache<D> {
 
     fn flush(&mut self) -> Result<(), BlockError> {
         self.dev.flush()
+    }
+}
+
+impl<D: BlockDevice> BlockCache<D> {
+    /// Gives the device back (tests: inspect what reached the disk).
+    pub fn into_device(self) -> D {
+        self.dev
+    }
+
+    pub fn device_mut(&mut self) -> &mut D {
+        &mut self.dev
     }
 }
 

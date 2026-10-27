@@ -211,12 +211,18 @@ pub struct UdpDatagram<'a> {
     pub payload: &'a [u8],
 }
 
-pub fn parse_udp(p: &[u8]) -> Option<UdpDatagram<'_>> {
+/// Parses a UDP datagram and verifies its checksum (`src`/`dst` = IP
+/// addresses). A checksum field of 0 means the sender computed none
+/// (allowed in IPv4, RFC 768) and is accepted.
+pub fn parse_udp(src: Ipv4Addr, dst: Ipv4Addr, p: &[u8]) -> Option<UdpDatagram<'_>> {
     if p.len() < UDP_HEADER {
         return None;
     }
     let len = be16(p, 4) as usize;
     if len < UDP_HEADER || len > p.len() {
+        return None;
+    }
+    if be16(p, 6) != 0 && transport_checksum(src, dst, PROTO_UDP, &p[..len]) != 0 {
         return None;
     }
     Some(UdpDatagram {
@@ -608,11 +614,27 @@ mod tests {
             (ICMP_ECHO_REQUEST, 0x1234, 5, &b"ping data"[..])
         );
         let u = build_udp([10, 0, 2, 15], [10, 0, 2, 2], 40000, 7, b"hello");
-        let d = parse_udp(&u).unwrap();
+        let d = parse_udp([10, 0, 2, 15], [10, 0, 2, 2], &u).unwrap();
         assert_eq!((d.src_port, d.dst_port, d.payload), (40000, 7, &b"hello"[..]));
         assert_ne!(u16::from_be_bytes([u[6], u[7]]), 0, "UDP checksum missing");
         assert_eq!(parse_ipv4_addr("10.0.2.2"), Some([10, 0, 2, 2]));
         assert_eq!(parse_ipv4_addr("10.0.2"), None);
         assert_eq!(parse_ipv4_addr("10.0.2.300"), None);
+    }
+
+    #[test_case]
+    fn udp_checksums_are_verified_on_receipt() {
+        let (a, b) = ([10, 0, 2, 15], [10, 0, 2, 2]);
+        let mut u = build_udp(a, b, 40000, 7, b"hello");
+        assert!(parse_udp(b, a, &build_udp(b, a, 1, 2, b"x")).is_some());
+        assert!(parse_udp(a, [10, 0, 2, 3], &u).is_none(), "checksum must cover the IP addresses");
+        u[9] ^= 0x20; // one flipped payload bit
+        assert!(parse_udp(a, b, &u).is_none(), "corrupted datagram accepted");
+        u[6..8].copy_from_slice(&[0, 0]); // the sender computed no checksum
+        assert_eq!(parse_udp(a, b, &u).unwrap().payload, b"hEllo");
+        // padding after the UDP length (short Ethernet frames) is not part of the sum
+        let mut padded = build_udp(a, b, 40000, 7, b"hi");
+        padded.extend_from_slice(&[0xAA; 6]);
+        assert_eq!(parse_udp(a, b, &padded).unwrap().payload, b"hi");
     }
 }

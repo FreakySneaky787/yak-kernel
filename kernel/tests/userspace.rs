@@ -78,6 +78,17 @@ extern "C" fn kmain() -> ! {
         status
     );
 
+    // M52: a thread's stack overflow faults in the guard below its stack slot
+    let (status, _) = run("fault", "thread-stack");
+    assert!(killed_by(&status, "stack overflow in a thread"), "{:?}", status);
+    // ... in the page right below the stack (the first slot is used)
+    let below_slot = alloc::format!("page fault at {:#x}", process::thread_stack(0).0 - 8);
+    assert!(
+        killed_by(&status, &below_slot[..below_slot.len() - 3]),
+        "{:?}",
+        status
+    );
+
     // M17: programs working with files
     let (status, out) = run("cat", "/docs/hello.txt /etc/motd");
     assert_eq!(status, ExitStatus::Exited(0));
