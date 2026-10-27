@@ -100,7 +100,11 @@ FWD_HTTP_PORT = free_port()
 
 
 def start_fake_dns():
-    """Answers every A query with 10.0.2.2 (the host as seen from the guest)."""
+    """Answers A queries with 10.0.2.2 (the host as seen from the guest) - and
+    misbehaves for some names, to test the client's error handling (M58):
+    nx.* = no such name, fail.* = server failure, cname.* = an answer without
+    an A record, noise.* = a stray reply and a truncated one before the real
+    answer, silent.* = no answer at all (the client must give up)."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind(("127.0.0.1", 0))
 
@@ -108,11 +112,30 @@ def start_fake_dns():
         while True:
             q, addr = sock.recvfrom(512)
             end = 12
+            labels = []
             while q[end] != 0:
+                labels.append(q[end + 1:end + 1 + q[end]].decode(errors="replace"))
                 end += q[end] + 1
+            first = labels[0] if labels else ""
             question = q[12:end + 5]
-            answer = b"\xc0\x0c\x00\x01\x00\x01\x00\x00\x00\x3c\x00\x04" + bytes([10, 0, 2, 2])
-            sock.sendto(q[:2] + b"\x81\x80\x00\x01\x00\x01\x00\x00\x00\x00" + question + answer, addr)
+            a_record = b"\xc0\x0c\x00\x01\x00\x01\x00\x00\x00\x3c\x00\x04" + bytes([10, 0, 2, 2])
+            ok = q[:2] + b"\x81\x80\x00\x01\x00\x01\x00\x00\x00\x00" + question + a_record
+            if first == "silent":
+                continue
+            if first == "nx":
+                sock.sendto(q[:2] + b"\x81\x83\x00\x01\x00\x00\x00\x00\x00\x00" + question, addr)
+            elif first == "fail":
+                sock.sendto(q[:2] + b"\x81\x82\x00\x01\x00\x00\x00\x00\x00\x00" + question, addr)
+            elif first == "cname":
+                cname = b"\xc0\x0c\x00\x05\x00\x01\x00\x00\x00\x3c\x00\x02\xc0\x0c"
+                sock.sendto(q[:2] + b"\x81\x80\x00\x01\x00\x01\x00\x00\x00\x00" + question + cname, addr)
+            elif first == "noise":
+                wrong_id = bytes([q[0] ^ 0xFF, q[1]])
+                sock.sendto(wrong_id + ok[2:], addr)  # someone else's answer
+                sock.sendto(ok[:-3], addr)  # ours, but cut off
+                sock.sendto(ok, addr)
+            else:
+                sock.sendto(ok, addr)
 
     threading.Thread(target=serve, daemon=True).start()
     return sock.getsockname()[1]
@@ -257,6 +280,12 @@ STEPS = [
     (f"nc 10.0.2.2 {TCP_ECHO_PORT} hello over TCP\r", ["hello over TCP"], ["error"]),  # TCP (M29)
     (f"echo go | nc 10.0.2.2 {TCP_BULK_PORT} | wc\r", ["  100000"], ["error"]),  # 100 KB from the host
     (f"host www.yak.test 10.0.2.2 {DNS_PORT}\r", ["www.yak.test has address 10.0.2.2"], ["error"]),  # M30
+    # M58: a name server that misbehaves
+    (f"host nx.yak.test 10.0.2.2 {DNS_PORT}\r", ["host: nx.yak.test: no such host"], ["has address"]),
+    (f"host fail.yak.test 10.0.2.2 {DNS_PORT}\r", ["host: fail.yak.test: server error 2"], ["has address"]),
+    (f"host cname.yak.test 10.0.2.2 {DNS_PORT}\r", ["no address in the answer"], ["has address"]),
+    (f"host noise.yak.test 10.0.2.2 {DNS_PORT}\r", ["noise.yak.test has address 10.0.2.2"], ["error", "malformed"]),
+    (f"time host silent.yak.test 10.0.2.2 {DNS_PORT}\r", ["host: silent.yak.test: timed out", "real 4."], ["has address"]),
     ("host --selftest\r", ["host selftest: all checks passed"], ["FAIL"]),
     (f"wget http://10.0.2.2:{HTTP_PORT}/hello\r", ["Hello from the host over HTTP", "200 OK"], ["error"]),
     (f"wget -O /fetched.txt http://10.0.2.2:{HTTP_PORT}/hello\r", ["200 OK"], ["error"]),

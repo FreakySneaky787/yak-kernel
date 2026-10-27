@@ -349,6 +349,16 @@
   to 3 requests. IPv4: no options sent, fragments dropped, DF set. ICMP: echo requests answered, replies with our id recorded.
   UDP: ports map to bounded queues (64 datagrams); checksums sent and verified on receipt (a datagram with a wrong
   checksum is dropped; checksum 0 = "none computed" is accepted, as RFC 768 allows for IPv4).
+- **Network faults** (M58): `net::set_loopback_loss(n, phase)` drops every n-th packet sent to ourselves (always compiled,
+  off by default – an atomic load per loopback packet); `tcp::set_max_retries` lowers the retry limit (default 8),
+  `tcp::retransmissions` counts expired retransmission timeouts. `kernel/tests/netfault.rs` checks with them: with every
+  5th packet lost (first loss = SYN, SYN-ACK or the first ACK) an echo of 20 KB comes back intact; a connect into
+  silence fails with `TimedOut` after its timeout; a peer that goes silent ends the connection after the retries
+  (measured 3.0 s for 3 retries from a 200 ms timeout: 0.2 + 0.4 + 0.8 + 1.6 s). Without an RTT sample (only the
+  handshake was acknowledged) the timeout starts at 1 s – with the default 8 retries a dead peer is noticed after about
+  a minute. DNS (`ulib::dns`) is checked against a name server that misbehaves (E2E): NXDOMAIN, server failure, an
+  answer without A record, a stray and a truncated reply before the real one, and silence (3 tries of 1.5 s, then
+  "timed out").
 - **User API**: `ping` (one echo, waits ≤ timeout), `udp_socket` → `Handle::Udp(Arc<UdpSocket>)` (port released when the last
   descriptor closes), `sendto` / `recvfrom` (timeout, abortable by kill), `net_info`. Small state locks are taken with
   interrupts off; the NIC lock with interrupts on (it is never needed by `wait_for` conditions).
