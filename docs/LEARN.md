@@ -354,7 +354,7 @@ Short explanations of every subsystem: what it is and why we need it.
   the cursor really is.
 
 ## M58 – Losing packets on purpose
-- A network loses packets all the time; TCP's job is to hide that. The test makes the kernel throw away every fifth
+- A network loses packets all the time; TCP's job is to hide that. The test makes the kernel throw away every tenth
   packet it sends to itself – data, acknowledgements, even the very first SYN – and checks that the bytes still arrive
   complete and in order. They do, because every unacknowledged segment is sent again when its timer runs out.
 - How long TCP keeps trying matters too: the wait doubles after each attempt, so a peer that has vanished is noticed

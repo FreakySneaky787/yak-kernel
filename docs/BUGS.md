@@ -226,6 +226,18 @@ Format: number · date · title, then symptom → cause → fix → test.
 - **Remember:** a limit on one region (the image) is only safe together with the limits of the regions that grow out of
   it (the heap).
 
+### #22 · 2026-10-27 · The TCP loss test needed almost the whole time limit of its test kernel
+- **Symptom:** `make stress`, pass 1 with 4 CPUs: `netfault` killed by the 30 s timeout of `run-qemu.sh` while
+  `every_fifth_packet_lost_the_data_still_arrives` ran. With 1 and 2 CPUs, and in 6 single runs, it passed.
+- **Cause:** the test, not the kernel. 3 echoes of 20 KB with every 5th packet lost cost 36–49 retransmission timeouts of
+  at least 200 ms each (go-back-N sends everything after a loss again, and every 5th of that is lost too) – 10–15 s of
+  the 30 s limit. On a busy machine that was not enough. Runs with a 120 s limit never hung (6 of 6 passed in 18–22 s).
+- **Fix:** 8 KB per echo and every 10th packet lost; the loss still hits the SYN, the SYN-ACK and the first ACK once
+  each. The test prints its duration.
+- **Test:** 6 runs with all 4 host cores busy: 2.7–6.1 s for the test, all passed; then the full `make stress`.
+- **Remember:** a test that waits for timeouts must be sized against the time limit of the machine it runs on, with
+  room to spare – the CI uses 120 s, a developer machine 30 s.
+
 ## Known pitfalls (not bugs, but worth remembering)
 - **The Limine host utility (`limine bios-install`) needs a C compiler** (`gcc`). It is not required for booting the ISO
   in QEMU with `-cdrom`; it is only needed to make the ISO bootable as a hard disk / USB image.

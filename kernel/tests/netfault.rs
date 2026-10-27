@@ -72,16 +72,23 @@ fn echo(port: u16, len: usize) -> Vec<u8> {
 }
 
 #[test_case]
-fn every_fifth_packet_lost_the_data_still_arrives() {
+fn every_tenth_packet_lost_the_data_still_arrives() {
     let before = tcp::retransmissions();
-    // phase 1..=3: the first lost packet is the SYN, the SYN-ACK, the first ACK
+    let start = time::uptime_ms();
+    // phase 1..=3: the first lost packet is the SYN, the SYN-ACK, the first ACK.
+    // Every loss costs at least one retransmission timeout (200 ms) - kept small, so the
+    // test stays far below the 30 s limit of a test kernel even on a busy machine.
     for phase in 1..=3 {
-        net::set_loopback_loss(5, phase);
-        echo(7300 + phase as u16, 20_000);
+        net::set_loopback_loss(10, phase);
+        echo(7300 + phase as u16, 8_000);
     }
     net::set_loopback_loss(0, 0);
     let retransmitted = tcp::retransmissions() - before;
-    kernel::serial_println!("    {} retransmission timeouts", retransmitted);
+    kernel::serial_println!(
+        "    {} retransmission timeouts, {} ms",
+        retransmitted,
+        time::uptime_ms() - start
+    );
     assert!(retransmitted >= 3, "losses must have been repaired by retransmission");
 }
 

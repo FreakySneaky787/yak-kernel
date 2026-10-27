@@ -352,7 +352,7 @@
 - **Network faults** (M58): `net::set_loopback_loss(n, phase)` drops every n-th packet sent to ourselves (always compiled,
   off by default – an atomic load per loopback packet); `tcp::set_max_retries` lowers the retry limit (default 8),
   `tcp::retransmissions` counts expired retransmission timeouts. `kernel/tests/netfault.rs` checks with them: with every
-  5th packet lost (first loss = SYN, SYN-ACK or the first ACK) an echo of 20 KB comes back intact; a connect into
+  10th packet lost (first loss = SYN, SYN-ACK or the first ACK) an echo of 8 KB comes back intact; a connect into
   silence fails with `TimedOut` after its timeout; a peer that goes silent ends the connection after the retries
   (measured 3.0 s for 3 retries from a 200 ms timeout: 0.2 + 0.4 + 0.8 + 1.6 s). Without an RTT sample (only the
   handshake was acknowledged) the timeout starts at 1 s – with the default 8 retries a dead peer is noticed after about
