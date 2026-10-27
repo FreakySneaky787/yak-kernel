@@ -101,9 +101,11 @@
 - One FAT32 volume on the system disk, mounted at boot as `fs::ROOT` (a spin lock like `DISK`: never from interrupt handlers).
   `FatFs<D: BlockDevice>` is generic, so the same code runs on `SystemDisk` (adapter for `drivers::DISK`) and on `RamDisk` in tests.
 - Mount: FAT32 boot sector at LBA 0 (superfloppy), otherwise the first MBR partition of type 0x0B/0x0C. Only 512-byte sectors.
-- No block cache: data clusters are read/written directly. Only one FAT sector is cached; FAT updates are written through to
-  **every** FAT copy immediately. Every mutating operation ends with `sync` (FSInfo hints + disk flush), so a `poweroff` or reset
-  right after a command never leaves the volume inconsistent. Simple and safe, slow for big files – fine for now.
+- Caching: every sector – FAT and data – goes through the write-through `BlockCache` below the file system (see "Disk
+  caching and interrupts"); `FatFs` itself keeps the FAT sector it used last, the last cluster chain and the last path
+  lookup. FAT updates are written through to **every** FAT copy immediately. Every mutating operation ends with `sync`
+  (FSInfo hints + disk flush), so a `poweroff` or reset right *after* a command never leaves the volume inconsistent.
+  A power loss or disk error *during* a command is a different case: it is not covered by this guarantee.
 - Names: a name that fits 8.3 in one case per part (`hello.txt`, `README`) is stored as a plain short entry with the NT
   lower-case flags, like Windows/Linux do. Everything else gets LFN entries plus a unique 8.3 alias (`MYNOTE~1`).
   Lookup is case-insensitive on long and short names.
@@ -316,7 +318,8 @@
 - **TCP windows** (M38): window scaling (RFC 7323, shift 3) when both SYNs carry the option; receive and send buffers
   256 KiB, up to 128 segments in flight. ARP: cache learned from requests/replies addressed to us and from IPv4 packets of on-link hosts; `resolve` sends up
   to 3 requests. IPv4: no options sent, fragments dropped, DF set. ICMP: echo requests answered, replies with our id recorded.
-  UDP: ports map to bounded queues (64 datagrams); checksums sent, not verified on receipt.
+  UDP: ports map to bounded queues (64 datagrams); checksums sent and verified on receipt (a datagram with a wrong
+  checksum is dropped; checksum 0 = "none computed" is accepted, as RFC 768 allows for IPv4).
 - **User API**: `ping` (one echo, waits ≤ timeout), `udp_socket` → `Handle::Udp(Arc<UdpSocket>)` (port released when the last
   descriptor closes), `sendto` / `recvfrom` (timeout, abortable by kill), `net_info`. Small state locks are taken with
   interrupts off; the NIC lock with interrupts on (it is never needed by `wait_for` conditions).

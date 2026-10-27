@@ -59,7 +59,9 @@ experience of a first-time reader**, not about new features. Stage 8 in `docs/PR
 - replacing Linux or being POSIX-compatible,
 - a full desktop / graphical user interface,
 - supporting as much real hardware as possible (QEMU is the reference machine),
-- performance competitive with production kernels.
+- performance competitive with production kernels,
+- becoming the base of a desktop operating system – YAK is a kernel to learn from; features that do not carry a
+  chapter of the course are not added.
 
 ## Working rules that follow from the goals
 - New features must come with a test and a `LEARN.md` section – an unexplained feature does not serve the purpose.

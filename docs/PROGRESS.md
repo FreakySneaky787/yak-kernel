@@ -105,6 +105,15 @@ Still open: N for `make stress` (proposal: 5), whether CI is wanted (M40b), whet
 
 Then: phase C (pilot chapters 1–4 + feedback), phases D/E – see `docs/ROADMAP.md`.
 
+## Stage 11: follow-up of an outside review (agreed 2026-10-27)
+An outside review of the docs listed risks and one contradiction; the user chose what to do before 1.0: fix the docs,
+verify UDP checksums, guard pages for thread stacks, tests with a failing disk. Everything else it named stays a
+documented limitation.
+
+| # | Milestone | Status | Tests |
+|---|---|---|---|
+| 51 | Docs: "File system" in `docs/DESIGN.md` contradicted the block cache (bug #20), the power-off guarantee is stated precisely, GOALS says YAK is not the base of a desktop OS; UDP checksums are verified on receipt (0 = none, accepted) | ✅ | `packet::tests::udp_checksums_are_verified_on_receipt` (wrong IP address, flipped bit, zero checksum, Ethernet padding); E2E UDP echo, DHCP and DNS still work |
+
 ## Log
 - **2026-10-24** – Setup: Rust nightly 1.101 (rustup), target `x86_64-unknown-none`, Limine v11.x-binary.
   M1: kernel boots via BIOS and UEFI, prints "Hello from KernelTry!" on serial, colour bars on the framebuffer (1280×800×32).

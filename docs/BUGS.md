@@ -202,6 +202,18 @@ Format: number · date · title, then symptom → cause → fix → test.
 - **Remember:** "interrupts off" protects against *this* CPU only – on SMP, anything a new thread may look at must
   exist before the thread becomes runnable.
 
+### #20 · 2026-10-27 · DESIGN.md said there was no block cache
+- **Symptom:** an outside review of the docs found two contradicting statements: "Disk caching and interrupts" says the
+  root file system runs on a 1024-sector `BlockCache`, "File system" said "No block cache: data clusters are
+  read/written directly".
+- **Cause:** documentation only. The "File system" text was written at M15; M32 added `BlockCache` and updated its own
+  section but not the older one. The code (`fs::RootDisk = BlockCache<SystemDisk>`) was right.
+- **Fix:** the "File system" section now describes the caches as they are and states the limit of the power-off
+  guarantee (after a command, not during one).
+- **Test:** none possible for prose; `scripts/check-doc-refs.py` only checks that named symbols exist.
+- **Remember:** a milestone that changes a layer must search the docs for every statement about that layer, not only
+  edit its own section.
+
 ## Known pitfalls (not bugs, but worth remembering)
 - **The Limine host utility (`limine bios-install`) needs a C compiler** (`gcc`). It is not required for booting the ISO
   in QEMU with `-cdrom`; it is only needed to make the ISO bootable as a hard disk / USB image.
