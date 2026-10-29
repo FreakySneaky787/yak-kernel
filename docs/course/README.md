@@ -29,6 +29,7 @@ step at a time. Every chapter ends with a kernel that boots in QEMU and passes i
 | 2 | [Testing without an operating system](02-tests.md) | `make test` running unit tests inside the kernel |
 | 3 | [Text on the screen](03-console.md) | a framebuffer console with its own font renderer |
 | 4 | [GDT and TSS](04-gdt.md) | our own segments and a safe stack for double faults |
+| 5 | [Interrupts and exceptions](05-interrupts.md) | exception handlers – a page fault reports itself, a double fault survives a broken stack |
 
 The course is being written now; the pilot (chapters 1–4) gets a round of feedback from readers, and the chapters
 after it change with what they report. If you get stuck, use the issue form

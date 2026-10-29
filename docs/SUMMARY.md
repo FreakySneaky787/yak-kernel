@@ -9,6 +9,7 @@
   - [2 – Testing without an operating system](course/02-tests.md)
   - [3 – Text on the screen](course/03-console.md)
   - [4 – GDT and TSS](course/04-gdt.md)
+  - [5 – Interrupts and exceptions](course/05-interrupts.md)
 
 # Understand the kernel
 

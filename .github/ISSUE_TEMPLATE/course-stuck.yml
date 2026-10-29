@@ -17,6 +17,7 @@ body:
         - 2 – Testing without an operating system
         - 3 – Text on the screen
         - 4 – GDT and TSS
+        - 5 – Interrupts and exceptions
     validations:
       required: true
   - type: dropdown

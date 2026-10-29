@@ -57,7 +57,7 @@ The interesting field is `interrupt_stacks` – seven stack pointers, IST1 to IS
 the exception frame for the resulting page fault – onto the broken stack – and fails again. That second failure is
 a *double fault*. If the double fault handler also used the broken stack, a third failure would follow: a **triple
 fault**, and the machine resets. With IST1 the CPU switches to a fresh stack *before* pushing anything. (The handler
-itself comes in chapter 5; today we only prepare the stack.)
+itself comes in [chapter 5](05-interrupts.md); today we only prepare the stack.)
 
 ## Step 3: a TSS descriptor
 The GDT points to the TSS with a **system descriptor** of 16 bytes – two entries – with the 64-bit address cut into

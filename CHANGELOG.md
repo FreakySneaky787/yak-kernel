@@ -2,11 +2,16 @@
 
 ## Unreleased
 **Course**
+- Chapter 5 – Interrupts and exceptions: an IDT with handlers for six CPU exceptions, a double fault that survives a
+  broken stack on IST1, and faults on purpose via the kernel command line (`KERNEL_CMDLINE=fault=page make run`).
 - Chapters 1–4 checked as a first reader would use them: the pages now show every line a learner has to change
   (including the calls in `kmain`), name the `diff` command against the previous chapter, and QEMU's own messages in
   `make test` go to `build/qemu.log` (printed when a check fails).
 - Issue forms "I got stuck in a course chapter" and "Feedback on the course"; `CONTRIBUTING.md`.
 - `scripts/check-course.py` also checks the course table, the issue form's chapter list and the `diff` line of each page.
+
+**Tests**
+- The userspace integration test no longer fails when a 100 ms sleep wakes up two ticks late on a busy host (bug #24).
 
 ## 1.0.0 (2026-10-27)
 The first stable release: a reliable, text-based x86-64 system for QEMU (`docs/GOALS.md`). Stages 9 to 12 (`docs/ROADMAP.md`, phases A–C; `docs/PROGRESS.md`).
