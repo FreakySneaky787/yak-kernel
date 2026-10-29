@@ -6,6 +6,7 @@ needs before it can handle exceptions safely.
 the normal stack breaks (used in the next chapter).
 **Code:** [`course/04-gdt/`](https://github.com/FreakySneaky787/yak-kernel/tree/main/course/04-gdt) (chapter 3 plus
 `gdt.rs`)
+**What changed:** `diff -ru course/03-console course/04-gdt` (in the repository) shows every line this chapter adds.
 
 ## Background: segments, then and now
 On the 8086, memory was addressed as *segment:offset*. Later CPUs turned segments into entries of a table – the
@@ -102,6 +103,27 @@ Three instructions make the CPU use our structures:
 
 GDT and TSS must live as long as the kernel – the CPU keeps using them – so they are `static`s, built once at
 `init` with `spin::Once`.
+
+## Step 5: calling it
+`main.rs` gets `mod gdt;` next to the other modules, and both entry points call `gdt::init()` right after the
+console – the normal `kmain` and the test `kmain`, because the tests check the loaded segments:
+
+```rust,file=kernel/src/main.rs
+    console::init();
+    gdt::init();
+    println!("Hello from YAK!");
+```
+
+At the end, the normal `kmain` reports what it loaded:
+
+```rust,file=kernel/src/main.rs
+    println!(
+        "GDT loaded: code segment {:#x}, TSS {:#x}, double fault stack top {:#x}",
+        gdt::KERNEL_CODE_SELECTOR,
+        gdt::TSS_SELECTOR,
+        gdt::double_fault_stack_top()
+    );
+```
 
 ## The tests
 `make test` now runs 16 tests; four are new:

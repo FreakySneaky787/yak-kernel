@@ -100,6 +100,7 @@ the kernel starts. The in-kernel tests assume the default 256 MiB.
 | [docs/BUGS.md](docs/BUGS.md) | every bug found so far: symptom, cause, fix, test |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | where the project is going: a chapter-by-chapter course on its own website |
 | [docs/PROGRESS.md](docs/PROGRESS.md) | milestones, log, open items, next step |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | how to report where you got stuck, and how to send a fix |
 
 ## Tests
 - `make test` – unit tests and integration test kernels, headless in QEMU (each aborts after 30 s).

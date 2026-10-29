@@ -130,6 +130,14 @@ fault tests and a downloadable release. 1.0.0 itself still waits for the outside
 | 58 | Network fault tests: loss injection on the loopback path (`net::set_loopback_loss`), TCP retry limit settable, retransmission counter; misbehaving fake name server in the E2E test | ✅ | `kernel/tests/netfault.rs`: 3 echoes of 8 KB with every 10th packet lost (5–14 retransmission timeouts, 2.7–6.1 s under full CPU load, data intact; first version with 20 KB / every 5th packet: bug #22), connect into silence → `TimedOut` after 1.5 s, silent peer → `TimedOut` after 3.0 s with 3 retries; E2E: NXDOMAIN, SERVFAIL, CNAME only, stray + truncated replies, silence (4.5 s, "timed out"); `host --selftest` +4 malformed-answer checks. No bug found |
 | 59 | Release files: `make release` (`scripts/release.sh`) builds `yak-<version>.iso` (`scripts/mkiso.sh`, shared with `run-qemu.sh`), the disk image with `/bin` (gzip), `run-yak.sh` and `SHA256SUMS` and boots them once (`scripts/check-release.py`); `.github/workflows/release.yml` attaches them to a published GitHub release; README "Try it without building"; checklist `docs/RELEASING.md` | ✅ | `make release`: BIOS and UEFI boot of the files with `run-yak.sh` (shell, `uname` = version, `/bin` ≥ 30 programs, `$(...)`, `poweroff`); negative check: a disk without `/bin` fails; `make check` green after moving the ISO build into `mkiso.sh` |
 
+## Stage 13: the course after 1.0 (roadmap phases C and D, decided 2026-10-29)
+I decided to prepare the pilot for its first outside reader – so that a report can arrive in a usable form – and to
+continue with chapter 5 meanwhile instead of waiting.
+
+| # | Milestone | Status | Tests |
+|---|---|---|---|
+| 60 | First-reader pass over chapters 1–4: every folder built on its own outside the repository (own Limine clone); the pages compared line by line with the folders – chapters 3 and 4 never showed how the new code is wired into `kmain`, chapter 3 counted one test twice, chapter 1 claimed a reset loop that `-no-reboot` prevents; QEMU's "terminating on signal 15" moved into `build/qemu.log`; a "What changed" `diff` line per page; issue forms "I got stuck in a course chapter" / "Feedback on the course"; `CONTRIBUTING.md` | ✅ | `make test` in copies of all four folders without `LIMINE_DIR`; `check-course.py` also checks the course table, the issue form's chapter list and the `diff` line (`--selftest` with all three failures) |
+
 ## Log
 - **2026-10-24** – Setup: Rust nightly 1.101 (rustup), target `x86_64-unknown-none`, Limine v11.x-binary.
   M1: kernel boots via BIOS and UEFI, prints "Hello from KernelTry!" on serial, colour bars on the framebuffer (1280×800×32).
@@ -442,6 +450,11 @@ fault tests and a downloadable release. 1.0.0 itself still waits for the outside
 
 - **2026-10-27** – M48: version 1.0.0. I decided to release without waiting for the outside reader.
 
+- **2026-10-29** – M60: a first-reader pass before handing the pilot to somebody else. The code was fine – every
+  chapter folder builds alone – but a reader typing along from the pages would have got stuck at the end of chapters 3
+  and 4: the lines in `kmain` that call the new code were only in the folders. A coverage script showed it; the
+  pages now show those lines, and `docs/HACKING.md` says every change a learner has to make appears on the page.
+
 ## Known limitations of release 1.0 (sorted in M42)
 Release blockers were defined as "a program can crash, hang or exhaust the kernel" (`docs/GOALS.md`: isolated
 programs, reliability). All of those found so far are fixed (bugs #11–#16). The rest are **documented limitations**:
@@ -485,6 +498,6 @@ they make YAK smaller than a production system, but they do not break the promis
   Apply" recommends a notice per file.
 
 ## Next step
-**1.0.0 is prepared.** I create the tag `v1.0.0` on the merge commit and publish the GitHub release
-(`docs/RELEASING.md`, steps 6–8); the workflow attaches the files. Then: feedback on the pilot chapters 1–4 (me and
-an outside reader), adjust the chapter format, continue with chapter 5 (interrupts and exceptions).
+1.0.0 is released (tag `v1.0.0`, GitHub release with files). The pilot is ready for an outside reader (M60): I
+hand chapters 1–4 to somebody who did not build YAK and point them at the issue forms. Meanwhile: chapter 5
+(interrupts and exceptions), stage 13.

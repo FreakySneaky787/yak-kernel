@@ -30,5 +30,9 @@ step at a time. Every chapter ends with a kernel that boots in QEMU and passes i
 | 3 | [Text on the screen](03-console.md) | a framebuffer console with its own font renderer |
 | 4 | [GDT and TSS](04-gdt.md) | our own segments and a safe stack for double faults |
 
-The course is being written now; this pilot (chapters 1–4) is followed by a round of feedback before the rest. If
-something is unclear or wrong, please open an issue on GitHub – that is exactly the feedback the pilot is for.
+The course is being written now; the pilot (chapters 1–4) gets a round of feedback from readers, and the chapters
+after it change with what they report. If you get stuck, use the issue form
+[**I got stuck in a course chapter**](https://github.com/FreakySneaky787/yak-kernel/issues/new?template=course-stuck.yml);
+if something was unclear even though it worked, use
+[**Feedback on the course**](https://github.com/FreakySneaky787/yak-kernel/issues/new?template=course-feedback.yml).
+That is exactly the feedback the pilot is for – [CONTRIBUTING.md](../../CONTRIBUTING.md) says more.

@@ -5,6 +5,7 @@
 through QEMU's exit status – no human has to look at the output.
 **Code:** [`course/02-tests/`](https://github.com/FreakySneaky787/yak-kernel/tree/main/course/02-tests) (chapter 1 plus
 `testing.rs`, `qemu.rs` and a new `run-qemu.sh`)
+**What changed:** `diff -ru course/01-boot course/02-tests` (in the repository) shows every line this chapter adds.
 
 ## Why this comes so early
 Everything later – memory management, the scheduler, the file system – is easier to get right with tests, and much

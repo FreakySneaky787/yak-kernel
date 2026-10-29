@@ -33,7 +33,8 @@ fi
 
 # test: the kernel halts when it is done, so we watch its output and stop QEMU ourselves
 LOG=build/serial.log
-"${QEMU[@]}" -display none -serial "file:$LOG" &
+# QEMU's own messages, e.g. "terminating on signal 15" when we stop it
+"${QEMU[@]}" -display none -serial "file:$LOG" 2>build/qemu.log &
 QEMU_PID=$!
 trap 'kill $QEMU_PID 2>/dev/null || true' EXIT
 
@@ -54,4 +55,5 @@ echo "[test] FAIL - expected every line of expected.txt:"
 cat expected.txt
 echo "[test] the kernel printed (build/serial.log):"
 cat "$LOG"
+if [[ -s build/qemu.log ]]; then echo "QEMU said (build/qemu.log):"; cat build/qemu.log; fi
 exit 1

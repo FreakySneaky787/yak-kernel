@@ -73,17 +73,21 @@ Everything else should be a program.
 
 ## Write a course chapter
 Chapter NN consists of the folder `course/NN-slug/` and the page `docs/course/NN-slug.md` (listed in
-`docs/SUMMARY.md` and in the table of [`course/README.md`](course/README.md)).
+`docs/SUMMARY.md`, in the table of [`docs/course/README.md`](course/README.md) and in the chapter list of the issue
+form `.github/ISSUE_TEMPLATE/course-stuck.yml`).
 1. **Start from the previous chapter:** copy `course/(NN-1)-*/` to `course/NN-slug/` and add the chapter's code. The
    folder must stay a complete project: `Makefile` with `run` and `test`, a copy of `rust-toolchain.toml`.
 2. **`make test` proves the chapter's promise** – it boots the kernel headless and checks its serial output (later
    chapters: the in-kernel test runner). A chapter without a test that fails when the new code is missing is not done.
 3. **Write the page:** goal · background · the code step by step · run it · what the test checks · what can go wrong
-   (from `docs/BUGS.md` where the reference kernel hit the same problem) · experiments.
+   (from `docs/BUGS.md` where the reference kernel hit the same problem) · experiments. Under **Code:** the page
+   names the command that shows the chapter's changes: `diff -ru course/(NN-1)-slug course/NN-slug`. Every change a
+   learner has to make appears on the page – including the lines that wire new code into `kmain`.
 4. **Code shown on the page is real code:** a block written as
    ```` ```rust,file=kernel/src/serial.rs ```` must appear line for line in that file of the chapter folder;
-   `scripts/check-course.py` (in `make docs-check`) fails otherwise. Blocks without `file=` are free (output,
-   shell commands, sketches).
+   `scripts/check-course.py` (in `make docs-check`) fails otherwise – as it does when a chapter is missing from
+   `SUMMARY.md`, the course table or the issue form, or the page lacks its `diff` line. Blocks without `file=` are
+   free (output, shell commands, sketches).
 5. `make course` builds and tests every chapter; CI runs it on every pull request.
 
 Rules: one concept per chapter; no code the learner has not seen explained; no claim without a test or a recorded

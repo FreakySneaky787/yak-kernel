@@ -7,6 +7,7 @@
 
 **Code:** [`course/03-console/`](https://github.com/FreakySneaky787/yak-kernel/tree/main/course/03-console) (chapter 2
 plus `font.rs`, `console.rs`, the font file and the `spin` crate)
+**What changed:** `diff -ru course/02-tests course/03-console` (in the repository) shows every line this chapter adds.
 
 ## Background: a framebuffer
 Old PCs had a *text mode*: write a character code to address `0xB8000` and the graphics card draws it. UEFI
@@ -116,6 +117,20 @@ pub static CONSOLE: Mutex<Option<Console<'static>>> = Mutex::new(None);
 address, is where we promise Rust that this memory really is ours. `print!` and `println!` write to the console
 **and** the serial port, so the tests from chapter 2 still see everything.
 
+In `main.rs`, `mod console;` and `mod font;` join the module list, `spin = "0.12.3"` joins the dependencies in
+`Cargo.toml`, and `kmain` sets up the console once the base revision is checked – from then on `println!` works:
+
+```rust,file=kernel/src/main.rs
+    console::init();
+    println!("Hello from YAK!");
+    match console::CONSOLE.lock().as_ref() {
+        Some(c) => serial_println!("Console: {} x {} characters", c.size().0, c.size().1),
+        None => serial_println!("No 32-bit framebuffer - text goes to the serial port only"),
+    }
+```
+
+The test `kmain` calls `console::init()` too, after `serial::init()`: the test on the real framebuffer needs it.
+
 ## Step 5: testing a picture
 How do you test drawing without looking at a screen? Draw into a tiny screen in memory – 10 × 3 characters, with a
 stride of 88 pixels for an 80-pixel-wide picture, so that a pitch mistake shows up – and check the pixels:
@@ -131,7 +146,7 @@ stride of 88 pixels for an 80-pixel-wide picture, so that a pitch mistake shows 
 ```
 
 `shows` compares a cell with the font's glyph, pixel by pixel. Together with tests for placement, wrapping, the
-padding right of the picture and the font parser, `make test` now runs 12 tests – and one more on the real
+padding right of the picture and the font parser, `make test` now runs 12 tests. One of them works on the real
 framebuffer: the console must cover the whole screen Limine gave us.
 
 ## Run it
