@@ -32,6 +32,7 @@ step at a time. Every chapter ends with a kernel that boots in QEMU and passes i
 | 5 | [Interrupts and exceptions](05-interrupts.md) | exception handlers – a page fault reports itself, a double fault survives a broken stack |
 | 6 | [Hardware interrupts and the timer](06-timer.md) | the PIC moved to vector 32, a 100 Hz timer, `sleep_ms` that waits in `hlt` |
 | 7 | [The keyboard](07-keyboard.md) | keys from the PS/2 keyboard on the screen – IRQ 1, a ring buffer, a scancode decoder; the end of part I |
+| 8 | [Physical memory](08-frames.md) | Limine's memory map and a bitmap frame allocator, reached through the higher-half direct map |
 
 The course is being written now; the pilot (chapters 1–4) gets a round of feedback from readers, and the chapters
 after it change with what they report. If you get stuck, use the issue form

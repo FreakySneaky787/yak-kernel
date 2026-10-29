@@ -20,6 +20,7 @@ body:
         - 5 – Interrupts and exceptions
         - 6 – Hardware interrupts and the timer
         - 7 – The keyboard
+        - 8 – Physical memory
     validations:
       required: true
   - type: dropdown

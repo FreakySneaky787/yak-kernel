@@ -12,6 +12,7 @@
   - [5 – Interrupts and exceptions](course/05-interrupts.md)
   - [6 – Hardware interrupts and the timer](course/06-timer.md)
   - [7 – The keyboard](course/07-keyboard.md)
+  - [8 – Physical memory](course/08-frames.md)
 
 # Understand the kernel
 
