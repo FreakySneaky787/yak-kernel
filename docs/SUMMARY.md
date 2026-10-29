@@ -10,6 +10,7 @@
   - [3 – Text on the screen](course/03-console.md)
   - [4 – GDT and TSS](course/04-gdt.md)
   - [5 – Interrupts and exceptions](course/05-interrupts.md)
+  - [6 – Hardware interrupts and the timer](course/06-timer.md)
 
 # Understand the kernel
 

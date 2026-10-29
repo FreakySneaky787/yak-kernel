@@ -2,6 +2,8 @@
 
 ## Unreleased
 **Course**
+- Chapter 6 – Hardware interrupts and the timer: the 8259 PIC moved to vectors 32–47, a 100 Hz PIT timer, and
+  `sleep_ms` that waits in `hlt` and never ends early.
 - Chapter 5 – Interrupts and exceptions: an IDT with handlers for six CPU exceptions, a double fault that survives a
   broken stack on IST1, and faults on purpose via the kernel command line (`KERNEL_CMDLINE=fault=page make run`).
 - Chapters 1–4 checked as a first reader would use them: the pages now show every line a learner has to change

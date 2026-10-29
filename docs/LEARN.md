@@ -59,7 +59,7 @@ Short explanations of every subsystem: what it is and why we need it.
   to the CPU as interrupt vectors.
 - **Remap**: out of the box IRQ0 would arrive as vector 8 – which is also the double fault. So we move the IRQs to 32–47.
 - **EOI** (end of interrupt): every handler must tell the PIC it is done, otherwise no further interrupt arrives.
-- The **PIT** is a counter running at 1.19 MHz. A divisor of 11932 gives ~100 interrupts per second = one "tick" every 10 ms.
+- The **PIT** is a counter running at 1.19 MHz. A divisor of 11931 (1193182 / 100, rounded down) gives ~100 interrupts per second = one "tick" every 10 ms.
   Uptime and `sleep` are built on top of it.
 - `hlt` puts the CPU to sleep until the next interrupt – this way the kernel waits without burning 100 % CPU.
 - **APIC**: modern CPUs have a local APIC per core sitting between PIC and CPU. Limine masked its PIC input,

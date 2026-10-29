@@ -233,8 +233,8 @@ Read the double fault's frame: RSP was `0xdeadbee0` – the broken stack – and
   `v=0e e=0002` (page fault on a write), `v=08` (double fault), then `Triple fault` and a CPU reset.
 - **A general protection fault with error code `0x102`:** bit 1 says "an IDT entry", `0x102 >> 3 = 0x20` says which
   – vector 32, which has no gate. The reference kernel hit exactly this when a test loaded its own IDT without the
-  timer's vector while interrupts were on ([bug #10](../BUGS.md)). In this chapter interrupts stay off; the next
-  chapter turns them on.
+  timer's vector while interrupts were on ([bug #10](../BUGS.md)). In this chapter interrupts stay off; [the next
+  chapter](06-timer.md) turns them on.
 - **Garbage in the frame, then a crash on return:** a handler declared without the error code for an exception
   that pushes one (8, 10–14, 17, 21, 29, 30), or the other way round. Every field is read one place off – RIP shows the error
   code – and `iretq` jumps to it. The three handler types in `idt.rs` exist so the compiler catches the obvious case.
