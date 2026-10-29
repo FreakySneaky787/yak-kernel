@@ -7,3 +7,4 @@
 /course/*/build/
 /course/*/vendor/
 /CLAUDE.md
+__pycache__/
