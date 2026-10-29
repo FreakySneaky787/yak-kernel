@@ -98,6 +98,8 @@ Short explanations of every subsystem: what it is and why we need it.
   so we flush it with `invlpg`.
 - **Guard page**: we leave the page below each kernel stack unmapped. If the stack overflows, the CPU touches that page and faults
   immediately, instead of silently corrupting the memory below.
+- An entry's bits depend on the level: in a 2 MiB / 1 GiB entry bit 12 is **PAT** (caching type), not an address bit –
+  `translate` must round the address down to the page size (bug #26). Limine builds the HHDM from 2 MiB pages where it can.
 
 ## M10 – Heap
 - The frame allocator only hands out whole 4 KiB pages. Most kernel data is much smaller and has arbitrary sizes – that is the job of the **heap**.

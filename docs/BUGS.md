@@ -275,6 +275,20 @@ Format: number · date · title, then symptom → cause → fix → test.
 - **Remember:** behaviour that depends on emulator details needs a run on the oldest supported version – CI runs
   Ubuntu's QEMU, a developer machine often a much newer one.
 
+### #26 · 2026-10-29 · `translate` was 4 KiB off inside the framebuffer's huge pages
+- **Symptom:** found while writing course chapter 9, no visible effect in the kernel: the chapter's `translate`,
+  written after the kernel's `translate_in`, gave `0xfd001000` instead of `0xfd000000` for the framebuffer's HHDM
+  address `0xffff8000fd000000`. The kernel's function computed it the same way.
+- **Cause:** Limine maps the framebuffer with 2 MiB pages and sets their PAT bit, which selects a caching type.
+  In a 2 MiB or 1 GiB page entry that bit is bit 12 (`0xfd0010eb`), in a 4 KiB entry it is bit 7. `translate_in`
+  took bits 12–51 as the address for every level and added the offset, so the PAT bit shifted the result by 4 KiB.
+  Every caller in the kernel translates 4 KiB pages (user memory, the SMP trampoline check), which is why nothing broke.
+- **Fix:** for a huge page the address is rounded down to the page size before the offset is added.
+- **Test:** `mem::paging::tests::translate_ignores_the_pat_bit_of_huge_pages` (kernel) and
+  `paging::tests::the_framebuffer_translates_exactly` (course chapter 9).
+- **Remember:** an entry's bits mean different things on different levels – the Intel SDM's table per level, not
+  one mask for all.
+
 ## Known pitfalls (not bugs, but worth remembering)
 - **The Limine host utility (`limine bios-install`) needs a C compiler** (`gcc`). It is not required for booting the ISO
   in QEMU with `-cdrom`; it is only needed to make the ISO bootable as a hard disk / USB image.

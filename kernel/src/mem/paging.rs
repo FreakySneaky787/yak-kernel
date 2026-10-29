@@ -292,7 +292,9 @@ pub fn translate_in(root: PhysAddr, virt: VirtAddr) -> Option<PhysAddr> {
         // Level 1 (PDPT) huge = 1 GiB, level 2 (PD) huge = 2 MiB
         if entry.is_huge() && (level == 1 || level == 2) {
             let page_size = if level == 1 { 1 << 30 } else { 1 << 21 };
-            return Some(PhysAddr(entry.addr().0 + (virt.0 & (page_size - 1))));
+            // bit 12 of a huge page entry is PAT (caching type), not an address bit (bug #26)
+            let start = entry.addr().0 & !(page_size - 1);
+            return Some(PhysAddr(start + (virt.0 & (page_size - 1))));
         }
         if level == 3 {
             return Some(PhysAddr(entry.addr().0 + (virt.0 & (PAGE_SIZE - 1))));
@@ -504,6 +506,14 @@ mod tests {
     fn indices_split_address() {
         let v = VirtAddr(0xFFFF_FFFF_8000_1234);
         assert_eq!(table_indices(v), [511, 510, 0, 1]);
+    }
+
+    #[test_case]
+    fn translate_ignores_the_pat_bit_of_huge_pages() {
+        // Limine maps the framebuffer with 2 MiB pages that have PAT (bit 12) set (bug #26)
+        let fb = crate::boot::FRAMEBUFFER.response().unwrap().framebuffers().first().unwrap();
+        let virt = fb.address() as u64;
+        assert_eq!(translate(VirtAddr(virt)), Some(PhysAddr(virt - hhdm_offset())));
     }
 
     #[test_case]

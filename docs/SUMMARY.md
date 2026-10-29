@@ -13,6 +13,7 @@
   - [6 – Hardware interrupts and the timer](course/06-timer.md)
   - [7 – The keyboard](course/07-keyboard.md)
   - [8 – Physical memory](course/08-frames.md)
+  - [9 – Paging](course/09-paging.md)
 
 # Understand the kernel
 

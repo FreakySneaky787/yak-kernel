@@ -2,6 +2,8 @@
 
 ## Unreleased
 **Course**
+- Chapter 9 – Paging: the live page tables read and changed (`translate`, `map`, `unmap`), and kernel stacks with
+  a guard page – a real stack overflow ends in the double fault handler.
 - Chapter 8 – Physical memory, the start of part II: Limine's memory map, a bitmap frame allocator over the
   usable RAM, and physical addresses reached through the higher-half direct map.
 - Chapter 7 – The keyboard, the end of part I: IRQ 1, a ring buffer between handler and kernel, a scancode
@@ -19,6 +21,8 @@
 - `scripts/check-course.py` also checks the course table, the issue form's chapter list and the `diff` line of each page.
 
 **Tests**
+- `paging::translate` no longer reads the PAT bit of a 2 MiB or 1 GiB page as an address bit (bug #26; no caller
+  was affected, all of them translate 4 KiB pages).
 - The userspace integration test no longer fails when a 100 ms sleep wakes up two ticks late on a busy host (bug #24).
 
 ## 1.0.0 (2026-10-27)

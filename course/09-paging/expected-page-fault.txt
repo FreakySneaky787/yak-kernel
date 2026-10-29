@@ -1,0 +1,3 @@
+Back from the breakpoint handler - the kernel carries on.
+EXCEPTION: PAGE FAULT at address 0x00000000deadbeef
+  cause: page not present, write, kernel mode
