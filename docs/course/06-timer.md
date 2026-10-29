@@ -5,7 +5,7 @@ it a clock and `sleep_ms`.
 **You end up with:** `sleep_ms(1000)` waits a second while the CPU sleeps in `hlt`; `make test` proves the ticks
 arrive and that a sleep never ends early.
 **Code:** [`course/06-timer/`](https://github.com/FreakySneaky787/yak-kernel/tree/main/course/06-timer) (chapter 5
-plus `port.rs`, `pic.rs`, `pit.rs`, `time.rs` and three IRQ handlers)
+plus `port.rs`, `pic.rs`, `pit.rs`, `time.rs`, three IRQ handlers and a CPU without local APIC in `run-qemu.sh`)
 **What changed:** `diff -ru course/05-interrupts course/06-timer` (in the repository) shows every line this chapter adds.
 
 ## Background: IRQs and the PIC
@@ -64,21 +64,32 @@ pub fn end_of_interrupt(irq: u8) {
 }
 ```
 
-## Step 3: the local APIC is in the way
-Modern CPUs have a newer interrupt controller in every core, the **local APIC**, and the PIC's signal enters it on
-a pin called LINT0. Limine leaves that pin masked. With the APIC on, our PIC could ring forever – nothing would
-arrive. The simplest way out for now is to switch the local APIC off, so the PIC talks to the CPU directly, as on a
-PC of 1990. That is bit 11 of the *model-specific register* `IA32_APIC_BASE`, written with `wrmsr`:
+## Step 3: a CPU without local APIC
+Every x86 core since the late 1990s has a newer interrupt controller of its own, the **local APIC**, and the PIC's
+signal enters it on a pin called LINT0. Limine leaves that pin masked. With an APIC, our PIC could ring forever –
+nothing would arrive.
 
-```rust,file=kernel/src/pic.rs
-pub fn disable_local_apic() {
-    let base = read_msr(IA32_APIC_BASE);
-    unsafe { write_msr(IA32_APIC_BASE, base & !APIC_GLOBAL_ENABLE) };
-}
+The APIC can be switched off (bit 11 of the register `IA32_APIC_BASE`), and the reference kernel did exactly that
+in its milestone M6 ([bug #2](../BUGS.md)). For the course it is not enough: QEMU 8.2 – the version of Ubuntu 24.04
+– still routes the PIC through the masked pin when the APIC is off and drops every interrupt; QEMU 10.2 delivers
+them ([bug #25](../BUGS.md)).
+Unmasking the pin needs the APIC's registers, and those are memory-mapped at an address Limine does not map – we
+cannot reach them before we have our own page tables (part II).
+
+So from this chapter on, `run-qemu.sh` starts QEMU with a CPU *without* local APIC:
+
+```bash,file=run-qemu.sh
+# -cpu qemu64,-apic: a CPU without local APIC, so the PIC's interrupts go straight to the CPU (chapter 6)
+QEMU=(qemu-system-x86_64 -M q35 -cpu qemu64,-apic -m 128M -cdrom "$ISO" -boot d -no-reboot
 ```
 
-The reference kernel found this the hard way ([bug #2](../BUGS.md): the timer never arrived, and QEMU's
-`info lapic` showed LINT0 masked). It later switched to the APIC and masked the PIC instead – a topic for part IV.
+The PIC is then wired straight to the CPU's interrupt pin, as on a PC of 1990. The APIC comes back in part IV,
+where the reference kernel uses it for the timer and for several CPUs. A test checks the CPU model really is the one
+we asked for – CPUID leaf 1, EDX bit 9 says whether there is an APIC:
+
+```rust,file=kernel/src/pic.rs
+    edx & (1 << 9) != 0
+```
 
 ## Step 4: the timer
 For 100 interrupts per second the PIT counts down from 1193182 / 100 = 11931. One command byte selects channel 0
@@ -116,7 +127,6 @@ then the hardware, and only at the end `sti`, which lets interrupts in:
 
 ```rust,file=kernel/src/interrupts.rs
 pub fn start_timer() {
-    pic::disable_local_apic();
     pic::init();
     pit::init(time::TICKS_PER_SECOND);
     pic::unmask(TIMER_IRQ);
@@ -161,7 +171,7 @@ pub fn sleep_ms(ms: u64) {
 
 ## The tests
 `make test` now runs 29 tests in the kernel; seven are new:
-- `the_local_apic_is_off` – bit 11 of `IA32_APIC_BASE` is clear;
+- `the_cpu_has_no_local_apic` – CPUID says there is none, as `run-qemu.sh` asked;
 - `only_the_timer_is_let_through` – the masks are `0b1111_1110` and `0b1111_1111`;
 - `irqs_start_after_the_exceptions` – IRQ 0 is vector 32, IRQ 15 vector 47;
 - `the_divisor_for_100_hz` – 11931, and the slowest the 16-bit counter can do;
@@ -174,8 +184,8 @@ boot checks of chapter 5 run again; the normal one now needs "at least 1000: yes
 bounds for time: how late an emulated machine wakes up depends on the host, and the reference kernel learned that
 an upper bound makes a test flaky ([bug #24](../BUGS.md)).
 
-Without `disable_local_apic()` the kernel stops after the "Timer" line – the tick never comes and `sleep_ms` waits
-forever; without the EOI exactly one tick arrives and the tick test runs into the time limit.
+Remove `-apic` from `run-qemu.sh` and the kernel stops after the "Timer" line – the tick never comes and
+`sleep_ms` waits forever; without the EOI exactly one tick arrives and the tick test runs into the time limit.
 
 ## Run it
 ```sh
@@ -192,7 +202,8 @@ sleep_ms(1000) took 1010 ms (at least 1000: yes), the CPU waited in hlt
 
 ## What can go wrong
 - **The kernel hangs in the first `sleep_ms`:** no tick arrives. In order of likelihood: interrupts are off (no
-  `sti`), the line is masked, the local APIC is still on, or the PIT was not programmed. The QEMU monitor shows the
+  `sti`), the line is masked, the CPU has a local APIC (`-cpu … ,-apic` missing – the APIC test says so first),
+  or the PIT was not programmed. The QEMU monitor shows the
   PIC's view: `info pic` lists `irr` (requested), `imr` (masked) and `irq_base` (the offset).
 - **Exactly one tick, then silence:** the handler does not send the EOI.
 - **A "double fault" with a nonsense frame as soon as interrupts are on:** the PIC was not moved, and IRQ 0 arrived
@@ -200,10 +211,10 @@ sleep_ms(1000) took 1010 ms (at least 1000: yes), the CPU waited in hlt
   off. Removing `pic::init()` from `start_timer` gives exactly this (with BIOS):
 
   ```text
-  EXCEPTION: DOUBLE FAULT (code 0xffffffff80009a65), last page fault at 0x0
-  rip=0x0000000000000008 cs=0x293 rflags=0xffff800007f8ece0 rsp=0x0000000000000010 ss=0x0
+  EXCEPTION: DOUBLE FAULT (code 0xffffffff800056c6), last page fault at 0x0
+  rip=0x0000000000000008 cs=0x282 rflags=0xffff800007f8ed08 rsp=0x0000000000000010 ss=0x0
   ```
-  The "error code" is the interrupted RIP, "rip" is the code segment `0x8`, and so on.
+  The "error code" is the interrupted RIP, "rip" is the code segment `0x8`, "cs" is RFLAGS, and so on.
 - **A general protection fault with error code `0x102` right after `sti`:** bit 1 says "an IDT entry",
   `0x102 >> 3 = 32` says which – the timer's line is open but its gate is missing (remove the `idt.set` for
   `TIMER_IRQ` and you get exactly this). The same holds for any IRQ: unmask only the lines you have a handler for.

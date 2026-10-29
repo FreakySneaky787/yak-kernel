@@ -91,36 +91,24 @@ pub fn in_service() -> (u8, u8) {
     }
 }
 
-/// Turns the CPU's local APIC off (bit 11 of the model-specific register IA32_APIC_BASE).
+/// Whether the CPU has a local APIC: CPUID leaf 1, EDX bit 9.
 ///
-/// Every modern x86 core has a *local APIC* between the PIC and the CPU; the PIC's signal enters it on its LINT0
-/// pin. Limine leaves LINT0 masked - with the APIC on, no PIC interrupt would ever arrive. With the APIC off, the
-/// PIC's signal goes straight to the CPU's interrupt pin, as on a PC from 1990. (The reference kernel later switches
-/// to the APIC and masks the PIC instead.)
-pub fn disable_local_apic() {
-    let base = read_msr(IA32_APIC_BASE);
-    unsafe { write_msr(IA32_APIC_BASE, base & !APIC_GLOBAL_ENABLE) };
-}
-
-/// Whether the local APIC is on - for the tests.
+/// Every x86 core since the late 1990s has a *local APIC*, a newer interrupt controller between the PIC and the
+/// CPU; the PIC's signal enters it on its LINT0 pin. Limine leaves LINT0 masked, so with an APIC no PIC interrupt
+/// would ever arrive. `run-qemu.sh` therefore starts QEMU with a CPU without one (`-cpu qemu64,-apic`): the PIC is
+/// wired straight to the CPU, as on a PC of 1990. The APIC comes back in a later chapter.
 #[cfg(test)]
-pub fn local_apic_enabled() -> bool {
-    read_msr(IA32_APIC_BASE) & APIC_GLOBAL_ENABLE != 0
-}
-
-const IA32_APIC_BASE: u32 = 0x1B;
-const APIC_GLOBAL_ENABLE: u64 = 1 << 11;
-
-/// Model-specific registers: CPU settings with a 32-bit number, read and written 64 bits at a time (EDX:EAX).
-fn read_msr(msr: u32) -> u64 {
-    let (low, high): (u32, u32);
-    unsafe { core::arch::asm!("rdmsr", in("ecx") msr, out("eax") low, out("edx") high, options(nomem, nostack)) };
-    (high as u64) << 32 | low as u64
-}
-
-unsafe fn write_msr(msr: u32, value: u64) {
-    let (low, high) = (value as u32, (value >> 32) as u32);
-    unsafe { core::arch::asm!("wrmsr", in("ecx") msr, in("eax") low, in("edx") high, options(nostack)) };
+pub fn cpu_has_local_apic() -> bool {
+    let edx: u32;
+    // rbx is reserved by the compiler, so cpuid's EBX output is saved around the instruction
+    unsafe {
+        core::arch::asm!(
+            "mov {tmp:r}, rbx", "cpuid", "mov rbx, {tmp:r}",
+            tmp = out(reg) _, inout("eax") 1u32 => _, out("ecx") _, out("edx") edx,
+            options(nomem, nostack, preserves_flags),
+        )
+    };
+    edx & (1 << 9) != 0
 }
 
 #[cfg(test)]
@@ -128,8 +116,8 @@ mod tests {
     use super::*;
 
     #[test_case]
-    fn the_local_apic_is_off() {
-        assert!(!local_apic_enabled());
+    fn the_cpu_has_no_local_apic() {
+        assert!(!cpu_has_local_apic(), "run-qemu.sh starts QEMU with -cpu qemu64,-apic");
     }
 
     #[test_case]

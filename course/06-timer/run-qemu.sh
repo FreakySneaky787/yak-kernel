@@ -39,7 +39,8 @@ xorriso -as mkisofs -R -r -J \
     "$ISO_ROOT" -o "$ISO" 2>/dev/null
 
 # isa-debug-exit: a write of value v to port 0xF4 ends QEMU with exit status (v << 1) | 1
-QEMU=(qemu-system-x86_64 -M q35 -m 128M -cdrom "$ISO" -boot d -no-reboot
+# -cpu qemu64,-apic: a CPU without local APIC, so the PIC's interrupts go straight to the CPU (chapter 6)
+QEMU=(qemu-system-x86_64 -M q35 -cpu qemu64,-apic -m 128M -cdrom "$ISO" -boot d -no-reboot
       -device isa-debug-exit,iobase=0xf4,iosize=0x04)
 TIMEOUT="${KERNEL_TEST_TIMEOUT:-30}"
 

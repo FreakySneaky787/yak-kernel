@@ -57,7 +57,6 @@ pub fn init() {
 /// Starts the timer: PIC and PIT set up, IRQ 0 let through, and interrupts on (`sti`). Needs `init` first - the
 /// first tick arrives 10 ms later and must find its gate.
 pub fn start_timer() {
-    pic::disable_local_apic();
     pic::init();
     pit::init(time::TICKS_PER_SECOND);
     pic::unmask(TIMER_IRQ);

@@ -63,7 +63,8 @@ Short explanations of every subsystem: what it is and why we need it.
   Uptime and `sleep` are built on top of it.
 - `hlt` puts the CPU to sleep until the next interrupt – this way the kernel waits without burning 100 % CPU.
 - **APIC**: modern CPUs have a local APIC per core sitting between PIC and CPU. Limine masked its PIC input,
-  so for now we disable it completely (bug #2).
+  so for now we disable it completely (bug #2). The course instead starts QEMU with a CPU without local APIC
+  (`-cpu qemu64,-apic`): switching it off does not help under QEMU 8.2 (bug #25).
 
 ## M7 – Keyboard
 - When a key is pressed, the PS/2 controller sends a **scancode** and raises IRQ1. We read the byte from port 0x60.
