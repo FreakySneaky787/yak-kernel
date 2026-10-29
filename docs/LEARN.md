@@ -74,6 +74,9 @@ Short explanations of every subsystem: what it is and why we need it.
 - The interrupt handler does almost nothing (byte into a ring buffer) so that it finishes quickly; the work happens outside.
 - **Race while waiting**: "buffer empty? → `hlt`" is dangerous if the interrupt arrives exactly in between – then the CPU sleeps although
   a key is already there. Solution: interrupts off, check, then `sti; hlt` – the CPU guarantees that no interrupt can slip in between `sti` and `hlt`.
+  While a periodic timer runs, the lost wake-up only delays the key until the next tick; without one it waits for the next key.
+- The buffer's spin lock is shared with the handler: the rest of the kernel takes it only with interrupts off – a handler
+  that interrupts the lock's holder would wait for it forever.
 
 ## M8 – Physical memory
 - RAM is managed in **frames** of 4 KiB. Limine tells us via the **memory map** which address ranges are usable RAM and which are

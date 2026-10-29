@@ -2,6 +2,9 @@
 
 ## Unreleased
 **Course**
+- Chapter 7 – The keyboard, the end of part I: IRQ 1, a ring buffer between handler and kernel, a scancode
+  decoder with Shift and Caps Lock, and a kernel that echoes what you type. `make test` types on the emulated
+  keyboard with QEMU's `sendkey`.
 - Chapter 6 – Hardware interrupts and the timer: the 8259 PIC moved to vectors 32–47, a 100 Hz PIT timer, and
   `sleep_ms` that waits in `hlt` and never ends early. From this chapter on QEMU runs with a CPU without local APIC
   (bug #25: under QEMU 8.2 no PIC interrupt arrives otherwise).

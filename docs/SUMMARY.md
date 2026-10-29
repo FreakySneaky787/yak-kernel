@@ -11,6 +11,7 @@
   - [4 – GDT and TSS](course/04-gdt.md)
   - [5 – Interrupts and exceptions](course/05-interrupts.md)
   - [6 – Hardware interrupts and the timer](course/06-timer.md)
+  - [7 – The keyboard](course/07-keyboard.md)
 
 # Understand the kernel
 

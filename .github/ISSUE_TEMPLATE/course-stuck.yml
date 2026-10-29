@@ -19,6 +19,7 @@ body:
         - 4 – GDT and TSS
         - 5 – Interrupts and exceptions
         - 6 – Hardware interrupts and the timer
+        - 7 – The keyboard
     validations:
       required: true
   - type: dropdown
