@@ -2,6 +2,8 @@
 
 ## Unreleased
 **Course**
+- Chapter 8 – Physical memory, the start of part II: Limine's memory map, a bitmap frame allocator over the
+  usable RAM, and physical addresses reached through the higher-half direct map.
 - Chapter 7 – The keyboard, the end of part I: IRQ 1, a ring buffer between handler and kernel, a scancode
   decoder with Shift and Caps Lock, and a kernel that echoes what you type. `make test` types on the emulated
   keyboard with QEMU's `sendkey`.

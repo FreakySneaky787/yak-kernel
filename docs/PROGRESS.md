@@ -140,6 +140,7 @@ continue with chapter 5 meanwhile instead of waiting.
 | C5 | Chapter 5 – Interrupts and exceptions: own IDT (`idt.rs`, 16-byte gates, `lidt`), `x86-interrupt` handlers for vectors 0, 3, 6, 8, 13, 14 (`interrupts.rs`), double fault on IST1, faults on purpose via the kernel command line (`fault=page`, `fault=stack`; `run-qemu.sh` gets `KERNEL_CMDLINE`/`EXPECTED` and notices when QEMU ends by itself) | ✅ | 22 in-kernel tests (6 new: gate bits, IDTR, breakpoints return, IST1 gate, exactly six gates present, page fault error text); 3 boot checks – normal, page fault at `0xdeadbeef`, double fault on its own stack; without `.set_ist(…)` the double fault check fails in 1 s (triple fault), without `interrupts::init()` the IDTR test fails |
 | C6 | Chapter 6 – Hardware interrupts and the timer: `port.rs` shared by serial/PIC/PIT, 8259 PIC moved to vectors 32–47 with EOI and spurious IRQ 7/15 handling, a CPU without local APIC in `run-qemu.sh` (`-cpu qemu64,-apic`: Limine masks LINT0, and switching the APIC off is not enough under QEMU 8.2 – bug #25), PIT at 100 Hz, `time.rs` (ticks, `uptime_ms`, `sleep_ms` in `hlt`, deadline rounded up + 1 as after bug #18) | ✅ | 29 in-kernel tests (7 new: no APIC (CPUID), masks, vectors, divisor, ticks in `hlt`, deadline rounding, sleep lower bound); normal boot needs `sleep_ms(1000)` ≥ 1000 ms (measured 1010); green under QEMU 8.2.2 (Ubuntu 24.04, container) and 10.2. Counter-checks: with an APIC the kernel hangs after `sti`; without EOI exactly one tick; without the PIC remap IRQ 0 hits the double fault handler with a frame one place off; without the timer gate #GP 0x102 |
 | C7 | Chapter 7 – The keyboard (end of part I): `ringbuf.rs` (fixed-size byte ring buffer), `scancode.rs` (set 1 decoder, US layout as one table row per keyboard row, Shift, Caps Lock, `E0`/`E1` prefixes skipped), `keyboard.rs` (IRQ 1 handler stores the byte, controller drained before unmasking, `read_key` with the lock taken only under `cli` and `sti; hlt` against the lost wake-up), echo loop in `kmain`, `\x08` in the console; `run-qemu.sh` types with QEMU `sendkey` through a monitor FIFO (`KEYS`, `KEYS_AFTER`) | ✅ | 36 in-kernel tests (7 new: ring buffer, four decoder tests, buffer → `read_key`, backspace on the console); the normal boot check types "Hi YAK!" with Shift and Caps Lock and waits for the echo; green under QEMU 8.2.2 (container) and 10.2. Counter-checks: without the `inb` or without the EOI only the first key arrives; with the lock held across `hlt` everything stops at the first key; without the prefix rule `prefixed_keys_are_skipped` fails |
+| C8 | Chapter 8 – Physical memory (start of part II): HHDM and memory map requests, `mem.rs` (`PhysAddr` whose only way to a pointer is the HHDM, alignment helpers), `pmm.rs` (bitmap frame allocator over the usable ranges only – Limine's reclaimable memory holds the live page tables, the stack and the responses; the bitmap lives in the first usable range that fits and reserves itself; `next_word` search, `free` refuses nonsense), `kmain` prints the memory map and round-trips a frame | ✅ | 45 in-kernel tests (9 new: helpers, four on a fake 256-frame machine, usable amount, *every* frame taken and chained through memory – each in usable RAM, none the bitmap – and freed again, zeroed frame). Counter-checks: without `reserve` the first frame is the bitmap and `free_frame` panics with `NotAllocated`; a physical address as pointer page-faults at `0x62000`; bootloader memory counted as usable boots fine but the every-frame test page-faults in the HHDM |
 
 ## Log
 - **2026-10-24** – Setup: Rust nightly 1.101 (rustup), target `x86_64-unknown-none`, Limine v11.x-binary.
@@ -479,6 +480,11 @@ continue with chapter 5 meanwhile instead of waiting.
   wake-up costs at most one tick – `sti; hlt` matters once nothing else wakes the CPU. Chapters 5–7 also lost a
   compiler warning (a function cast straight to an integer in a test).
 
+- **2026-10-29** – C8: chapter 8, physical memory – part II begins. I kept the chapter to the bitmap allocator and
+  left out what the reference kernel added later (taking back Limine's memory, a frame below 1 MiB for the other
+  CPUs). The strongest test takes every frame there is and chains them through memory; it is also the only thing
+  that catches the most dangerous mistake, counting Limine's memory as usable – the kernel itself boots fine with it.
+
 ## Known limitations of release 1.0 (sorted in M42)
 Release blockers were defined as "a program can crash, hang or exhaust the kernel" (`docs/GOALS.md`: isolated
 programs, reliability). All of those found so far are fixed (bugs #11–#16). The rest are **documented limitations**:
@@ -524,6 +530,7 @@ they make YAK smaller than a production system, but they do not break the promis
 ## Next step
 1.0.0 is released (tag `v1.0.0`, GitHub release with files). The pilot is ready for an outside reader (M60): I
 hand chapters 1–4 to somebody who did not build YAK and point them at the issue forms. Chapters 5–7 are written
-(C5–C7): part I of the course is complete. Next: part II, memory – chapter 8, the physical frame allocator
-(`docs/LEARN.md` M8: Limine's memory map, a bitmap allocator); then paging with guard pages (chapter 9) and the heap
-(chapter 10).
+(C5–C7): part I of the course is complete. Part II has begun with chapter 8, physical memory (C8). Next: chapter 9,
+paging (`docs/LEARN.md` M9): walking Limine's page tables, `translate`, `map`/`unmap` with frames from chapter 8, and
+a guard page under a kernel stack – the stack overflow that chapter 5 could only fake becomes a real one. Then the
+heap (chapter 10).

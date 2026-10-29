@@ -85,6 +85,8 @@ Short explanations of every subsystem: what it is and why we need it.
   For 256 MiB that is only 65536 bits = 8 KiB of bookkeeping.
 - Physical addresses cannot be dereferenced directly because paging is on. Limine maps all of physical memory at a fixed
   offset (**HHDM**, higher-half direct map), so physical `p` is accessible at virtual `p + offset`.
+- Only **usable** ranges may be handed out at first. *Bootloader reclaimable* memory holds the page tables the CPU is using,
+  the boot stack and Limine's responses (the memory map itself); it becomes free only after the kernel has its own.
 
 ## M9 – Paging
 - Every memory access uses a **virtual** address; the CPU translates it to a physical address through **page tables**.
