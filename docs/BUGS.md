@@ -246,6 +246,16 @@ Format: number · date · title, then symptom → cause → fix → test.
 - **Test:** `make e2e` and `make e2e-uefi` green.
 - **Remember:** the same lesson as #22 – assert a lower bound for timeouts, never an exact time.
 
+### #24 · 2026-10-29 · The `hello` sleep check in the userspace test allowed only one tick of delay
+- **Symptom:** `make check` on a busy host: `tests/userspace.rs` failed at its first assertion – `hello` printed
+  "Slept for 120 ms", the test accepted only 100 or 110 ms. Five runs right after it printed 110 ms and passed.
+- **Cause:** the test, not the kernel. A sleep of 100 ms lasts at least 100 ms (bug #18); when the woken thread runs
+  again depends on the timer ticks arriving on time, and under TCG on a loaded host a tick can come late.
+- **Fix:** the test reads the number and checks 100 ≤ ms ≤ 300 – the lower bound stays exact, the upper one only catches a sleep
+  that is far too long. `irq::tests::sleep_never_ends_early` still checks bug #18 precisely with the TSC clock.
+- **Test:** `tests/userspace.rs` green in five runs in a row.
+- **Remember:** the third time after #22 and #23 – an emulated machine gives lower bounds for time, never upper ones.
+
 ## Known pitfalls (not bugs, but worth remembering)
 - **The Limine host utility (`limine bios-install`) needs a C compiler** (`gcc`). It is not required for booting the ISO
   in QEMU with `-cdrom`; it is only needed to make the ISO bootable as a hard disk / USB image.
