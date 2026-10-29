@@ -150,7 +150,7 @@ mod tests {
         let gate = idt().entry(DOUBLE_FAULT);
         assert!(gate.is_present());
         assert_eq!(gate.ist(), DOUBLE_FAULT_IST);
-        assert_eq!(gate.address(), double_fault as usize as u64);
+        assert_eq!(gate.address(), double_fault as *const () as u64);
     }
 
     #[test_case]
