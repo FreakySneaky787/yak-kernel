@@ -1,0 +1,67 @@
+name: I got stuck in a course chapter
+description: A build fails, a test is red, or the text and the code do not agree.
+title: "Course chapter N: "
+labels: ["course", "stuck"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you – a report like this is exactly what the course needs. Please paste output as text, not as a
+        screenshot, so it can be searched.
+  - type: dropdown
+    id: chapter
+    attributes:
+      label: Chapter
+      options:
+        - 1 – Booting with Limine
+        - 2 – Testing without an operating system
+        - 3 – Text on the screen
+        - 4 – GDT and TSS
+        - 5 – Interrupts and exceptions
+    validations:
+      required: true
+  - type: dropdown
+    id: path
+    attributes:
+      label: How are you working through it?
+      options:
+        - Following along – typing the code from the pages into my own project
+        - Jumped in – working in a copy of the chapter folder
+        - Only reading
+    validations:
+      required: true
+  - type: input
+    id: step
+    attributes:
+      label: Where did you get stuck?
+      description: The heading of the step on the page, e.g. "Step 3 – a TSS descriptor".
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: >-
+        The terminal output of `make test` or `make run`; when a check failed, also `build/serial.log` and
+        `build/qemu.log` from the chapter folder.
+      render: text
+  - type: input
+    id: host
+    attributes:
+      label: Host system
+      description: Operating system and version, e.g. "Fedora 44" or "Ubuntu 24.04 in WSL".
+    validations:
+      required: true
+  - type: textarea
+    id: deps
+    attributes:
+      label: Tool versions
+      description: The output of `qemu-system-x86_64 --version | head -1; rustc --version; xorriso --version 2>&1 | head -1`
+        run in the chapter folder.
+      render: text

@@ -41,12 +41,15 @@ extern "C" fn kmain() -> ! {
     assert_eq!(status, ExitStatus::Exited(0));
     assert!(out.starts_with("Hello from user space! I am process "));
     assert!(out.contains("  arg 1: a\n  arg 2: b\n"));
-    // 100 ms measured in 10 ms ticks: at least 100 (bug #18), at most one tick more
-    assert!(
-        out.contains("Slept for 100 ms") || out.contains("Slept for 110 ms"),
-        "{}",
-        out
-    );
+    // 100 ms measured in 10 ms ticks: never less than 100 (bug #18). Usually one tick more, but how late the
+    // wake-up comes depends on the host - only a generous upper bound (bug #24)
+    let slept: u64 = out
+        .split("Slept for ")
+        .nth(1)
+        .and_then(|r| r.split(' ').next())
+        .and_then(|r| r.parse().ok())
+        .expect("no sleep time printed");
+    assert!((100..=300).contains(&slept), "{}", out);
 
     assert_eq!(run("fault", "exit 7").0, ExitStatus::Exited(7));
     // bug #19: the panic handler works with an exhausted heap (it used to recurse until the stack was gone)

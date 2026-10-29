@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: How to contribute
+    url: https://github.com/FreakySneaky787/yak-kernel/blob/main/CONTRIBUTING.md
+    about: How to report problems and send fixes.

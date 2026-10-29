@@ -1,0 +1,37 @@
+name: Feedback on the course
+description: Something was unclear, too long, too short or in the wrong order – even if everything worked.
+title: "Course feedback: "
+labels: ["course", "feedback"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The pilot chapters are written to be tested on readers. "I had to read this paragraph three times" is
+        useful feedback.
+  - type: input
+    id: chapters
+    attributes:
+      label: Which chapters did you work through?
+      placeholder: e.g. 1–3
+    validations:
+      required: true
+  - type: textarea
+    id: unclear
+    attributes:
+      label: What was unclear?
+      description: Quote the sentence or name the step, and say what you thought it meant.
+  - type: textarea
+    id: pace
+    attributes:
+      label: Too fast, too slow, missing?
+      description: Steps that needed knowledge the course had not given you yet, or explanations you could skip.
+  - type: textarea
+    id: background
+    attributes:
+      label: Your background
+      description: Optional. How much Rust, C, assembly or operating-system knowledge you had before.
+  - type: input
+    id: time
+    attributes:
+      label: How long did it take?
+      description: Optional, roughly per chapter.

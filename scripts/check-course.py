@@ -7,7 +7,9 @@ The course has two halves that must never drift apart:
 
 Static checks (always):
 - every chapter folder has a page and every page a folder; chapters are numbered 01, 02, ... without gaps;
-  every page is listed in docs/SUMMARY.md
+  every page is listed in docs/SUMMARY.md, in the chapter table of docs/course/README.md and in the chapter list
+  of the issue form .github/ISSUE_TEMPLATE/course-stuck.yml
+- every page after the first names the command that shows its changes: diff -ru course/<previous> course/<this>
 - every chapter folder carries the repository's rust-toolchain.toml unchanged (learners copy single folders)
 - every code block in a page whose info string names a file (```rust,file=kernel/src/main.rs) appears
   line for line in that file of the chapter folder - the text can only show code that really runs
@@ -23,6 +25,8 @@ import sys
 import tempfile
 
 CHAPTER = re.compile(r"^(\d\d)-[a-z0-9-]+$")
+# an option of the chapter dropdown in the issue form: "        - 4 – GDT and TSS"
+FORM_CHAPTER = re.compile(r"^\s*- (\d+) – ", re.M)
 FENCE = re.compile(r"^```([^\n`]*)\n(.*?)^```\s*$", re.M | re.S)
 
 
@@ -52,8 +56,13 @@ def check_static(root):
     numbers = [int(n[:2]) for n in folders]
     if numbers != list(range(1, len(numbers) + 1)):
         problems.append(f"chapter numbers must be 01, 02, ... without gaps, found {numbers}")
-    summary_path = os.path.join(root, "docs", "SUMMARY.md")
-    summary = open(summary_path, encoding="utf-8").read() if os.path.exists(summary_path) else ""
+    def read(*path):
+        full = os.path.join(root, *path)
+        return open(full, encoding="utf-8").read() if os.path.exists(full) else ""
+
+    summary = read("docs", "SUMMARY.md")
+    course_table = read("docs", "course", "README.md")
+    form_chapters = {int(n) for n in FORM_CHAPTER.findall(read(".github", "ISSUE_TEMPLATE", "course-stuck.yml"))}
     toolchain = open(os.path.join(root, "rust-toolchain.toml"), encoding="utf-8").read()
     for name in folders:
         folder = os.path.join(course_dir, name)
@@ -62,10 +71,16 @@ def check_static(root):
             problems.append(f"course/{name}/rust-toolchain.toml must be a copy of the repository's")
         if not os.path.exists(os.path.join(folder, "Makefile")):
             problems.append(f"course/{name}/Makefile is missing (needs `run` and `test`)")
-    for name in pages:
+    for i, name in enumerate(pages):
         if f"(course/{name}.md)" not in summary:
             problems.append(f"docs/course/{name}.md is not listed in docs/SUMMARY.md")
+        if f"({name}.md)" not in course_table:
+            problems.append(f"docs/course/{name}.md is not in the chapter table of docs/course/README.md")
+        if int(name[:2]) not in form_chapters:
+            problems.append(f"chapter {name} is missing from the chapter list of .github/ISSUE_TEMPLATE/course-stuck.yml")
         text = open(os.path.join(pages_dir, name + ".md"), encoding="utf-8").read()
+        if i > 0 and f"diff -ru course/{pages[i - 1]} course/{name}" not in text:
+            problems.append(f"docs/course/{name}.md does not name `diff -ru course/{pages[i - 1]} course/{name}`")
         for m in FENCE.finditer(text):
             info = dict(p.split("=", 1) for p in m.group(1).split(",") if "=" in p)
             if "file" not in info:
@@ -92,25 +107,33 @@ def build(root, folders):
 
 def selftest():
     with tempfile.TemporaryDirectory() as root:
-        os.makedirs(os.path.join(root, "course", "01-boot", "src"))
-        os.makedirs(os.path.join(root, "course", "03-gap"))
-        os.makedirs(os.path.join(root, "docs", "course"))
-        open(os.path.join(root, "rust-toolchain.toml"), "w").write("[toolchain]\n")
-        open(os.path.join(root, "course", "01-boot", "rust-toolchain.toml"), "w").write("[toolchain]\n")
-        open(os.path.join(root, "course", "01-boot", "Makefile"), "w").write("test:\n")
-        open(os.path.join(root, "course", "01-boot", "src", "main.rs"), "w").write(
-            "fn main() {\n    hello();   \n}\n")
-        open(os.path.join(root, "docs", "SUMMARY.md"), "w").write("- [1](course/01-boot.md)\n")
-        open(os.path.join(root, "docs", "course", "01-boot.md"), "w").write(
-            "```rust,file=src/main.rs\nfn main() {\n    hello();\n}\n```\n"
-            "```rust,file=src/main.rs\nfn other() {}\n```\n"
-            "```rust\nnot checked\n```\n")
+        def write(path, text):
+            os.makedirs(os.path.dirname(os.path.join(root, path)), exist_ok=True)
+            open(os.path.join(root, path), "w", encoding="utf-8").write(text)
+
+        os.makedirs(os.path.join(root, "course", "04-gap"))
+        write("rust-toolchain.toml", "[toolchain]\n")
+        for name in ("01-boot", "02-next"):
+            write(f"course/{name}/rust-toolchain.toml", "[toolchain]\n")
+            write(f"course/{name}/Makefile", "test:\n")
+        write("course/01-boot/src/main.rs", "fn main() {\n    hello();   \n}\n")
+        write("docs/SUMMARY.md", "- [1](course/01-boot.md)\n- [2](course/02-next.md)\n")
+        write("docs/course/README.md", "| 1 | [Boot](01-boot.md) |\n")
+        write(".github/ISSUE_TEMPLATE/course-stuck.yml", "      options:\n        - 1 – Boot\n")
+        write("docs/course/01-boot.md",
+              "```rust,file=src/main.rs\nfn main() {\n    hello();\n}\n```\n"
+              "```rust,file=src/main.rs\nfn other() {}\n```\n"
+              "```rust\nnot checked\n```\n")
+        write("docs/course/02-next.md", "diff -ru course/01-other course/02-next\n")
         _, problems = check_static(root)
-    expected = ["chapter 03-gap: page docs/course/03-gap.md is missing",
-                "chapter numbers must be 01, 02, ... without gaps, found [1, 3]",
-                "course/03-gap/rust-toolchain.toml must be a copy of the repository's",
-                "course/03-gap/Makefile is missing (needs `run` and `test`)",
-                "docs/course/01-boot.md:6: block is not in course/01-boot/src/main.rs"]
+    expected = ["chapter 04-gap: page docs/course/04-gap.md is missing",
+                "chapter numbers must be 01, 02, ... without gaps, found [1, 2, 4]",
+                "course/04-gap/rust-toolchain.toml must be a copy of the repository's",
+                "course/04-gap/Makefile is missing (needs `run` and `test`)",
+                "docs/course/01-boot.md:6: block is not in course/01-boot/src/main.rs",
+                "docs/course/02-next.md is not in the chapter table of docs/course/README.md",
+                "chapter 02-next is missing from the chapter list of .github/ISSUE_TEMPLATE/course-stuck.yml",
+                "docs/course/02-next.md does not name `diff -ru course/01-boot course/02-next`"]
     ok = problems == expected
     print("check-course selftest:", "ok" if ok else f"FAILED {problems}")
     return 0 if ok else 1

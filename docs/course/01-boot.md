@@ -158,7 +158,11 @@ Ours prints the message and halts.
 ## Step 6: a bootable CD image
 `run-qemu.sh` packs the kernel and Limine's files into an ISO image with `xorriso` – one image that boots with BIOS
 and with UEFI – and starts QEMU with it. `limine.conf` on the image tells Limine which file to boot and with which
-protocol.
+protocol. `-no-reboot` on the QEMU command line turns a reset of the machine into the end of QEMU, so a crashing
+kernel stops instead of booting again and again.
+
+These files – `run-qemu.sh`, `limine.conf`, the `Makefile` and `rust-toolchain.toml` – are tooling, not kernel code.
+Copy them from the chapter folder instead of typing them; each one starts with a comment that explains it.
 
 ## Run it
 ```sh
@@ -187,7 +191,8 @@ chapter has a test that fails without the chapter's code.
 - **`error: linking with ld.bfd failed`:** GNU ld (package `binutils`) is missing.
 - **"relocation truncated to fit":** code built for a different code model than the linker script expects; the
   `code-model=kernel` flag in `.cargo/config.toml` belongs to the higher-half address in `linker.ld`.
-- **The kernel resets in a loop:** a *triple fault* – the CPU hit an error while handling an error. Add
+- **QEMU closes by itself right after the start:** a *triple fault* – the CPU hit an error while handling an
+  error and reset the machine, which `-no-reboot` turns into the end of QEMU. Add
   `-d int,cpu_reset -D qemu.log` to the QEMU command in `run-qemu.sh` and read the last exception in the log.
   (We will set up proper exception handlers in a later chapter.)
 

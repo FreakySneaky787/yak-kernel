@@ -6,6 +6,7 @@ needs before it can handle exceptions safely.
 the normal stack breaks (used in the next chapter).
 **Code:** [`course/04-gdt/`](https://github.com/FreakySneaky787/yak-kernel/tree/main/course/04-gdt) (chapter 3 plus
 `gdt.rs`)
+**What changed:** `diff -ru course/03-console course/04-gdt` (in the repository) shows every line this chapter adds.
 
 ## Background: segments, then and now
 On the 8086, memory was addressed as *segment:offset*. Later CPUs turned segments into entries of a table – the
@@ -56,7 +57,7 @@ The interesting field is `interrupt_stacks` – seven stack pointers, IST1 to IS
 the exception frame for the resulting page fault – onto the broken stack – and fails again. That second failure is
 a *double fault*. If the double fault handler also used the broken stack, a third failure would follow: a **triple
 fault**, and the machine resets. With IST1 the CPU switches to a fresh stack *before* pushing anything. (The handler
-itself comes in chapter 5; today we only prepare the stack.)
+itself comes in [chapter 5](05-interrupts.md); today we only prepare the stack.)
 
 ## Step 3: a TSS descriptor
 The GDT points to the TSS with a **system descriptor** of 16 bytes – two entries – with the 64-bit address cut into
@@ -102,6 +103,27 @@ Three instructions make the CPU use our structures:
 
 GDT and TSS must live as long as the kernel – the CPU keeps using them – so they are `static`s, built once at
 `init` with `spin::Once`.
+
+## Step 5: calling it
+`main.rs` gets `mod gdt;` next to the other modules, and both entry points call `gdt::init()` right after the
+console – the normal `kmain` and the test `kmain`, because the tests check the loaded segments:
+
+```rust,file=kernel/src/main.rs
+    console::init();
+    gdt::init();
+    println!("Hello from YAK!");
+```
+
+At the end, the normal `kmain` reports what it loaded:
+
+```rust,file=kernel/src/main.rs
+    println!(
+        "GDT loaded: code segment {:#x}, TSS {:#x}, double fault stack top {:#x}",
+        gdt::KERNEL_CODE_SELECTOR,
+        gdt::TSS_SELECTOR,
+        gdt::double_fault_stack_top()
+    );
+```
 
 ## The tests
 `make test` now runs 16 tests; four are new:
