@@ -18,6 +18,7 @@ body:
         - 3 – Text on the screen
         - 4 – GDT and TSS
         - 5 – Interrupts and exceptions
+        - 6 – Hardware interrupts and the timer
     validations:
       required: true
   - type: dropdown

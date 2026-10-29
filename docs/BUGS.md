@@ -16,6 +16,8 @@ Format: number · date · title, then symptom → cause → fix → test.
 - **Fix:** `lapic::disable()` clears bit 11 (global enable) in MSR `IA32_APIC_BASE`, so PIC interrupts go directly to the CPU's INTR pin.
 - **Test:** `irq::tests::local_apic_disabled_for_pic_mode`, `timer_ticks_advance`, `sleep_waits_roughly`. Verified with BIOS and UEFI.
 - **Update (M12):** superseded – the kernel now uses the local APIC + I/O APIC and masks LINT0 on purpose; the 8259 is fully masked.
+- **Update (C6):** the fix depends on the QEMU version – QEMU 8.2 drops PIC interrupts at the masked LINT0 even with
+  the APIC disabled (bug #25).
 - **Remember:** when interrupts do not arrive, look at `info pic` / `info lapic` first:
   `python3 -I scripts/qemu-monitor.py <elf> [s] -- "info pic" "info lapic"`.
 
@@ -255,6 +257,23 @@ Format: number · date · title, then symptom → cause → fix → test.
   that is far too long. `irq::tests::sleep_never_ends_early` still checks bug #18 precisely with the TSC clock.
 - **Test:** `tests/userspace.rs` green in five runs in a row.
 - **Remember:** the third time after #22 and #23 – an emulated machine gives lower bounds for time, never upper ones.
+
+### #25 · 2026-10-29 · Course chapter 6: no timer interrupt under QEMU 8.2
+- **Symptom:** CI job `course` on PR #9: `time::tests::sleep_never_ends_early` hung until the 120 s limit. Locally
+  (Fedora, QEMU 10.2) all 29 tests passed. Reproduced with the same kernel under Ubuntu 24.04's QEMU 8.2.2 in a
+  container: the normal kernel stops after "Timer: IRQ 0 on vector 32".
+- **Diagnosis:** QEMU monitor under 8.2: `pic0: irr=01 imr=fe isr=00 irq_base=20` – the PIC holds the tick, moved and
+  unmasked – and `LVT0 0x00018700 … masked ExtINT`, RFLAGS.IF = 1, the CPU in `hlt`. The chapter switched the local
+  APIC off through `IA32_APIC_BASE` as the reference kernel did in M6 (bug #2), but QEMU 8.2 still sends the PIC's
+  signal through LINT0, and Limine masked LINT0. QEMU 10.2 delivers it; where its code differs I did not find.
+- **Fix:** unmasking LINT0 ("virtual wire mode") needs the APIC registers – memory-mapped at `0xFEE0_0000`, which
+  Limine does not map (a read through the HHDM page-faults), or x2APIC MSRs, which QEMU 8.2's TCG does not offer.
+  So from chapter 6 on the course starts QEMU with `-cpu qemu64,-apic`: no local APIC, the PIC goes straight to the
+  CPU. The `IA32_APIC_BASE` code is gone from the chapter; the APIC returns in part IV.
+- **Test:** `pic::tests::the_cpu_has_no_local_apic`; chapter 6's `make test` green under QEMU 8.2.2 (container) and
+  10.2; with `-apic` removed the kernel hangs again. The CI job `course` (Ubuntu 24.04) runs it on every push.
+- **Remember:** behaviour that depends on emulator details needs a run on the oldest supported version – CI runs
+  Ubuntu's QEMU, a developer machine often a much newer one.
 
 ## Known pitfalls (not bugs, but worth remembering)
 - **The Limine host utility (`limine bios-install`) needs a C compiler** (`gcc`). It is not required for booting the ISO

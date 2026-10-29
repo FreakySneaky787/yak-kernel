@@ -138,6 +138,7 @@ continue with chapter 5 meanwhile instead of waiting.
 |---|---|---|---|
 | 60 | First-reader pass over chapters 1–4: every folder built on its own outside the repository (own Limine clone); the pages compared line by line with the folders – chapters 3 and 4 never showed how the new code is wired into `kmain`, chapter 3 counted one test twice, chapter 1 claimed a reset loop that `-no-reboot` prevents; QEMU's "terminating on signal 15" moved into `build/qemu.log`; a "What changed" `diff` line per page; issue forms "I got stuck in a course chapter" / "Feedback on the course"; `CONTRIBUTING.md` | ✅ | `make test` in copies of all four folders without `LIMINE_DIR`; `check-course.py` also checks the course table, the issue form's chapter list and the `diff` line (`--selftest` with all three failures) |
 | C5 | Chapter 5 – Interrupts and exceptions: own IDT (`idt.rs`, 16-byte gates, `lidt`), `x86-interrupt` handlers for vectors 0, 3, 6, 8, 13, 14 (`interrupts.rs`), double fault on IST1, faults on purpose via the kernel command line (`fault=page`, `fault=stack`; `run-qemu.sh` gets `KERNEL_CMDLINE`/`EXPECTED` and notices when QEMU ends by itself) | ✅ | 22 in-kernel tests (6 new: gate bits, IDTR, breakpoints return, IST1 gate, exactly six gates present, page fault error text); 3 boot checks – normal, page fault at `0xdeadbeef`, double fault on its own stack; without `.set_ist(…)` the double fault check fails in 1 s (triple fault), without `interrupts::init()` the IDTR test fails |
+| C6 | Chapter 6 – Hardware interrupts and the timer: `port.rs` shared by serial/PIC/PIT, 8259 PIC moved to vectors 32–47 with EOI and spurious IRQ 7/15 handling, a CPU without local APIC in `run-qemu.sh` (`-cpu qemu64,-apic`: Limine masks LINT0, and switching the APIC off is not enough under QEMU 8.2 – bug #25), PIT at 100 Hz, `time.rs` (ticks, `uptime_ms`, `sleep_ms` in `hlt`, deadline rounded up + 1 as after bug #18) | ✅ | 29 in-kernel tests (7 new: no APIC (CPUID), masks, vectors, divisor, ticks in `hlt`, deadline rounding, sleep lower bound); normal boot needs `sleep_ms(1000)` ≥ 1000 ms (measured 1010); green under QEMU 8.2.2 (Ubuntu 24.04, container) and 10.2. Counter-checks: with an APIC the kernel hangs after `sti`; without EOI exactly one tick; without the PIC remap IRQ 0 hits the double fault handler with a frame one place off; without the timer gate #GP 0x102 |
 
 ## Log
 - **2026-10-24** – Setup: Rust nightly 1.101 (rustup), target `x86_64-unknown-none`, Limine v11.x-binary.
@@ -463,6 +464,13 @@ continue with chapter 5 meanwhile instead of waiting.
   pushed to. Every claim on the page that says what happens was checked by a run – `-d int` shows the chain
   `v=0e`, `v=08`, triple fault when the IST index is missing.
 
+- **2026-10-29** – C6: chapter 6, PIC and timer. Bug #2 (Limine masks LINT0, so PIC interrupts never arrive with the
+  local APIC on) is still true with Limine 11. The chapter first switched the APIC off like M6 did – green locally,
+  red in CI: QEMU 8.2 drops the interrupts anyway (bug #25). The chapter now runs on a CPU without APIC. The counter-check
+  without the PIC remap is the best example for chapter 5's "one place off" warning: the timer IRQ lands on vector 8,
+  and the double fault handler prints the interrupted RIP as its error code. `docs/LEARN.md` named a PIT divisor of
+  11932; the code has always computed 11931.
+
 ## Known limitations of release 1.0 (sorted in M42)
 Release blockers were defined as "a program can crash, hang or exhaust the kernel" (`docs/GOALS.md`: isolated
 programs, reliability). All of those found so far are fixed (bugs #11–#16). The rest are **documented limitations**:
@@ -508,6 +516,6 @@ they make YAK smaller than a production system, but they do not break the promis
 ## Next step
 1.0.0 is released (tag `v1.0.0`, GitHub release with files). The pilot is ready for an outside reader (M60): I
 hand chapters 1–4 to somebody who did not build YAK and point them at the issue forms. Chapter 5 is written
-(C5). Next: chapter 6 – hardware interrupts, PIC and timer (`docs/LEARN.md` M6): remap the PIC, a timer IRQ on
-vector 32, `sti`; its check: ticks counted while the kernel waits in `hlt`. Then chapter 7, the keyboard – the end
-of part I.
+(C5), and chapter 6 (C6). Next: chapter 7 – the keyboard (`docs/LEARN.md` M7): PS/2 controller, IRQ 1 on vector
+33, scancode set 1 decoded into characters, a ring buffer between handler and `kmain`; its check sends keys with
+QEMU's `sendkey` (as `scripts/screenshot.py` does). That ends part I.

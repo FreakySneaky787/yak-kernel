@@ -1,0 +1,9 @@
+Hello from YAK!
+Console: 160 x 50 characters
+Grüße - umlauts work too: äöü ÄÖÜ ß
+GDT loaded: code segment 0x8, TSS 0x18, double fault stack top 0xffffffff8
+IDT loaded: exceptions 0, 3, 6, 8 (on IST1), 13, 14
+EXCEPTION: BREAKPOINT at 0xffffffff8
+Back from the breakpoint handler - the kernel carries on.
+Timer: IRQ 0 on vector 32, 100 Hz
+(at least 1000: yes), the CPU waited in hlt
