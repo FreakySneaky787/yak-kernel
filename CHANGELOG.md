@@ -2,6 +2,9 @@
 
 ## Unreleased
 **Course**
+- Chapter 10 – The heap, the end of part II: a free-list allocator behind `#[global_allocator]` that grows by
+  mapping pages with chapter 9's `map`; `Box`, `Vec` and `String` work in the kernel, and a request over the
+  limit (`fault=heap`) ends in a panic.
 - Chapter 9 – Paging: the live page tables read and changed (`translate`, `map`, `unmap`), and kernel stacks with
   a guard page – a real stack overflow ends in the double fault handler.
 - Chapter 8 – Physical memory, the start of part II: Limine's memory map, a bitmap frame allocator over the

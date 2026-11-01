@@ -109,6 +109,9 @@ Short explanations of every subsystem: what it is and why we need it.
 - **Free**: put the block back into the list at its address position; if it touches a neighbouring gap, merge them (*coalescing*) –
   otherwise the heap would crumble into many tiny unusable pieces (*fragmentation*).
 - Once a `#[global_allocator]` exists, Rust's `alloc` crate works: `Box`, `Vec`, `String`, `BTreeMap` – just like in normal programs.
+- The heap needs nothing but frames and `map`: course chapter 10 starts it with nothing mapped, and the first `Box` maps its first pages.
+- **Locks and interrupts**: if an interrupt handler allocated while its CPU was inside `alloc`, it would wait forever for the lock its own
+  CPU holds. The kernel therefore turns interrupts off around every heap call; the course chapter keeps them on because no handler allocates.
 
 ## M11 – Shell
 - A **shell** is a loop: print a prompt, read a line, split it into words, look up the first word as a command, run it.
