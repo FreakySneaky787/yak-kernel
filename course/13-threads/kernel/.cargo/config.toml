@@ -1,0 +1,14 @@
+[build]
+# A target without an operating system underneath: no std, no libc, no default linker script
+target = "x86_64-unknown-none"
+
+[target.x86_64-unknown-none]
+rustflags = [
+    "-C", "linker=ld.bfd",          # GNU ld
+    "-C", "linker-flavor=ld",
+    "-C", "link-arg=-Tlinker.ld",   # our memory layout (higher half)
+    "-C", "relocation-model=static",
+    "-C", "code-model=kernel",      # code lives in the top 2 GiB of the address space
+]
+# `cargo run` and `cargo test` hand the built kernel to this script, which boots it in QEMU
+runner = "../run-qemu.sh"

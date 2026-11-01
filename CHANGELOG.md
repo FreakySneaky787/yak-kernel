@@ -2,6 +2,9 @@
 
 ## Unreleased
 **Course**
+- Chapter 13 – Threads and a scheduler: kernel threads with guarded stacks, a context switch in assembly,
+  round-robin preemption by the local APIC timer, and blocking waits (sleep, keyboard, `join`) without lost wake-ups;
+  the heap now locks with interrupts off, since the timer handler allocates.
 - Chapter 12 – ACPI and the APIC, the start of part IV: the MADT from the ACPI tables, the I/O APIC routing the
   timer and the keyboard, and the local APIC timer measured against the PIT; QEMU runs with a local APIC again.
   Bug #27 found and fixed on the way (the PIT's square wave ticked twice per period through the I/O APIC).
