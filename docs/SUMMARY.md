@@ -14,6 +14,7 @@
   - [7 – The keyboard](course/07-keyboard.md)
   - [8 – Physical memory](course/08-frames.md)
   - [9 – Paging](course/09-paging.md)
+  - [10 – The heap](course/10-heap.md)
 
 # Understand the kernel
 

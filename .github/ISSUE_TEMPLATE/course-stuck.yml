@@ -22,6 +22,7 @@ body:
         - 7 – The keyboard
         - 8 – Physical memory
         - 9 – Paging
+        - 10 – The heap
     validations:
       required: true
   - type: dropdown

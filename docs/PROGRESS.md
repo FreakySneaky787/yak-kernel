@@ -142,6 +142,7 @@ continue with chapter 5 meanwhile instead of waiting.
 | C7 | Chapter 7 – The keyboard (end of part I): `ringbuf.rs` (fixed-size byte ring buffer), `scancode.rs` (set 1 decoder, US layout as one table row per keyboard row, Shift, Caps Lock, `E0`/`E1` prefixes skipped), `keyboard.rs` (IRQ 1 handler stores the byte, controller drained before unmasking, `read_key` with the lock taken only under `cli` and `sti; hlt` against the lost wake-up), echo loop in `kmain`, `\x08` in the console; `run-qemu.sh` types with QEMU `sendkey` through a monitor FIFO (`KEYS`, `KEYS_AFTER`) | ✅ | 36 in-kernel tests (7 new: ring buffer, four decoder tests, buffer → `read_key`, backspace on the console); the normal boot check types "Hi YAK!" with Shift and Caps Lock and waits for the echo; green under QEMU 8.2.2 (container) and 10.2. Counter-checks: without the `inb` or without the EOI only the first key arrives; with the lock held across `hlt` everything stops at the first key; without the prefix rule `prefixed_keys_are_skipped` fails |
 | C8 | Chapter 8 – Physical memory (start of part II): HHDM and memory map requests, `mem.rs` (`PhysAddr` whose only way to a pointer is the HHDM, alignment helpers), `pmm.rs` (bitmap frame allocator over the usable ranges only – Limine's reclaimable memory holds the live page tables, the stack and the responses; the bitmap lives in the first usable range that fits and reserves itself; `next_word` search, `free` refuses nonsense), `kmain` prints the memory map and round-trips a frame | ✅ | 45 in-kernel tests (9 new: helpers, four on a fake 256-frame machine, usable amount, *every* frame taken and chained through memory – each in usable RAM, none the bitmap – and freed again, zeroed frame). Counter-checks: without `reserve` the first frame is the bitmap and `free_frame` panics with `NotAllocated`; a physical address as pointer page-faults at `0x62000`; bootloader memory counted as usable boots fine but the every-frame test page-faults in the HHDM |
 | C9 | Chapter 9 – Paging: `paging.rs` (entries and tables through the HHDM, `translate` with huge pages, `flags`, `map` creating zeroed intermediate tables, `unmap` with `invlpg`), `stack.rs` (stacks in PML4 slot 510 with an unmapped guard page), `fault=overflow` – a real recursion on a guarded stack that ends in the double fault handler; executable address request. Found bug #26 (PAT bit of huge pages shifted `translate` by 4 KiB), fixed in the kernel too | ✅ | 52 in-kernel tests (7 new: indices, kernel address against Limine's, HHDM and empty lower half, map/unmap round trip costing exactly three tables, framebuffer translation (bug #26), no 4 KiB page inside a huge one, guard page unmapped); a fourth boot check for the overflow; green under QEMU 8.2.2 and 10.2. Counter-checks: guard page mapped – the overflow runs one page past the stack; without `invlpg` the unmapped page still reads `0xbeef`; intermediate tables without WRITABLE – protection violation on write |
+| C10 | Chapter 10 – The heap (end of part II): `heap.rs` – a free list sorted by address whose 16-byte headers live in the gaps, blocks rounded to 16, first fit with alignment padding given back, merging with both neighbours on free; `#[global_allocator]` behind a spin lock, an empty area in PML4 slot 507 that maps at least 64 KiB more with `paging::map` when a request does not fit, 16 MiB limit; `extern crate alloc` with `Box`/`Vec`/`String`/`format!` in `kmain`; `fault=heap` – a `Vec` over the limit ends in Rust's `memory allocation of … bytes failed` panic | ✅ | 61 in-kernel tests (9 new: four on a free list over a 16 KiB array – merging, alignment, full list, first fit; five on the kernel heap – Box/String/format in the heap area, growth, 10 000 boxes leave it unchanged, BTreeMap, over the limit is null without mapping); a fifth boot check for `fault=heap`; green under QEMU 8.2.2 and 10.2. Counter-checks: no merge with the following gap – 3 gaps instead of 1; alignment ignored – a 4096-aligned block 16 bytes off; sizes not rounded to 16 – misaligned pointer dereference; area not mapped – page fault at `0xfffffd8000000000` |
 
 ## Log
 - **2026-10-24** – Setup: Rust nightly 1.101 (rustup), target `x86_64-unknown-none`, Limine v11.x-binary.
@@ -491,6 +492,12 @@ continue with chapter 5 meanwhile instead of waiting.
   same walk over the framebuffer showed bug #26: its 2 MiB entries carry the PAT bit, and `translate` – mine and the
   reference kernel's – read it as an address bit. Fixed in both, with a test in both.
 
+- **2026-11-01** – C10: chapter 10, the heap – part II is complete. The heap starts with nothing mapped; the first
+  `Box` maps its first 64 KiB, so the chapter needs no `init` and shows that a heap is just frames and `map`. I kept
+  the spin lock with interrupts on and wrote on the page why that holds only while no handler allocates (the
+  reference kernel turns them off). The counter-check with unrounded sizes did not corrupt memory silently: Rust's
+  debug checks stopped it at the first misaligned gap pointer.
+
 ## Known limitations of release 1.0 (sorted in M42)
 Release blockers were defined as "a program can crash, hang or exhaust the kernel" (`docs/GOALS.md`: isolated
 programs, reliability). All of those found so far are fixed (bugs #11–#16). The rest are **documented limitations**:
@@ -535,7 +542,7 @@ they make YAK smaller than a production system, but they do not break the promis
 
 ## Next step
 1.0.0 is released (tag `v1.0.0`, GitHub release with files). The pilot is ready for an outside reader (M60): I
-hand chapters 1–4 to somebody who did not build YAK and point them at the issue forms. Chapters 5–7 are written
-(C5–C7): part I of the course is complete. Part II continues with chapter 8, physical memory (C8), and chapter 9, paging (C9). Next:
-chapter 10, the heap (`docs/LEARN.md` M10): a linked-list allocator as `#[global_allocator]` on pages mapped with
-chapter 9's `map`, so that `alloc::vec::Vec` and `String` work – the end of part II.
+hand chapters 1–4 to somebody who did not build YAK and point them at the issue forms. Parts I (chapters 1–7) and
+II (chapters 8–10: frames, paging, the heap) of the course are written. Next: part III, chapter 11, a first shell
+(`docs/LEARN.md` M11) – a loop that reads a line from the keyboard of chapter 7, splits it into words (now a `Vec`
+of `String`s, thanks to chapter 10) and runs a command.
