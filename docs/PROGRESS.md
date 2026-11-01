@@ -143,6 +143,7 @@ continue with chapter 5 meanwhile instead of waiting.
 | C8 | Chapter 8 – Physical memory (start of part II): HHDM and memory map requests, `mem.rs` (`PhysAddr` whose only way to a pointer is the HHDM, alignment helpers), `pmm.rs` (bitmap frame allocator over the usable ranges only – Limine's reclaimable memory holds the live page tables, the stack and the responses; the bitmap lives in the first usable range that fits and reserves itself; `next_word` search, `free` refuses nonsense), `kmain` prints the memory map and round-trips a frame | ✅ | 45 in-kernel tests (9 new: helpers, four on a fake 256-frame machine, usable amount, *every* frame taken and chained through memory – each in usable RAM, none the bitmap – and freed again, zeroed frame). Counter-checks: without `reserve` the first frame is the bitmap and `free_frame` panics with `NotAllocated`; a physical address as pointer page-faults at `0x62000`; bootloader memory counted as usable boots fine but the every-frame test page-faults in the HHDM |
 | C9 | Chapter 9 – Paging: `paging.rs` (entries and tables through the HHDM, `translate` with huge pages, `flags`, `map` creating zeroed intermediate tables, `unmap` with `invlpg`), `stack.rs` (stacks in PML4 slot 510 with an unmapped guard page), `fault=overflow` – a real recursion on a guarded stack that ends in the double fault handler; executable address request. Found bug #26 (PAT bit of huge pages shifted `translate` by 4 KiB), fixed in the kernel too | ✅ | 52 in-kernel tests (7 new: indices, kernel address against Limine's, HHDM and empty lower half, map/unmap round trip costing exactly three tables, framebuffer translation (bug #26), no 4 KiB page inside a huge one, guard page unmapped); a fourth boot check for the overflow; green under QEMU 8.2.2 and 10.2. Counter-checks: guard page mapped – the overflow runs one page past the stack; without `invlpg` the unmapped page still reads `0xbeef`; intermediate tables without WRITABLE – protection violation on write |
 | C10 | Chapter 10 – The heap (end of part II): `heap.rs` – a free list sorted by address whose 16-byte headers live in the gaps, blocks rounded to 16, first fit with alignment padding given back, merging with both neighbours on free; `#[global_allocator]` behind a spin lock, an empty area in PML4 slot 507 that maps at least 64 KiB more with `paging::map` when a request does not fit, 16 MiB limit; `extern crate alloc` with `Box`/`Vec`/`String`/`format!` in `kmain`; `fault=heap` – a `Vec` over the limit ends in Rust's `memory allocation of … bytes failed` panic | ✅ | 61 in-kernel tests (9 new: four on a free list over a 16 KiB array – merging, alignment, full list, first fit; five on the kernel heap – Box/String/format in the heap area, growth, 10 000 boxes leave it unchanged, BTreeMap, over the limit is null without mapping); a fifth boot check for `fault=heap`; green under QEMU 8.2.2 and 10.2. Counter-checks: no merge with the following gap – 3 gaps instead of 1; alignment ignored – a 4096-aligned block 16 bytes off; sizes not rounded to 16 – misaligned pointer dereference; area not mapped – page fault at `0xfffffd8000000000` |
+| C11 | Chapter 11 – A first shell (part III): `words.rs` (a line split into words in one pass, `"…"`/`'…'` keep spaces, empty words, `UnclosedQuote`), `shell.rs` (`LineEditor` – characters, Backspace that never eats the prompt, Enter, 72-character limit; a static table of six commands `help`, `echo`, `clear`, `uptime`, `sleep`, `mem` behind `execute`; every piece writes to a `core::fmt::Write`); `kmain` ends in `shell::run()` instead of chapter 7's echo loop | ✅ | 71 in-kernel tests (10 new: three on the splitter, two on the line editor, five on commands through `execute` into a `String`); the boot check types `echo Hi  YAK!`, a Backspace-corrected `echo shell`, `nope` and `mem` with `sendkey`; green under QEMU 8.2.2 and 10.2. Counter-checks: Backspace without the guard eats the prompt (screenshot: `yak`), every space ending a word gives empty words, no line limit – 77 characters |
 
 ## Log
 - **2026-10-24** – Setup: Rust nightly 1.101 (rustup), target `x86_64-unknown-none`, Limine v11.x-binary.
@@ -498,6 +499,11 @@ continue with chapter 5 meanwhile instead of waiting.
   reference kernel turns them off). The counter-check with unrounded sizes did not corrupt memory silently: Rust's
   debug checks stopped it at the first misaligned gap pointer.
 
+- **2026-11-01** – C11: chapter 11, a first shell – part III. I kept it to the keyboard: serial input, escape
+  sequences, history and completion are named on the page as what the reference shell has besides. The decision
+  that carries the chapter is that every piece writes to a `core::fmt::Write`, so the tests compare the exact bytes
+  a command prints – including the `\x08 \x08` of the line editor.
+
 ## Known limitations of release 1.0 (sorted in M42)
 Release blockers were defined as "a program can crash, hang or exhaust the kernel" (`docs/GOALS.md`: isolated
 programs, reliability). All of those found so far are fixed (bugs #11–#16). The rest are **documented limitations**:
@@ -542,7 +548,8 @@ they make YAK smaller than a production system, but they do not break the promis
 
 ## Next step
 1.0.0 is released (tag `v1.0.0`, GitHub release with files). The pilot is ready for an outside reader (M60): I
-hand chapters 1–4 to somebody who did not build YAK and point them at the issue forms. Parts I (chapters 1–7) and
-II (chapters 8–10: frames, paging, the heap) of the course are written. Next: part III, chapter 11, a first shell
-(`docs/LEARN.md` M11) – a loop that reads a line from the keyboard of chapter 7, splits it into words (now a `Vec`
-of `String`s, thanks to chapter 10) and runs a command.
+hand chapters 1–4 to somebody who did not build YAK and point them at the issue forms. Parts I–III of the course
+are written (chapters 1–11, the last one the first shell, C11). Next: part IV, concurrency, starting with chapter
+12, ACPI and the APIC (`docs/LEARN.md` M12): the MADT, the I/O APIC and the local APIC timer instead of the PIC.
+Open question for that chapter: the course runs QEMU with `-cpu qemu64,-apic` since chapter 6 (bug #25) – chapter
+12 has to turn the local APIC back on and say why the earlier chapters could not.

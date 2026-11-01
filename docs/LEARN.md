@@ -115,6 +115,7 @@ Short explanations of every subsystem: what it is and why we need it.
 
 ## M11 – Shell
 - A **shell** is a loop: print a prompt, read a line, split it into words, look up the first word as a command, run it.
+- Course chapter 11 builds it small: commands write to a `core::fmt::Write`, so a test can pass a `String` and compare exactly what was printed.
 - The **line editor** lets you move the cursor and edit in the middle of the line. Because we only use the backspace character
   (`\x08`) to move left and simply overwrite characters, the same output works on our screen and on any serial terminal.
 - **Terminals talk in escape sequences**: an arrow key on a serial terminal arrives as three bytes `ESC [ A`, colours are sent as

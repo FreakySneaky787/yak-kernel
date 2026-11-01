@@ -1,0 +1,23 @@
+Hello from YAK!
+Console: 160 x 50 characters
+Grüße - umlauts work too: äöü ÄÖÜ ß
+GDT loaded: code segment 0x8, TSS 0x18, double fault stack top 0xffffffff8
+IDT loaded: exceptions 0, 3, 6, 8 (on IST1), 13, 14
+EXCEPTION: BREAKPOINT at 0xffffffff8
+Back from the breakpoint handler - the kernel carries on.
+Timer: IRQ 0 on vector 32, 100 Hz
+(at least 1000: yes), the CPU waited in hlt
+Memory map (
+ MiB usable, 
+through the HHDM: wrote 0xc0ffee, read 0xc0ffee
+read 0xbeef through the HHDM
+its guard page at 0xffffff0000000000 is mapped: no
+Heap: Box at 0xfffffd8000000000 holds 42, a Vec of 1000 numbers sums to 500500, format! made "YAK has 10 chapters"
+64 KiB mapped at 0xfffffd8000000000 - after drop: 0 bytes in use
+Keyboard: IRQ 1 on vector 33 (US layout)
+Shell: type help and Enter
+Hi YAK!
+shell
+unknown command: nope (try help)
+frames: 
+heap: 

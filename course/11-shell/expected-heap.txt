@@ -1,0 +1,3 @@
+64 KiB mapped at 0xfffffd8000000000 - after drop: 0 bytes in use
+Asking the heap for 16 MiB and one byte ...
+memory allocation of 16777217 bytes failed
