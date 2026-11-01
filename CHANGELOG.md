@@ -2,6 +2,9 @@
 
 ## Unreleased
 **Course**
+- Chapter 14 – The other CPUs: a real-mode trampoline below 1 MiB, INIT/STARTUP IPIs, a GDT, TSS and stack per
+  CPU, and `run_on` for jobs on other CPUs; QEMU runs with 4 CPUs. Bug #28 in chapter 13 fixed on the way (the
+  boot hung about once in 20 in `task::init`).
 - Chapter 13 – Threads and a scheduler: kernel threads with guarded stacks, a context switch in assembly,
   round-robin preemption by the local APIC timer, and blocking waits (sleep, keyboard, `join`) without lost wake-ups;
   the heap now locks with interrupts off, since the timer handler allocates.

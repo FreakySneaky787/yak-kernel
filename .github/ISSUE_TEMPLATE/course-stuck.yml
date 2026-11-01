@@ -26,6 +26,7 @@ body:
         - 11 – A first shell
         - 12 – ACPI and the APIC
         - 13 – Threads and a scheduler
+        - 14 – The other CPUs
     validations:
       required: true
   - type: dropdown
