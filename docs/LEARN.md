@@ -134,6 +134,9 @@ Short explanations of every subsystem: what it is and why we need it.
   Its speed is unknown, so we measure it once against the PIT (whose frequency is fixed at 1.193182 MHz) and then program it for 100 Hz.
 - APIC registers are **memory-mapped I/O (MMIO)**: reading/writing special physical addresses talks to hardware, not RAM.
   Such pages must be mapped **uncached**, otherwise the CPU might serve stale values from its cache.
+- **Testing a clock**: course chapter 12 first calibrated the APIC timer against PIT ticks that came twice as often as
+  they should (the PIT's square wave through the I/O APIC, bug #27). Every test measured in those same ticks and passed.
+  Only a second, independent clock showed it – the host's watch, and QEMU's known APIC rate of 1 GHz.
 
 ## M13 – Multitasking
 - A **thread** is "a CPU state + its own stack". To switch threads we save the registers of the running one on its stack,

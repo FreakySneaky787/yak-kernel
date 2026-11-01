@@ -272,6 +272,7 @@ Format: number · date · title, then symptom → cause → fix → test.
   CPU. The `IA32_APIC_BASE` code is gone from the chapter; the APIC returns in part IV.
 - **Test:** `pic::tests::the_cpu_has_no_local_apic`; chapter 6's `make test` green under QEMU 8.2.2 (container) and
   10.2; with `-apic` removed the kernel hangs again. The CI job `course` (Ubuntu 24.04) runs it on every push.
+- **Update (C12):** chapter 12 uses the APIC; from there on `run-qemu.sh` starts QEMU with `-cpu qemu64` again.
 - **Remember:** behaviour that depends on emulator details needs a run on the oldest supported version – CI runs
   Ubuntu's QEMU, a developer machine often a much newer one.
 
@@ -288,6 +289,23 @@ Format: number · date · title, then symptom → cause → fix → test.
   `paging::tests::the_framebuffer_translates_exactly` (course chapter 9).
 - **Remember:** an entry's bits mean different things on different levels – the Intel SDM's table per level, not
   one mask for all.
+
+### #27 · 2026-11-01 · Course chapter 12: the PIT ticked twice as fast through the I/O APIC
+- **Symptom:** found while writing course chapter 12, before it was published. All tests were green and
+  `sleep_ms(1000)` reported 1010 ms – but `sleep 5000` in the shell returned after 2.7 s on the host clock (chapter
+  11: 5.2 s). Every test measured time in the same ticks that were wrong, so none could notice.
+- **Cause:** the chapter routes the PIT's IRQ 0 through the I/O APIC for a tenth of a second, to measure the local
+  APIC timer against it. The PIT ran in mode 3 (square wave), as since chapter 6, and through the I/O APIC that gave
+  two interrupts per period, 200 Hz: the calibration measured 312 274 APIC timer counts per tick instead of about
+  625 000 (QEMU's APIC timer runs at 1 GHz, divided by 16). The PIC of chapters 6–11 gave one per period. The same
+  under QEMU 8.2.2 and 10.2. In mode 2 (rate generator, one short pulse per period) the count is 624 593 and
+  `sleep 5000` takes 5.2 s. The reference kernel is not affected: it measures the APIC timer with PIT channel 2,
+  polled, and never routes IRQ 0.
+- **Fix:** the chapter's `pit::init` uses mode 2.
+- **Test:** `lapic::tests::the_timer_was_measured_against_a_100_hz_clock` (course chapter 12): 600 000–650 000
+  counts per tick; with mode 3 it fails with `311689 counts per tick`.
+- **Remember:** a clock cannot be checked against itself. A test of time needs a second, independent clock – here
+  the APIC timer's known rate under QEMU, or the host's clock.
 
 ## Known pitfalls (not bugs, but worth remembering)
 - **The Limine host utility (`limine bios-install`) needs a C compiler** (`gcc`). It is not required for booting the ISO
