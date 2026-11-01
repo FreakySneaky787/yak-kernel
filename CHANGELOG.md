@@ -2,6 +2,8 @@
 
 ## Unreleased
 **Course**
+- Chapter 11 – A first shell, part III: a line editor, a splitter for words with quotes, and a table of six
+  commands; `make test` types four commands with QEMU's `sendkey` and checks the answers.
 - Chapter 10 – The heap, the end of part II: a free-list allocator behind `#[global_allocator]` that grows by
   mapping pages with chapter 9's `map`; `Box`, `Vec` and `String` work in the kernel, and a request over the
   limit (`fault=heap`) ends in a panic.

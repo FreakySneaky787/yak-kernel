@@ -23,6 +23,7 @@ body:
         - 8 – Physical memory
         - 9 – Paging
         - 10 – The heap
+        - 11 – A first shell
     validations:
       required: true
   - type: dropdown
