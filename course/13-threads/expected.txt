@@ -1,0 +1,30 @@
+Hello from YAK!
+Console: 160 x 50 characters
+Grüße - umlauts work too: äöü ÄÖÜ ß
+GDT loaded: code segment 0x8, TSS 0x18, double fault stack top 0xffffffff8
+IDT loaded: exceptions 0, 3, 6, 8 (on IST1), 13, 14
+EXCEPTION: BREAKPOINT at 0xffffffff8
+Back from the breakpoint handler - the kernel carries on.
+Memory map (
+ MiB usable, 
+through the HHDM: wrote 0xc0ffee, read 0xc0ffee
+read 0xbeef through the HHDM
+its guard page at 0xffffff0000000000 is mapped: no
+Heap: Box at 0xfffffd8000000000 holds 42, a Vec of 1000 numbers sums to 500500, format! made "YAK has 10 chapters"
+64 KiB mapped at 0xfffffd8000000000 - after drop: 0 bytes in use
+ACPI: RSDP revision 0, 
+MADT: 1 CPU, local APIC at 0xfee00000, I/O APIC at 0xfec00000 with 24 inputs
+Timer: the PIT's IRQ 0 arrived at I/O APIC input 2; the local APIC timer counts 
+Timer: now the local APIC timer of CPU 0 raises vector 32, 100 Hz; input 2 is masked: yes
+(at least 1000: yes), the CPU waited in hlt
+Keyboard: IRQ 1 arrives at I/O APIC input 1, vector 33 (US layout)
+Threads: kmain is now thread 0, "main"; the idle thread halts the CPU when nobody else is ready
+- both ran: yes
+Shell: type help and Enter
+Hi YAK!
+shell
+unknown command: nope (try help)
+frames: 
+heap: 
+   0  main     Running
+   1  idle     Ready

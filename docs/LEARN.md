@@ -148,6 +148,8 @@ Short explanations of every subsystem: what it is and why we need it.
   queue and woken up by the event it waits for. If nobody is ready, the **idle thread** halts the CPU.
 - The classic trap is the **lost wake-up**: check "no input yet", then the key arrives, then we go to sleep – and never wake up.
   We avoid it by checking and blocking with interrupts disabled.
+- Course chapter 13 builds this for one CPU. The moment the timer handler touches the scheduler's queue, the **heap** is used
+  in an interrupt handler – so its lock must be taken with interrupts off, or a tick that finds it held waits for ever.
 
 ## M14 – PCI and the SATA disk
 - **PCI** devices are found by reading their *configuration space*: vendor/device ID, class (storage, network, ...) and **BARs**

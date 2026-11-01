@@ -17,6 +17,7 @@
   - [10 – The heap](course/10-heap.md)
   - [11 – A first shell](course/11-shell.md)
   - [12 – ACPI and the APIC](course/12-apic.md)
+  - [13 – Threads and a scheduler](course/13-threads.md)
 
 # Understand the kernel
 
