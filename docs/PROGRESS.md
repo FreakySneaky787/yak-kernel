@@ -146,6 +146,7 @@ continue with chapter 5 meanwhile instead of waiting.
 | C11 | Chapter 11 – A first shell (part III): `words.rs` (a line split into words in one pass, `"…"`/`'…'` keep spaces, empty words, `UnclosedQuote`), `shell.rs` (`LineEditor` – characters, Backspace that never eats the prompt, Enter, 72-character limit; a static table of six commands `help`, `echo`, `clear`, `uptime`, `sleep`, `mem` behind `execute`; every piece writes to a `core::fmt::Write`); `kmain` ends in `shell::run()` instead of chapter 7's echo loop | ✅ | 71 in-kernel tests (10 new: three on the splitter, two on the line editor, five on commands through `execute` into a `String`); the boot check types `echo Hi  YAK!`, a Backspace-corrected `echo shell`, `nope` and `mem` with `sendkey`; green under QEMU 8.2.2 and 10.2. Counter-checks: Backspace without the guard eats the prompt (screenshot: `yak`), every space ending a word gives empty words, no line limit – 77 characters |
 | C12 | Chapter 12 – ACPI and the APIC (part IV): `acpi.rs` (RSDP → RSDT/XSDT with checksums → MADT: CPUs, local and I/O APIC addresses, ISA overrides; parser over a byte slice), `paging::map_device` with a `NO_CACHE` flag for device registers at their HHDM address, `lapic.rs` (software enable, EOI, timer measured over 10 PIT ticks, then periodic on vector 32), `ioapic.rs` (SELECT/WINDOW, redirection entries, all masked, `route`/`mask`), PIC only remapped and masked; `interrupts::start` after memory; QEMU with `-cpu qemu64` again. Found bug #27 (PIT mode 3 through the I/O APIC = 200 Hz), fixed with mode 2 | ✅ | 82 in-kernel tests (12 new: checksum, hand-made MADT, MADT without I/O APIC, QEMU's tables; local APIC present, mapped uncached, enabled, ID, timer periodic, timer ≈ 625 000 counts per tick (bug #27); 24 inputs, only the keyboard routed; two PIC tests became `every_line_is_masked`); boot checks unchanged; green under QEMU 8.2.2 and 10.2. Counter-checks: no EOI, override ignored, APIC not enabled – all hang after the heap lines; PIT not masked – `sleep 5000` takes 2.7 s on the host clock |
 | C13 | Chapter 13 – Threads and a scheduler: `task.rs` (threads in a `BTreeMap` of boxes, guarded 32 KiB stacks, `switch_context` in `global_asm!` saving rbx/rbp/r12–r15, a hand-made first stack returning into a trampoline, round-robin queue, idle thread, `kmain` as thread 0; preemption from the timer handler after the EOI; `wait_for(wait, ready)` checks and blocks with interrupts off – used by `sleep_ms`, `read_key` and `join`; `reap` frees dead threads' stacks in `spawn`/`join`, never in the interrupt), `stack::free`, `without_interrupts`, a heap whose lock is taken with interrupts off (the timer handler allocates now), shell command `threads` | ✅ | 91 in-kernel tests (9 new: first stack word by word, spawn/join/reap, yield turns, preemption of a loop without yield, a sleeper blocked until its tick, 160 stack frames returned, the timer allocating while a thread holds the heap, only main and idle left, `threads` in the shell); the boot check types `threads`; 7 runs under QEMU 10.2 and 3 under 8.2.2 green; `sleep 5000` 5.2 s on the host clock. Counter-checks: EOI after `on_tick` and no `sti` in new threads – boot stops after the first thread line; heap lock with interrupts on – 6 runs green without the new test, 3 of 3 hang with it |
+| C14 | Chapter 14 – The other CPUs: `smp.rs` (a frame below 1 MiB reserved right after `mem::init`, the real → protected → long mode trampoline with hand-encoded loads, copied and filled in, identity-mapped for the start with `Flags::CODE`; INIT, 10 ms, STARTUP, second STARTUP; `ap_main` with its own GDT/TSS/double fault stack, shared IDT, local APIC on; a mailbox per CPU, `run_on`, wake-up IPI on vector 0xF0), IPIs in `lapic.rs`, `gdt::init_other_cpu`, the MADT's APIC ID list, QEMU with `-smp ${KERNEL_SMP:-4}`; the scheduler stays on the BSP. Found bug #28 in chapter 13 | ✅ | 96 in-kernel tests (4 new: all MADT CPUs online, a job runs on its CPU with its own TSS and GDT, the heap on every CPU, trampoline below 1 MiB and unmapped again); green with `KERNEL_SMP=1/2/4` under QEMU 10.2 and 8.2.2; 30 boots without a hang. Counter-checks: no identity mapping – #PF on the instruction fetch after paging on, triple fault; the BSP's GDT on an AP – #GP 0x18 on `ltr`, triple fault; AP's APIC off – `run_on` waits for ever |
 
 ## Log
 - **2026-10-24** – Setup: Rust nightly 1.101 (rustup), target `x86_64-unknown-none`, Limine v11.x-binary.
@@ -517,6 +518,15 @@ continue with chapter 5 meanwhile instead of waiting.
   interrupts off. Removing that again passed six test runs – the race is rare – so I wrote a test that provokes it:
   a thread allocating in a loop while main wakes up twenty times; without the fix it hangs every time.
 
+- **2026-11-01** – Bug #28 in chapter 13, found while testing chapter 14: the boot hung about once in 20 because
+  `task::init` built the scheduler in steps with interrupts on. I booted in a loop until it hung and read RIP
+  through the QEMU monitor – the idle thread's `hlt`, with `main` lost. Fixed in chapters 13 and 14.
+
+- **2026-11-01** – I decided to move the FPU chapter (M24) from part IV to part VI: the course kernel has no SSE and
+  no user programs yet, so there is nothing to save. C14: chapter 14, the other CPUs. The trampoline is the
+  reference kernel's, explained; the APs only run jobs, the scheduler stays on the BSP. Every mistake I tried in the
+  start path ended in a triple fault of the whole machine, so the page shows how to read QEMU's `-d int` log.
+
 ## Known limitations of release 1.0 (sorted in M42)
 Release blockers were defined as "a program can crash, hang or exhaust the kernel" (`docs/GOALS.md`: isolated
 programs, reliability). All of those found so far are fixed (bugs #11–#16). The rest are **documented limitations**:
@@ -561,9 +571,7 @@ they make YAK smaller than a production system, but they do not break the promis
 
 ## Next step
 1.0.0 is released (tag `v1.0.0`, GitHub release with files). The pilot is ready for an outside reader (M60): I
-hand chapters 1–4 to somebody who did not build YAK and point them at the issue forms. Chapters 1–13 of the course
-are written; part IV (concurrency) has ACPI and the APIC (C12) and threads with a scheduler (C13). Next, following
-`docs/ROADMAP.md`: FPU/SSE state per thread (`docs/LEARN.md` M24), then starting the other CPUs (M25) and one
-scheduler for all of them (M26). Open question before chapter 14: the course kernel is built without SSE and has no
-user programs yet, so FPU state has nothing to protect – either the chapter lets kernel threads use SSE, or it moves
-to part VI (user space) and part IV continues with the other CPUs.
+hand chapters 1–4 to somebody who did not build YAK and point them at the issue forms. Chapters 1–14 of the course
+are written; part IV (concurrency) has ACPI and the APIC (C12), threads (C13) and the other CPUs (C14). Next:
+chapter 15, one scheduler for all CPUs (`docs/LEARN.md` M26) – an idle thread and a timer per CPU, a real lock
+for the scheduler held through the switch, and the lost wake-up again, now between CPUs. That ends part IV.

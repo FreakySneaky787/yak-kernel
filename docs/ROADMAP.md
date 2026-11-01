@@ -58,13 +58,15 @@ Write chapters 1–4 fresh as a clean linear history (not cut out of today's mix
 | I Bare metal | boot+serial, tests, framebuffer console, GDT/TSS, interrupts/exceptions, PIC+timer, keyboard (M1–M7) |
 | II Memory | frame allocator, paging + guard pages, heap (M8–M10) |
 | III A first shell | kernel shell (M11) |
-| IV Concurrency | APIC/ACPI, threads + scheduler, FPU state, SMP start, SMP scheduler (M12, M13, M24–M26) |
+| IV Concurrency | APIC/ACPI, threads + scheduler, SMP start, SMP scheduler (M12, M13, M25, M26) |
 | V Storage | PCI + AHCI, FAT32, caching + MSI (M14, M15, M32) |
-| VI User space | ring 3 + syscalls + ELF, files, user heap, processes, shell as program, pipes, signals, threads/futexes (M16–M22, M34, M36) |
+| VI User space | ring 3 + syscalls + ELF, files, user heap, FPU state, processes, shell as program, pipes, signals, threads/futexes (M16–M22, M24, M34, M36) |
 | VII Networking | e1000 + IPv4/UDP, TCP, DHCP/DNS/HTTP (M27–M30, M38) |
 | VIII Hardening | SMEP/SMAP + XSAVE, memory reclaim/demand paging, testing how a kernel fails (M33, M37, M41) |
 
 Roughly 30 chapters; one chapter ≈ one milestone of work. Order of writing = order of reading.
+I moved the FPU state (M24) from part IV to part VI on 2026-11-01: the course kernel is built without SSE, so the
+registers only need saving once user programs use floating point.
 
 ### Phase E – polish and growth
 - Exercises per chapter with tests learners can run (`make check` on their branch); solutions = next chapter branch.

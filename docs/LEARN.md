@@ -270,6 +270,8 @@ Short explanations of every subsystem: what it is and why we need it.
 - Each core needs its own stack, its own TSS (where its interrupt stacks are), and its own local APIC set up. Memory and
   page tables are shared – that is what makes it one machine.
 - For now the extra cores only run small jobs we hand them; the scheduler learns to use them in the next milestone.
+- Course chapter 14: every core needs its **own TSS** – `ltr` marks a TSS busy, and a second core cannot load it. A mistake in the start
+  path usually ends in a triple fault that resets *all* cores; QEMU's `-d int,cpu_reset` log shows the last exceptions.
 
 ## M26 – One scheduler, many cores
 - With several cores, "interrupts off" no longer means "nobody else runs": the other cores keep going. Every shared

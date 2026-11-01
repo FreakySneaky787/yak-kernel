@@ -18,6 +18,7 @@
   - [11 – A first shell](course/11-shell.md)
   - [12 – ACPI and the APIC](course/12-apic.md)
   - [13 – Threads and a scheduler](course/13-threads.md)
+  - [14 – The other CPUs](course/14-smp.md)
 
 # Understand the kernel
 

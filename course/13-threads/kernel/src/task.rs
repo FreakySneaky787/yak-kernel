@@ -186,33 +186,30 @@ fn schedule(change: impl FnOnce(&mut Scheduler)) {
 
 /// Turns the code that runs now (`kmain`) into thread 0, "main", and starts the idle thread.
 pub fn init() {
-    let mut threads = BTreeMap::new();
     let main = Thread {
         name: "main",
         state: State::Running,
         rsp: 0, // filled in by its first switch
         stack: None,
     };
-    threads.insert(0, Box::new(main));
-    *SCHEDULER.lock() = Some(Scheduler {
-        threads,
-        ready: VecDeque::new(),
-        current: 0,
-        idle: 0,
-        next_id: 1,
-    });
-    let idle = spawn("idle", || {
+    let idle = new_thread("idle", || {
         loop {
             // nothing else ready: sleep until an interrupt - the timer's at the latest - and look again
             yield_now();
             unsafe { asm!("hlt", options(nomem, nostack)) };
         }
     });
+    let threads = BTreeMap::from([(0, Box::new(main)), (1, idle)]);
+    // All at once, with interrupts off: a tick that found the scheduler half built would act on it (bug #28). The
+    // idle thread is never in the queue - it runs when the queue is empty.
     without_interrupts(|| {
-        let mut guard = SCHEDULER.lock();
-        let scheduler = guard.as_mut().unwrap();
-        scheduler.ready.retain(|&id| id != idle); // never in the queue: it runs when the queue is empty
-        scheduler.idle = idle;
+        *SCHEDULER.lock() = Some(Scheduler {
+            threads,
+            ready: VecDeque::new(),
+            current: 0,
+            idle: 1,
+            next_id: 2,
+        })
     });
 }
 
@@ -221,19 +218,24 @@ pub fn running() -> bool {
     without_interrupts(|| SCHEDULER.lock().is_some())
 }
 
-/// Starts `entry` as a new thread; it runs when its turn comes.
-pub fn spawn(name: &'static str, entry: impl FnOnce() + Send + 'static) -> Id {
-    reap();
+/// A thread that will run `entry`, with a stack of its own - not known to the scheduler yet.
+fn new_thread(name: &'static str, entry: impl FnOnce() + Send + 'static) -> Box<Thread> {
     let stack = stack::alloc(STACK_PAGES).expect("frames for a thread stack");
     // a `Box<dyn FnOnce>` is two words wide; boxed once more, one pointer fits into r12
     let entry: Box<Entry> = Box::new(Box::new(entry));
     let entry = Box::into_raw(entry);
-    let thread = Box::new(Thread {
+    Box::new(Thread {
         name,
         state: State::Ready,
         rsp: first_stack(stack.top, entry as u64),
         stack: Some(stack),
-    });
+    })
+}
+
+/// Starts `entry` as a new thread; it runs when its turn comes.
+pub fn spawn(name: &'static str, entry: impl FnOnce() + Send + 'static) -> Id {
+    reap();
+    let thread = new_thread(name, entry);
     without_interrupts(|| {
         let mut guard = SCHEDULER.lock();
         let scheduler = guard.as_mut().expect("task::init ran");
@@ -489,6 +491,17 @@ mod tests {
         }
         stop.store(true, Ordering::Relaxed);
         join(allocator);
+    }
+
+    #[test_case]
+    fn the_idle_thread_is_thread_1_and_never_queued() {
+        without_interrupts(|| {
+            let guard = SCHEDULER.lock();
+            let scheduler = guard.as_ref().unwrap();
+            assert_eq!(scheduler.idle, 1);
+            assert_eq!(scheduler.threads[&1].name, "idle");
+            assert!(!scheduler.ready.contains(&1));
+        });
     }
 
     #[test_case]
