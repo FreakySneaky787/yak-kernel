@@ -36,6 +36,7 @@ step at a time. Every chapter ends with a kernel that boots in QEMU and passes i
 | 9 | [Paging](09-paging.md) | `translate`, `map` and `unmap` on the live page tables, and kernel stacks whose overflow hits a guard page |
 | 10 | [The heap](10-heap.md) | a free-list allocator behind `#[global_allocator]` on pages mapped with `map` – `Box`, `Vec` and `String` in the kernel; the end of part II |
 | 11 | [A first shell](11-shell.md) | a prompt, a line editor, words with quotes and a table of commands – the kernel answers what you type; part III |
+| 12 | [ACPI and the APIC](12-apic.md) | the MADT read from the ACPI tables, the I/O APIC routing timer and keyboard, and the local APIC timer measured against the PIT; part IV |
 
 The course is being written now; the pilot (chapters 1–4) gets a round of feedback from readers, and the chapters
 after it change with what they report. If you get stuck, use the issue form

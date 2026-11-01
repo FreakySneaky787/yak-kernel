@@ -2,6 +2,9 @@
 
 ## Unreleased
 **Course**
+- Chapter 12 – ACPI and the APIC, the start of part IV: the MADT from the ACPI tables, the I/O APIC routing the
+  timer and the keyboard, and the local APIC timer measured against the PIT; QEMU runs with a local APIC again.
+  Bug #27 found and fixed on the way (the PIT's square wave ticked twice per period through the I/O APIC).
 - Chapter 11 – A first shell, part III: a line editor, a splitter for words with quotes, and a table of six
   commands; `make test` types four commands with QEMU's `sendkey` and checks the answers.
 - Chapter 10 – The heap, the end of part II: a free-list allocator behind `#[global_allocator]` that grows by

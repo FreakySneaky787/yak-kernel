@@ -24,6 +24,7 @@ body:
         - 9 – Paging
         - 10 – The heap
         - 11 – A first shell
+        - 12 – ACPI and the APIC
     validations:
       required: true
   - type: dropdown
