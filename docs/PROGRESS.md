@@ -517,6 +517,10 @@ continue with chapter 5 meanwhile instead of waiting.
   interrupts off. Removing that again passed six test runs – the race is rare – so I wrote a test that provokes it:
   a thread allocating in a loop while main wakes up twenty times; without the fix it hangs every time.
 
+- **2026-11-01** – Bug #28 in chapter 13, found while testing chapter 14: the boot hung about once in 20 because
+  `task::init` built the scheduler in steps with interrupts on. I booted in a loop until it hung and read RIP
+  through the QEMU monitor – the idle thread's `hlt`, with `main` lost. Fixed in chapters 13 and 14.
+
 ## Known limitations of release 1.0 (sorted in M42)
 Release blockers were defined as "a program can crash, hang or exhaust the kernel" (`docs/GOALS.md`: isolated
 programs, reliability). All of those found so far are fixed (bugs #11–#16). The rest are **documented limitations**:

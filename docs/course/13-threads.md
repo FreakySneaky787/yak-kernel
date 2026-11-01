@@ -136,7 +136,7 @@ FPU/SSE state per thread, user threads with their own address spaces, CPU time p
 sleeping lock.
 
 ## The tests
-`make test` now runs 91 tests in the kernel; nine are new:
+`make test` now runs 92 tests in the kernel; ten are new:
 - `a_new_stack_returns_into_the_trampoline` – the hand-made first stack, checked word by word;
 - `a_thread_runs_and_is_joined` – spawned, still ready (main keeps the CPU), run, joined, and gone from the table;
 - `yield_takes_turns` – two threads that yield three times each;
@@ -145,7 +145,8 @@ sleeping lock.
 - `ended_threads_give_their_stack_back` – 20 threads of 8 pages, and the 160 frames are free again after `join`;
 - `the_timer_can_allocate_while_a_thread_holds_the_heap` – a thread that allocates in a loop while main wakes up
   20 times; with the heap's lock taken with interrupts on, it hangs every time (three of three runs);
-- `only_main_and_idle_are_left`, and in the shell `threads_lists_the_shell_itself`.
+- `the_idle_thread_is_thread_1_and_never_queued` (bug #28), `only_main_and_idle_are_left`, and in the shell
+  `threads_lists_the_shell_itself`.
 
 The boot check types `threads` as a fifth command. Concurrency bugs are often rare, so I ran the test kernel seven
 times under QEMU 10.2 and three times under 8.2.2: all green.
@@ -177,6 +178,11 @@ seconds on a watch.
 - **No `sti` in `thread_start`:** new threads run with interrupts off. In the boot, the first counter thread then
   keeps the CPU – no tick can take it away – and the boot stops at the same place. In the tests it is the idle
   thread, the first time a test sleeps: its `hlt` with interrupts off never ends.
+- **The scheduler visible half built:** the first version of `task::init` installed the scheduler with the idle
+  id still 0 – `main`'s – and spawned the idle thread afterwards, with interrupts on. One boot in 20 a tick came in
+  between, `yield_now` took `main` for the idle thread and never queued it again, and the kernel halted for good
+  after the `Keyboard:` line ([bug #28](../BUGS.md)). Now `init` builds both threads first and installs the
+  scheduler in one step with interrupts off.
 - **The heap's lock with interrupts on:** six test runs pass without the new test. With it, the timer finds the
   lock held and the kernel hangs in `the_timer_can_allocate_while_a_thread_holds_the_heap` – in three of three
   runs.

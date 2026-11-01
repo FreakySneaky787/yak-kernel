@@ -307,6 +307,24 @@ Format: number · date · title, then symptom → cause → fix → test.
 - **Remember:** a clock cannot be checked against itself. A test of time needs a second, independent clock – here
   the APIC timer's known rate under QEMU, or the host's clock.
 
+### #28 · 2026-11-01 · Course chapter 13: the boot hung now and then in `task::init`
+- **Symptom:** found while testing chapter 14: the boot check `fault=overflow` failed 2 times in 20, and chapter 13
+  (already merged) hung 1 time in 20 at the same place – after the `Keyboard:` line, before `Threads:`. Its seven
+  test-kernel runs had all been green: the tests start the scheduler too, but the window is small.
+- **Diagnosis:** booted in a loop until it hung, then `info registers` through the QEMU monitor: RIP in the idle
+  thread's `hlt` (`task.rs:208`), interrupts on, RSP on the idle thread's stack – and `main` in no queue.
+- **Cause:** `task::init` set up the scheduler in steps with interrupts on: first a scheduler whose `idle` field
+  was 0 – thread 0 is `main` – then `spawn("idle")`, then the real idle id. A tick between the steps found a ready
+  thread and called `yield_now`, which never queues the idle thread – and took `main` for it. `main` was never
+  queued again, and the CPU halted in the idle thread for good. The reference kernel is not affected: its
+  `task::init` runs entirely with interrupts off; the course chapter lost that while being made smaller.
+- **Fix:** `init` builds both threads first (`new_thread`, the idle thread never queued) and installs the finished
+  scheduler in one step with interrupts off. In chapters 13 and 14.
+- **Test:** `task::tests::the_idle_thread_is_thread_1_and_never_queued`; 40 boots of chapter 13 without a hang
+  (before: 3 of 40).
+- **Remember:** a structure that an interrupt handler reads must never be visible half built – build it aside,
+  then publish it in one step with interrupts off.
+
 ## Known pitfalls (not bugs, but worth remembering)
 - **The Limine host utility (`limine bios-install`) needs a C compiler** (`gcc`). It is not required for booting the ISO
   in QEMU with `-cdrom`; it is only needed to make the ISO bootable as a hard disk / USB image.
