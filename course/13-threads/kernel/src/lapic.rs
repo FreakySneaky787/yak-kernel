@@ -133,7 +133,7 @@ mod tests {
         // QEMU's local APIC counts at 1 GHz: divided by 16, that is 625 000 counts per 10 ms. Half of it would mean
         // that the PIT's interrupts came twice as often as they should (bug #27)
         let counts = read(TIMER_INITIAL);
-        assert!((600_000..650_000).contains(&counts), "{} counts per tick", counts);
+        assert!((550_000..700_000).contains(&counts), "{} counts per tick", counts);
     }
 
     #[test_case]

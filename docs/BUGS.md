@@ -325,6 +325,27 @@ Format: number · date · title, then symptom → cause → fix → test.
 - **Remember:** a structure that an interrupt handler reads must never be visible half built – build it aside,
   then publish it in one step with interrupts off.
 
+### #29 · 2026-11-06 · Course chapters 12–15: the timer calibration test failed on a busy host
+- **Symptom:** while chapter 15 ran 6 times with all 4 host cores busy (to imitate a CI runner):
+  `the_timer_was_measured_against_a_100_hz_clock` failed twice with 597 649 and 596 420 counts per tick.
+- **Cause:** the test, not the kernel. The local APIC timer is measured against the PIT's interrupts; on a loaded host
+  QEMU delivers them a little late, so the 10 ticks take a little longer and the count per tick comes out about 4 %
+  low. The window 600 000–650 000 around the expected 625 000 left too little room.
+- **Fix:** 550 000–700 000 in chapters 12 to 15. Bug #27 halved the value (about 312 000) and is still caught.
+- **Test:** chapter 15's unit tests 4 times with the host fully loaded, all passed.
+- **Remember:** like #22 and #23: a test that measures time needs room for a slow machine – here on both sides.
+
+### #30 · 2026-11-06 · Course chapter 15: `join` returned while the ended thread was still on its CPU
+- **Symptom:** chapter 15's unit tests, run 8 times, 4 of them with all host cores busy: `ended_threads_give_their_
+  stack_back` failed twice – once 8 frames (one thread stack) were missing after all threads were joined.
+- **Cause:** `exit` woke the joiners as soon as the thread was marked dead – but it was still on its CPU until the
+  switch away from it had finished, so `reap` had to leave its stack alone. `join` returned, and the stack was freed
+  only by a later `spawn` or `join`. On one CPU that gap was invisible: the joiner could only run after the switch.
+- **Fix:** the joiners are woken in `finish_switch`, once the dead thread is off its CPU, and `join` waits for "dead
+  and not on a CPU". The test's threads also wait for a signal, so that none ends before the frames are counted.
+- **Test:** `ended_threads_give_their_stack_back`, 6 runs, 4 with the host loaded: all passed.
+- **Remember:** on SMP, "the thread ended" and "the thread's stack is free" are two moments, not one.
+
 ## Known pitfalls (not bugs, but worth remembering)
 - **The Limine host utility (`limine bios-install`) needs a C compiler** (`gcc`). It is not required for booting the ISO
   in QEMU with `-cdrom`; it is only needed to make the ISO bootable as a hard disk / USB image.
