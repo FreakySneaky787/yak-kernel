@@ -141,8 +141,8 @@ interrupts); and it routes more devices – the serial port, the disk, the netwo
 - `the_cpu_has_a_local_apic` (CPUID), `the_registers_are_mapped_uncached`, `the_apic_is_on_and_built_into_the_cpu`,
   `its_id_is_the_one_cpuid_reports`, `the_timer_runs_periodically_on_vector_32`;
 - `the_timer_was_measured_against_a_100_hz_clock` – QEMU's local APIC counts at 1 GHz; divided by 16 that is
-  625 000 per tick, and the test wants 600 000 to 650 000. It is the only test that checks time against a second
-  clock – the one that catches bug #27;
+  625 000 per tick, and the test wants 550 000 to 700 000 (a busy host delays the PIT's ticks a little, bug #29).
+  It is the only test that checks time against a second clock – the one that catches bug #27, which halves it;
 - `qemus_io_apic_has_24_inputs`, `only_the_keyboard_is_routed` – the PIT's input is masked again.
 
 The boot checks of chapter 11 run unchanged: the shell is typed into through the I/O APIC now.

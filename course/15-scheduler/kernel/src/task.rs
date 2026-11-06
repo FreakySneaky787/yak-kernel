@@ -238,6 +238,10 @@ fn finish_switch() {
     let previous = PREVIOUS[cpu].load(Ordering::Relaxed);
     if let Some(thread) = s.threads.get_mut(&previous) {
         thread.on_cpu = None;
+        // A thread that ended is only now off its stack: from here on `join` may return and `reap` may free it.
+        if thread.state == State::Dead {
+            s.wake(|wait| wait == Wait::Join(previous));
+        }
     }
     unsafe { SCHEDULER.force_unlock() };
 }
@@ -417,19 +421,21 @@ pub fn exit() -> ! {
         let mut guard = SCHEDULER.lock();
         let s = guard.as_mut().expect("task::init ran");
         let id = s.current[cpu].expect("this CPU runs threads");
-        s.thread(id).state = State::Dead;
-        s.wake(|wait| wait == Wait::Join(id));
+        s.thread(id).state = State::Dead; // its joiners are woken once it is off this CPU (`finish_switch`)
     }
     schedule();
     unreachable!("a dead thread was switched back to");
 }
 
-/// Waits until thread `id` has ended.
+/// Waits until thread `id` has ended - and left its CPU, so that `reap` can free its stack.
 pub fn join(id: Id) {
     wait_for(Wait::Join(id), || {
         let guard = SCHEDULER.lock();
-        let state = guard.as_ref()?.threads.get(&id).map(|t| t.state);
-        matches!(state, None | Some(State::Dead)).then_some(())
+        let gone = match guard.as_ref()?.threads.get(&id) {
+            None => true,
+            Some(thread) => thread.state == State::Dead && thread.on_cpu.is_none(),
+        };
+        gone.then_some(())
     });
     reap();
 }
@@ -508,13 +514,18 @@ mod tests {
     #[test_case]
     fn a_thread_runs_and_is_joined() {
         let done = Arc::new(AtomicBool::new(false));
-        let flag = done.clone();
-        // interrupts off, so that no tick switches to it before we look
-        let (id, first) = without_interrupts(|| {
-            let id = spawn("test", move || flag.store(true, Ordering::Relaxed));
-            (id, state(id))
+        let go = Arc::new(AtomicBool::new(false));
+        let (flag, start) = (done.clone(), go.clone());
+        // Since chapter 15 an idle CPU takes a new thread at once - "interrupts off" no longer keeps it waiting. So
+        // it waits for a signal: until then it exists, but has not done its work.
+        let id = spawn("test", move || {
+            wait_for(Wait::Event(9), || start.load(Ordering::SeqCst).then_some(()));
+            flag.store(true, Ordering::Relaxed);
         });
-        assert_eq!(first, Some(State::Ready)); // spawned, but not run yet: main still has the CPU
+        assert!(matches!(state(id), Some(State::Ready | State::Running | State::Blocked(_))));
+        assert!(!done.load(Ordering::Relaxed));
+        go.store(true, Ordering::SeqCst);
+        wake(Wait::Event(9));
         join(id);
         assert!(done.load(Ordering::Relaxed));
         assert_eq!(state(id), None, "join reaps the thread");

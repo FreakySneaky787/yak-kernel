@@ -77,12 +77,17 @@ fn finish_switch() {
     let previous = PREVIOUS[cpu].load(Ordering::Relaxed);
     if let Some(thread) = s.threads.get_mut(&previous) {
         thread.on_cpu = None;
+        // A thread that ended is only now off its stack: from here on `join` may return and `reap` may free it.
+        if thread.state == State::Dead {
+            s.wake(|wait| wait == Wait::Join(previous));
+        }
     }
     unsafe { SCHEDULER.force_unlock() };
 }
 ```
 
-The lock is ours, but the guard that would let us reach the data is gone – so `init` keeps a raw pointer to the
+A thread that ended is a special case: until this moment its stack was still in use, so its joiners are woken only
+now – `exit` just marks it dead. The lock is ours, but the guard that would let us reach the data is gone – so `init` keeps a raw pointer to the
 scheduler, `SCHEDULER_DATA`, and `force_unlock` releases the lock by hand. Both are `unsafe` for a good reason: they
 are correct only because every path into a thread goes through `finish_switch` exactly once.
 
@@ -129,9 +134,16 @@ lock that is ever taken with interrupts on.
   turn with `wait_for` and waking the other. One lost wake-up, and both wait for ever.
 - `the_scheduler_lock_is_free_after_a_switch` – 100 yields and a short thread, and the lock is still usable.
 
-Two old tests had to learn about other CPUs: the thread that should be asleep may still be on its way there on
-another CPU, and threads spawned for the stack test would end – and give their stacks back – before the frames were
-counted, so they now wait for a signal.
+Three old tests had to learn about other CPUs: a new thread no longer waits while `main` has interrupts off – an
+idle CPU takes it at once; the thread that should be asleep may still be on its way there on another CPU; and
+threads spawned for the stack test would end – and give their stacks back – before the frames were counted. They
+now wait for a signal (`Wait::Event`). The first of them was found by CI, not here: on the runner an idle CPU was
+quicker than on this machine.
+
+To find such timing assumptions, the unit tests ran 8 more times, 4 of them with all host cores kept busy. That
+found two more problems: `join` returned while the ended thread was still on its CPU, so its stack could not be
+freed yet ([bug #30](../BUGS.md)) – and a timer test of chapter 12 whose window was too narrow for a busy machine
+([bug #29](../BUGS.md)).
 
 Two counter-checks were run, 3 times each: with chapter 13's order in `wait_for` (check, then block), the ping-pong
 test hangs every time; with the lock released before `switch_context`, the same. The chapter's test kernel passed
@@ -162,6 +174,8 @@ and in the shell, `threads` now says where each thread is:
   showed as a hang in the ping-pong test; in a bigger kernel it is a crash somewhere far away.
 - **A path into a thread that skips `finish_switch`:** the lock stays held, and the next CPU that wants it spins for
   ever – every CPU, one after another. New threads start in `thread_start`, so it calls `finish_switch` first.
+- **"Ended" is not "off the CPU":** a joiner that is woken when the thread is marked dead runs while the dead thread
+  is still on its stack (bug #30) – fine for the result, too early for freeing the stack.
 - **"Check, then block":** wake-ups get lost, rarely – which is why the ping-pong test plays 2000 rounds.
 - **Every CPU counting the time:** each CPU adds its own 100 ticks a second, so with four CPUs the clock runs four
   times too fast and every sleep ends early.
