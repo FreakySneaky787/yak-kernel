@@ -31,6 +31,7 @@ body:
         - 16 – PCI and a SATA disk
         - 17 – Reading FAT32
         - 18 – Writing FAT32
+        - 19 – A block cache, and the disk's interrupt
     validations:
       required: true
   - type: dropdown

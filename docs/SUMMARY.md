@@ -23,6 +23,7 @@
   - [16 – PCI and a SATA disk](course/16-ahci.md)
   - [17 – Reading FAT32](course/17-fat32.md)
   - [18 – Writing FAT32](course/18-fat32-write.md)
+  - [19 – A block cache, and the disk's interrupt](course/19-disk-irq.md)
 
 # Understand the kernel
 

@@ -43,6 +43,7 @@ step at a time. Every chapter ends with a kernel that boots in QEMU and passes i
 | 16 | [PCI and a SATA disk](16-ahci.md) | every PCI device listed at boot, and an AHCI driver that reads sectors from a SATA disk by DMA; part V |
 | 17 | [Reading FAT32](17-fat32.md) | files and directories from a FAT32 volume made by `mkfs.fat` and mtools: cluster chains, long names, `ls` and `cat` |
 | 18 | [Writing FAT32](18-fat32-write.md) | new files, appended data, directories and removal, written in a safe order – `fsck.fat` finds nothing, mtools reads what the kernel wrote |
+| 19 | [A block cache, and the disk's interrupt](19-disk-irq.md) | a write-through sector cache (394 disk commands for a file become 196, then 0) and MSI from the SATA controller, so disk commands sleep in `wait_for`; the end of part V |
 
 The course is being written now; the pilot (chapters 1–4) gets a round of feedback from readers, and the chapters
 after it change with what they report. If you get stuck, use the issue form
