@@ -28,6 +28,7 @@ body:
         - 13 – Threads and a scheduler
         - 14 – The other CPUs
         - 15 – One scheduler for all CPUs
+        - 16 – PCI and a SATA disk
     validations:
       required: true
   - type: dropdown

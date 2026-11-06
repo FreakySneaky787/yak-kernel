@@ -40,6 +40,7 @@ step at a time. Every chapter ends with a kernel that boots in QEMU and passes i
 | 13 | [Threads and a scheduler](13-threads.md) | kernel threads with their own stacks, a context switch in assembly, preemption by the APIC timer, and waiting that blocks instead of spinning |
 | 14 | [The other CPUs](14-smp.md) | the other cores started through a real-mode trampoline (INIT/STARTUP IPIs), each with its own GDT, TSS and stack, running jobs sent with `run_on` |
 | 15 | [One scheduler for all CPUs](15-scheduler.md) | every CPU runs threads from one queue: a timer and an idle thread per CPU, the scheduler lock held through the switch, waiting that cannot lose a wake-up; the end of part IV |
+| 16 | [PCI and a SATA disk](16-ahci.md) | every PCI device listed at boot, and an AHCI driver that reads sectors from a SATA disk by DMA; part V |
 
 The course is being written now; the pilot (chapters 1–4) gets a round of feedback from readers, and the chapters
 after it change with what they report. If you get stuck, use the issue form
