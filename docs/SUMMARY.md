@@ -20,6 +20,7 @@
   - [13 – Threads and a scheduler](course/13-threads.md)
   - [14 – The other CPUs](course/14-smp.md)
   - [15 – One scheduler for all CPUs](course/15-scheduler.md)
+  - [16 – PCI and a SATA disk](course/16-ahci.md)
 
 # Understand the kernel
 
