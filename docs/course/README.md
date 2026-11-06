@@ -44,8 +44,10 @@ step at a time. Every chapter ends with a kernel that boots in QEMU and passes i
 | 17 | [Reading FAT32](17-fat32.md) | files and directories from a FAT32 volume made by `mkfs.fat` and mtools: cluster chains, long names, `ls` and `cat` |
 | 18 | [Writing FAT32](18-fat32-write.md) | new files, appended data, directories and removal, written in a safe order – `fsck.fat` finds nothing, mtools reads what the kernel wrote |
 | 19 | [A block cache, and the disk's interrupt](19-disk-irq.md) | a write-through sector cache (394 disk commands for a file become 196, then 0) and MSI from the SATA controller, so disk commands sleep in `wait_for`; the end of part V |
+| 20 | [Ring 3 and the first system call](20-ring3.md) | code in ring 3 that can only compute and ask: user segments, RSP0 per thread, USER pages, `iretq`, `int 0x80` with `write` and `exit`, faults that end the program, not the kernel; part VI |
 
-The course is being written now; the pilot (chapters 1–4) gets a round of feedback from readers, and the chapters
+For now the course ends with chapter 20 (my decision of 2026-11-06; the plan for chapters 21–36 is in
+[`docs/ROADMAP.md`](../ROADMAP.md)). The pilot (chapters 1–4) gets a round of feedback from readers, and the chapters
 after it change with what they report. If you get stuck, use the issue form
 [**I got stuck in a course chapter**](https://github.com/FreakySneaky787/yak-kernel/issues/new?template=course-stuck.yml);
 if something was unclear even though it worked, use

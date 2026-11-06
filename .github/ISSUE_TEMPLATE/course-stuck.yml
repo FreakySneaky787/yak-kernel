@@ -32,6 +32,7 @@ body:
         - 17 – Reading FAT32
         - 18 – Writing FAT32
         - 19 – A block cache, and the disk's interrupt
+        - 20 – Ring 3 and the first system call
     validations:
       required: true
   - type: dropdown

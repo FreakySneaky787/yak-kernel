@@ -1,0 +1,21 @@
+[package]
+name = "kernel"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+
+[dependencies]
+# Rust definitions of the Limine boot protocol (the only crate besides `spin` in the whole project)
+limine = "0.6.5"
+# A spin lock: lets the console be a global that `println!` can reach from everywhere
+spin = "0.12.3"
+
+[[bin]]
+name = "kernel"
+bench = false
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
