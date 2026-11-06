@@ -10,8 +10,8 @@ book with navigation and search.
 
 ![YAK shell running in QEMU: uname, cpu, netinfo, ps and df](docs/images/shell.png)
 
-> **Status:** release **1.0.0** – a hobby / learning project (see [docs/GOALS.md](docs/GOALS.md) and
-> [docs/PROGRESS.md](docs/PROGRESS.md)); next comes the course. The project is developed together with an AI assistant.
+> **Status:** release **1.1.0** – a hobby / learning project (see [docs/GOALS.md](docs/GOALS.md) and
+> [docs/PROGRESS.md](docs/PROGRESS.md)); the [course](docs/course/README.md) has chapters 1–20. The project is developed together with an AI assistant.
 
 ## What is in it
 | Area | What YAK does |

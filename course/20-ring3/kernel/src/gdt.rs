@@ -250,11 +250,21 @@ mod tests {
 
     #[test_case]
     fn gdtr_points_to_our_table() {
-        let mut pointer = DescriptorTablePointer { limit: 0, base: 0 };
-        unsafe { asm!("sgdt [{}]", in(reg) &mut pointer, options(nostack, preserves_flags)) };
-        let (limit, base) = (pointer.limit, pointer.base); // copies: fields of a packed struct
-        assert_eq!(base, GDT.get().unwrap() as *const _ as u64);
-        assert_eq!(limit as usize, 7 * 8 - 1);
+        // Each CPU has a GDT of its own, and since chapter 15 the test thread may run on any of them - so each CPU
+        // is asked itself, with `run_on` (bug #31: asked from wherever the test ran, this failed on another CPU).
+        let gdtr = || {
+            let mut pointer = DescriptorTablePointer { limit: 0, base: 0 };
+            unsafe { asm!("sgdt [{}]", in(reg) &mut pointer, options(nostack, preserves_flags)) };
+            (pointer.limit, pointer.base) // copies: fields of a packed struct
+        };
+        let tables: alloc::vec::Vec<(u16, u64)> = (0..crate::smp::online())
+            .map(|cpu| crate::smp::run_on(cpu, gdtr).expect("the CPU runs"))
+            .collect();
+        assert_eq!(tables[0].1, GDT.get().unwrap() as *const _ as u64, "CPU 0 uses the static GDT");
+        for (cpu, &(limit, base)) in tables.iter().enumerate() {
+            assert_eq!(limit as usize, 7 * 8 - 1, "CPU {}", cpu);
+            assert_eq!(tables.iter().filter(|t| t.1 == base).count(), 1, "CPU {} shares its GDT", cpu);
+        }
     }
 
     #[test_case]
