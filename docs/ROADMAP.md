@@ -77,6 +77,11 @@ before, then phase E (exercises, diagrams + glossary) and release 1.1.0. The pla
 35 memory reclaim + guard pages for threads · 36 testing how a kernel fails. A chapter may be split or merged when
 it grows too large; this list changes with it.
 
+**Changed the same day (my decision, 2026-11-06):** for now the chapters are written only up to chapter 20 – part V
+complete with chapter 19, and chapter 20 (ring 3 and the first system call) as the start of part VI. Chapters 21–36
+stay planned as listed above, but nothing is written for them until I decide again; phase E and release 1.1.0 wait
+for that decision too.
+
 ### Phase E – polish and growth
 - Exercises per chapter with tests learners can run (`make check` on their branch); solutions = next chapter branch.
 - Diagrams (memory layout, interrupt path, scheduler states), glossary, search (mdBook built-in).
