@@ -346,6 +346,17 @@ Format: number · date · title, then symptom → cause → fix → test.
 - **Test:** `ended_threads_give_their_stack_back`, 6 runs, 4 with the host loaded: all passed.
 - **Remember:** on SMP, "the thread ended" and "the thread's stack is free" are two moments, not one.
 
+### #31 · 2026-11-06 · Course chapters 15–20: a GDT test asked whichever CPU the test thread was on
+- **Symptom:** `make course` for release 1.1.0: chapter 20's `gdt::tests::gdtr_points_to_our_table` failed once – the
+  GDTR held a heap address, the test expected the boot CPU's static GDT. CI and all earlier runs had passed.
+- **Cause:** the test, not the kernel. Since chapter 15 every CPU runs threads, so the test thread `main` may have
+  moved to an AP – and each AP loads a GDT of its own (chapter 14). `sgdt` answered for the CPU the test ran on.
+- **Fix:** the test asks every CPU itself with `smp::run_on`: CPU 0 has the static GDT, every CPU the right size,
+  no two CPUs the same table. Changed in chapters 15–20 (chapter 14's threads stay on the BSP).
+- **Test:** the fixed test, 3 runs of chapter 20 and one of each of chapters 15–19: all passed.
+- **Remember:** "the CPU I run on" is a moving target once threads migrate – a per-CPU question has to be asked on
+  that CPU (as chapter 15 learned for the double fault stack).
+
 ## Known pitfalls (not bugs, but worth remembering)
 - **The Limine host utility (`limine bios-install`) needs a C compiler** (`gcc`). It is not required for booting the ISO
   in QEMU with `-cdrom`; it is only needed to make the ISO bootable as a hard disk / USB image.
