@@ -68,6 +68,15 @@ Roughly 30 chapters; one chapter ≈ one milestone of work. Order of writing = o
 I moved the FPU state (M24) from part IV to part VI on 2026-11-01: the course kernel is built without SSE, so the
 registers only need saving once user programs use floating point.
 
+**The final sprint (my decision, 2026-11-06):** the course goes to the end of part VIII, chapter by chapter as
+before, then phase E (exercises, diagrams + glossary) and release 1.1.0. The plan for the chapters after 14:
+15 one scheduler for all CPUs · 16 PCI + AHCI · 17 FAT32 read · 18 FAT32 write · 19 block cache + disk interrupts ·
+20 ring 3 and the first system call · 21 address spaces + ELF · 22 files for programs · 23 user heap + demand paging ·
+24 FPU/SSE state · 25 processes · 26 the shell as a program · 27 pipes · 28 signals · 29 threads + futexes ·
+30 e1000, Ethernet, ARP, IPv4, ping · 31 UDP + sockets · 32 TCP · 33 DHCP, DNS, HTTP · 34 SMEP/SMAP + XSAVE ·
+35 memory reclaim + guard pages for threads · 36 testing how a kernel fails. A chapter may be split or merged when
+it grows too large; this list changes with it.
+
 ### Phase E – polish and growth
 - Exercises per chapter with tests learners can run (`make check` on their branch); solutions = next chapter branch.
 - Diagrams (memory layout, interrupt path, scheduler states), glossary, search (mdBook built-in).
