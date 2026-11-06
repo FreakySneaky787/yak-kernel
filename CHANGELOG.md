@@ -1,7 +1,28 @@
 # Changelog
 
 ## Unreleased
+
+## 1.1.0 (2026-11-06)
+The course release: chapters 1–20 of the course – parts I to V and the start of part VI – each a complete project
+in `course/NN-slug/` with its own `make test`, all of them built and tested by CI. The reference kernel is the one of
+1.0.0, with two test fixes. I decided on 2026-11-06 to stop the course at chapter 20 for now (`docs/ROADMAP.md`).
+
 **Course**
+- Chapter 20 – Ring 3 and the first system call, the start of part VI: user segments, RSP0 set per thread at every
+  switch, USER pages, `iretq` into ring 3, `int 0x80` with `write` (addresses checked) and `exit`, and faults in
+  ring 3 that end the program instead of the kernel.
+- Chapter 19 – A block cache, and the disk's interrupt, the end of part V: a write-through sector cache (394 disk
+  commands for a 100 000-byte file become 196, then 0) and MSI from the SATA controller, so disk commands sleep in
+  `wait_for`.
+- Chapter 18 – Writing FAT32: new files, appended data, directories and removal in a crash-tolerant order;
+  `check-disk.sh` hands the disk image to `fsck.fat` and mtools after every test run.
+- Chapter 17 – Reading FAT32: boot sector, cluster chains (a chain in a circle is an error, not a hang), long names
+  and the lower-case flags, `ls` and `cat`; the test disks are made by `mkfs.fat` and mtools.
+- Chapter 16 – PCI and a SATA disk, the start of part V: PCI enumeration, an AHCI driver that reads sectors by DMA,
+  `disk` and `read` in the shell.
+- Chapter 15 – One scheduler for all CPUs, the end of part IV: a timer and an idle thread per CPU, the scheduler lock
+  held through the switch, waiting that cannot lose a wake-up sent from another CPU. Bugs #29 (a timer test window
+  too narrow for a busy host) and #30 (`join` returned while the ended thread was still on its CPU) found on the way.
 - Chapter 14 – The other CPUs: a real-mode trampoline below 1 MiB, INIT/STARTUP IPIs, a GDT, TSS and stack per
   CPU, and `run_on` for jobs on other CPUs; QEMU runs with 4 CPUs. Bug #28 in chapter 13 fixed on the way (the
   boot hung about once in 20 in `task::init`).
@@ -33,6 +54,10 @@
   `make test` go to `build/qemu.log` (printed when a check fails).
 - Issue forms "I got stuck in a course chapter" and "Feedback on the course"; `CONTRIBUTING.md`.
 - `scripts/check-course.py` also checks the course table, the issue form's chapter list and the `diff` line of each page.
+
+**Infrastructure**
+- The CI course job builds and tests every chapter (20 now, about 6½ minutes) and installs dosfstools and mtools
+  for the FAT32 test disks of chapters 17–20.
 
 **Tests**
 - `paging::translate` no longer reads the PAT bit of a 2 MiB or 1 GiB page as an address bit (bug #26; no caller

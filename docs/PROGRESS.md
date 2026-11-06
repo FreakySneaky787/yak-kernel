@@ -153,6 +153,7 @@ continue with chapter 5 meanwhile instead of waiting.
 | C18 | Chapter 18 – Writing FAT32: AHCI WRITE DMA EXT (header bit W) and FLUSH CACHE EXT, `BlockDevice::write`/`flush`; `fat32.rs`: free clusters counted at mount (FSInfo only written), `set` in every FAT copy, `allocate` (refuses before writing, chain complete before it is hung on), `free_chain`, entries remember their slots and 8.3 name, `free_slot` grows a full directory, 8.3 names with case flags only (`BadName` otherwise, the alias of a long name is taken), `write_file`/`append`/`create_dir`/`remove` in a crash-tolerant order, `sync` = FSInfo + flush; shell `write`, `append`, `mkdir`, `rm`; `check-disk.sh` runs `fsck.fat -n` and mtools on the image after QEMU | ✅ | 132 in-kernel tests (new: write/read back, replace frees clusters, append over a cluster boundary, directories growing, removal incl. long-name pieces, name/path errors, full volume refused, free count exact); `fsck.fat` clean and mtools byte-exact after the unit tests and after the boot check. Counter-checks (once each, all caught by `fsck.fat`): one FAT copy only – "FATs differ"; long name pieces left – "Orphaned long file name part"; tests with their own mounts – "Free cluster summary wrong" |
 | C19 | Chapter 19 – A block cache, and the disk's interrupt: `BlockCache<D>` (write-through, runs of misses as one read, least-recently-used replacement, hit/miss counters) under the file system (`fs::Disk`, 2048 sectors); PCI capability list + `enable_msi`; AHCI: GHC.IE, PxIE, `handle_interrupt` (errors kept in `FAILED_PORTS`, `task::wake(Wait::Event(0x50))`), commands wait in `task::wait_for` (polling without MSI or with interrupts off); boot counts disk commands for `/big.bin`: 394 without the cache, 196 through it, 0 the second time; shell `disk` shows commands, interrupts, cache. Ends part V | ✅ | 137 in-kernel tests (new: cache reads once / runs, write-through, LRU order, MSI capability, commands end by interrupt; the IDT test caught the new vector); `fsck.fat` + mtools still clean on top of the cache. Counter-check: no `task::wake` in the handler – the test kernel hangs at IDENTIFY (2 of 2 runs) |
 | C20 | Chapter 20 – Ring 3 and the first system call: user data/code descriptors (DPL 3, selectors 0x2B/0x33); a TSS per CPU in an `UnsafeCell`, RSP0 set by the scheduler at every switch to a thread's own kernel stack (`gdt::set_kernel_stack`); USER bit propagated to every table level in `paging::map`; `user.rs`: code/data/stack pages at 0x40_0000/0x40_1000/below 0x80_0000 (mapped once – no TLB shootdowns), `iretq` into ring 3 with cleared registers, `int 0x80` through a DPL 3 gate and an assembly entry (`write` with address checks: lower half, every page USER; `exit`; −14/−38 like Linux), faults with CS in ring 3 end the program (#GP, #PF, #UD, #DE); `int 0x80` instead of `syscall` (no stack switch to build) – my choice for the chapter, `syscall` is what the reference kernel uses. Starts part VI; the last chapter for now | ✅ | 145 in-kernel tests (new: user segments DPL 3, hello + exit 42, stack, `cli` → #GP, kernel read and own code write → #PF, bad pointer → −14, unknown call → −38, `user_bytes` edges, timer preempts ring 3 (also with `KERNEL_SMP=1`), RSP0 = running thread's stack). Counter-checks (once each): gate without DPL 3 – every `int 0x80` is a #GP; USER only on the page – #PF at the first instruction; no RSP0 – double fault (push to −8) |
+| M61 | YAK 1.1.0 – the course release: version 1.1.0 in both manifests, CHANGELOG section 1.1.0 (chapters 1–20; the kernel is 1.0.0's with two test fixes), README/GOALS/ROADMAP status; I create the tag `v1.1.0` and the GitHub release | ⏳ | `make check` green (E2E: `uname` → "YAK 1.1.0 x86_64"); `make release`: yak-1.1.0 ISO and disk image boot with BIOS and UEFI, `SHA256SUMS` OK; `make book` 0 broken links; `make course` and `make stress` running |
 
 ## Log
 - **2026-10-24** – Setup: Rust nightly 1.101 (rustup), target `x86_64-unknown-none`, Limine v11.x-binary.
@@ -533,7 +534,12 @@ continue with chapter 5 meanwhile instead of waiting.
   reference kernel's, explained; the APs only run jobs, the scheduler stays on the BSP. Every mistake I tried in the
   start path ended in a triple fault of the whole machine, so the page shows how to read QEMU's `-d int` log.
 
-## Known limitations of release 1.0 (sorted in M42)
+- **2026-11-06** – C15–C20 in one day, one PR each. I first decided to finish the course to part VIII, then the
+  same day to stop at chapter 20 for now, and to release the course as 1.1.0 (M61). CI found one timing assumption
+  in C15, load runs two more (bugs #29, #30); a GitHub runner hung for 11 minutes in `apt-get` once (re-run, green).
+  In C18 `fsck.fat` caught my own first version of the write tests (two mounts of one disk, a wrong free count).
+
+## Known limitations of releases 1.0 and 1.1 (sorted in M42, checked for 1.1 in M61)
 Release blockers were defined as "a program can crash, hang or exhaust the kernel" (`docs/GOALS.md`: isolated
 programs, reliability). All of those found so far are fixed (bugs #11–#16). The rest are **documented limitations**:
 they make YAK smaller than a production system, but they do not break the promises of release 1.0.
@@ -569,6 +575,12 @@ they make YAK smaller than a production system, but they do not break the promis
 - `ps` CPU percentages only cover threads that still exist (dead threads are reaped with their counters).
 - Under TCG (no KVM) `make check` takes about 2 minutes on a warm build, `make stress` (5 passes) about 30 minutes.
 
+**Course (1.1)**
+- The course ends at chapter 20 (my decision of 2026-11-06): ring 3 with one address space and two system calls.
+  Own address spaces, programs from the disk, processes, the network and hardening are in the reference kernel and
+  its walkthroughs, not yet in the course. No exercises, diagrams or glossary yet (phase E).
+- The pilot (chapters 1–4) still waits for its first outside reader.
+
 ## Open after 1.0
 - **A first reader**: somebody who did not build YAK follows README → the course → one experiment and reports where
   they got stuck. That is the real test of the "understandable" goal.
@@ -576,10 +588,9 @@ they make YAK smaller than a production system, but they do not break the promis
   Apply" recommends a notice per file.
 
 ## Next step
-1.0.0 is released (tag `v1.0.0`, GitHub release with files). The pilot is ready for an outside reader (M60). Chapters
-1–20 of the course are written – as far as I decided on 2026-11-06 (`docs/ROADMAP.md`): part IV ended with one
-scheduler for all CPUs (C15), part V (C16–C19) goes from PCI and a SATA disk to FAT32, a block cache and disk
-interrupts, and C20 runs code in ring 3 with a first system call. The CI course job took 6¼ minutes for 19
-chapters. Next: nothing is planned until I decide again – chapters 21–36 (plan in `docs/ROADMAP.md`), phase E
-(exercises, diagrams, glossary) and a release 1.1.0 wait for that decision; an outside reader for the course is still
-open.
+1.1.0 is prepared (M61): version, CHANGELOG, status texts; the course has chapters 1–20 (part IV ended with one
+scheduler for all CPUs, part V goes from PCI and a SATA disk to FAT32, a block cache and disk interrupts, chapter 20
+runs code in ring 3). Next: I create the tag `v1.1.0` on the merge commit and publish the GitHub release
+(`docs/RELEASING.md`, steps 6–8); the release workflow attaches the files. After that nothing is planned until I
+decide again – chapters 21–36 (plan in `docs/ROADMAP.md`) and phase E wait for that decision; an outside reader for
+the course is still open.

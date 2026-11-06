@@ -52,7 +52,7 @@ Write chapters 1–4 fresh as a clean linear history (not cut out of today's mix
 1 Boot with Limine + serial output · 2 Testing without an OS · 3 Text on the screen · 4 GDT and TSS.
 → I and at least one outside reader go through them; adjust format before writing more.
 
-### Phase D – the remaining course (parts, following the M1–M38 order, which already teaches evolution)
+### Phase D – the remaining course (parts, following the M1–M38 order, which already teaches evolution) – chapters 5–20 written, released as 1.1.0
 | Part | Chapters (from milestones) |
 |---|---|
 | I Bare metal | boot+serial, tests, framebuffer console, GDT/TSS, interrupts/exceptions, PIC+timer, keyboard (M1–M7) |
@@ -80,7 +80,7 @@ it grows too large; this list changes with it.
 **Changed the same day (my decision, 2026-11-06):** for now the chapters are written only up to chapter 20 – part V
 complete with chapter 19, and chapter 20 (ring 3 and the first system call) as the start of part VI. Chapters 21–36
 stay planned as listed above, but nothing is written for them until I decide again; phase E and release 1.1.0 wait
-for that decision too.
+for that decision too. Release 1.1.0 (2026-11-06) is the course up to chapter 20.
 
 ### Phase E – polish and growth
 - Exercises per chapter with tests learners can run (`make check` on their branch); solutions = next chapter branch.
