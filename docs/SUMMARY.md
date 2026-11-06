@@ -22,6 +22,7 @@
   - [15 – One scheduler for all CPUs](course/15-scheduler.md)
   - [16 – PCI and a SATA disk](course/16-ahci.md)
   - [17 – Reading FAT32](course/17-fat32.md)
+  - [18 – Writing FAT32](course/18-fat32-write.md)
 
 # Understand the kernel
 

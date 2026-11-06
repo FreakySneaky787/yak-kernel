@@ -30,6 +30,7 @@ body:
         - 15 – One scheduler for all CPUs
         - 16 – PCI and a SATA disk
         - 17 – Reading FAT32
+        - 18 – Writing FAT32
     validations:
       required: true
   - type: dropdown
