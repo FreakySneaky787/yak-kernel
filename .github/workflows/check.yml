@@ -68,7 +68,9 @@ jobs:
       - name: Host packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qemu-system-x86 xorriso make gcc binutils git python3
+          # dosfstools + mtools: the FAT32 test disks of chapter 17 on
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 xorriso make gcc binutils git python3 \
+            dosfstools mtools
       - name: Rust toolchain (pinned in rust-toolchain.toml)
         run: rustup toolchain install
       - name: make course (every chapter folder builds and passes its own tests)
