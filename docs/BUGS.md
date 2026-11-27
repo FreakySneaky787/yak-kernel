@@ -357,6 +357,35 @@ Format: number · date · title, then symptom → cause → fix → test.
 - **Remember:** "the CPU I run on" is a moving target once threads migrate – a per-CPU question has to be asked on
   that CPU (as chapter 15 learned for the double fault stack).
 
+### #32 · 2026-11-27 · Course chapters 20 and 21: `write(0, 0)` panics the kernel
+- **Symptom:** a ring 3 program that calls `write` with address 0 and length 0 ends the whole kernel with
+  `unsafe precondition(s) violated: slice::from_raw_parts requires the pointer to be aligned and non-null` – found by
+  a probe test while writing chapter 21, which copies chapter 20's `user_bytes`.
+- **Cause:** the same as #12 of the reference kernel: `user_bytes` accepted an empty range (the page loop does not run)
+  and then built `from_raw_parts(address as *const u8, 0)` from the unchecked address. With a null pointer that is
+  undefined behaviour, which the debug build checks.
+- **Fix:** `user_bytes` returns an empty slice for length 0 before it looks at the address. **Done in chapters 20 (added after release
+  1.1.0, as was done for #31, with its page) and in chapters 21 and later.**
+- **Test:** `writing_nothing_is_fine_whatever_the_address` (chapters 20 and 21): a program that writes 0 bytes from address 0
+  exits with 0; `user_bytes(0, 0)` and `user_bytes(u64::MAX, 0)` are empty slices. Counter-check: without the early
+  return the test panics in `from_raw_parts`.
+- **Remember:** "an accessible empty range is no licence to dereference its pointer" (#12) – a new copy of an old
+  helper needs the old tests.
+
+### #33 · 2026-11-27 · Course chapter 22: a test expected a kernel SS that ring 3 had made null
+- **Symptom:** with chapter 22's file tests, `gdt::tests::our_segments_are_loaded` (chapter 4: is SS the kernel's data
+  selector?) failed with `left: 0, right: 16`.
+- **Cause:** a test, not the kernel. An interrupt that comes from ring 3 (a system call, the timer) makes the CPU load a
+  *null* SS, and nothing loads it again. A probe before the fix: SS 16 on all four CPUs before four programs ran,
+  `[0, 0, 16, 16]` after them. In 64-bit mode a null SS is legal in ring 0 (base and limit of the stack segment are
+  ignored). The test passed in chapters 20 and 21 only because it runs before the first ring 3 program there; the new
+  tests of chapter 22 (`files`) sort before `gdt`.
+- **Fix:** the assertion accepts the kernel's data selector *or* 0, with a comment; chapter 22 and later. Chapters 4–21
+  are unchanged (their order of tests never exposes it).
+- **Test:** `our_segments_are_loaded` itself, now after programs have run.
+- **Remember:** a test that reads CPU state is as good as the history of that CPU. Which CPU, and what ran on it before,
+  decide (see also #31).
+
 ## Known pitfalls (not bugs, but worth remembering)
 - **The Limine host utility (`limine bios-install`) needs a C compiler** (`gcc`). It is not required for booting the ISO
   in QEMU with `-cdrom`; it is only needed to make the ISO bootable as a hard disk / USB image.

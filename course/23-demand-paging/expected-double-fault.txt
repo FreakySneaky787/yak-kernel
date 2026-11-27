@@ -1,0 +1,4 @@
+Back from the breakpoint handler - the kernel carries on.
+running on the double fault stack: yes
+EXCEPTION: DOUBLE FAULT (code 0x0), last page fault at 0xdeadbed8
+rsp=0x00000000deadbee0

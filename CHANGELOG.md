@@ -1,6 +1,26 @@
 # Changelog
 
 ## Unreleased
+The course continues after 1.1.0: so far it ends with chapter 23 (1.1.0 had chapters 1–20).
+
+**Course**
+- Chapter 21 – Address spaces and ELF files: a PML4 per program whose upper half is the kernel's (`paging::init`
+  gives every upper-half entry a table first, so later kernel mappings reach every space), `AddressSpace` that gives
+  back every frame and table on `drop`, an ELF loader that refuses damaged, wrapping and writable-and-executable
+  files, a CR3 per thread loaded by the scheduler, `spawn`/`join` for programs, and programs built from
+  `programs/*.S` with `as` and `ld` into `/bin` of the test disk. Two programs run at the same addresses at once;
+  the shell gets `run`. New in the course folders: `programs/`, and `make programs`.
+- Chapter 22 – Files for programs: file descriptors and the calls `open`, `read`, `write` (now `write(fd, …)`), `seek` and
+  `close`; a table of open files per program that is closed when the program ends; `FatFs::read_at`; every call checks
+  what it gets and answers with a negative error number, one call moves at most 64 KiB; system calls run with interrupts
+  on; the programs `cat` and `copy`, and `run /bin/copy` in the shell. Bug #33 (a chapter 4 test that expected a kernel SS
+  which ring 3 had made null) found on the way: the test is fixed.
+- Chapter 23 – A heap for programs: `brk` and demand paging: a heap of up to 64 MiB per program that starts behind its
+  image, frames mapped by the page fault handler on the first touch (and by the system calls that look at a buffer
+  in the heap), given back when the break moves down or the program ends; a 32 MiB heap with three touched pages costs
+  17 frames. The page fault handler tells a missing page from a protection fault.
+- Bug #32: in chapters 20 and 21 a ring 3 program could panic the kernel with `write(0, 0)` (an empty slice from a null
+  pointer). Fixed in chapter 20 (a test and the fix, after the release) and in chapter 21 on – see `docs/BUGS.md`.
 
 ## 1.1.0 (2026-11-06)
 The course release: chapters 1–20 of the course – parts I to V and the start of part VI – each a complete project

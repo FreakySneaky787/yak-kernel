@@ -45,9 +45,12 @@ step at a time. Every chapter ends with a kernel that boots in QEMU and passes i
 | 18 | [Writing FAT32](18-fat32-write.md) | new files, appended data, directories and removal, written in a safe order – `fsck.fat` finds nothing, mtools reads what the kernel wrote |
 | 19 | [A block cache, and the disk's interrupt](19-disk-irq.md) | a write-through sector cache (394 disk commands for a file become 196, then 0) and MSI from the SATA controller, so disk commands sleep in `wait_for`; the end of part V |
 | 20 | [Ring 3 and the first system call](20-ring3.md) | code in ring 3 that can only compute and ask: user segments, RSP0 per thread, USER pages, `iretq`, `int 0x80` with `write` and `exit`, faults that end the program, not the kernel; part VI |
+| 21 | [Address spaces and ELF files](21-elf.md) | a page table of its own for every program (the upper half is the kernel's), an ELF loader that refuses what it should not load, a CR3 per thread loaded at every switch, and programs built with `as` and `ld` that run from `/bin` of the disk – two of them at the same addresses at once |
+| 22 | [Files for programs](22-files.md) | file descriptors and the calls `open`, `read`, `write`, `seek` and `close`: a table of open files per program that goes away with it, `FatFs::read_at`, errors as negative numbers – and the programs `cat` and `copy` |
+| 23 | [A heap for programs: `brk` and demand paging](23-demand-paging.md) | `brk` and a heap of up to 64 MiB per program whose frames are mapped by the page fault handler when a page is first touched, and given back when the break moves down – a 32 MiB heap with three touched pages costs 17 frames |
 
-For now the course ends with chapter 20 (my decision of 2026-11-06; the plan for chapters 21–36 is in
-[`docs/ROADMAP.md`](../ROADMAP.md)). The pilot (chapters 1–4) gets a round of feedback from readers, and the chapters
+So far the course ends with chapter 23 (release 1.1.0 had chapters 1–20; chapters 21–23 were added on 2026-11-27 and are
+not released yet; the plan for chapters 24–36 is in [`docs/ROADMAP.md`](../ROADMAP.md)). The pilot (chapters 1–4) gets a round of feedback from readers, and the chapters
 after it change with what they report. If you get stuck, use the issue form
 [**I got stuck in a course chapter**](https://github.com/FreakySneaky787/yak-kernel/issues/new?template=course-stuck.yml);
 if something was unclear even though it worked, use
