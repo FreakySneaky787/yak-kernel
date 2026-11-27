@@ -127,11 +127,17 @@ pub fn kernel_root() -> PhysAddr {
 /// that part of the address space yet). From now on a mapping in the upper half only changes tables *below* the
 /// PML4, which every copy of the upper half shares - see the top of this file. Runs once, before the first address
 /// space is made.
+///
+/// Limine sets the USER bit on some of the entries it made (the kernel's and the HHDM's). The pages below them are
+/// supervisor-only, so ring 3 could not use them anyway - but nothing of the kernel's half should look open to ring
+/// 3, and every program's PML4 gets a copy: the bit is cleared.
 pub fn init() {
     let root = read_cr3();
     KERNEL_ROOT.store(root.0, Ordering::Relaxed);
     for entry in &mut table(root).0[KERNEL_HALF..] {
-        if !entry.is(Flags::PRESENT) {
+        if entry.is(Flags::PRESENT) {
+            entry.0 &= !Flags::USER.0;
+        } else {
             let pdpt = pmm::alloc_frame_zeroed().expect("a frame for a table of the kernel half");
             *entry = Entry::new(pdpt, Flags(Flags::PRESENT.0 | Flags::WRITABLE.0));
         }
@@ -303,6 +309,19 @@ mod tests {
 
     /// An address nobody maps: the area `stack.rs` uses starts here, the tests stay below it.
     const SCRATCH: u64 = 0xFFFF_FE80_0000_0000;
+
+    #[test_case]
+    fn every_entry_of_the_upper_half_exists_and_is_closed_to_ring_3() {
+        let pml4 = &table(kernel_root()).0;
+        for (i, entry) in pml4.iter().enumerate().skip(KERNEL_HALF) {
+            assert!(
+                entry.is(Flags::PRESENT),
+                "entry {} is empty: a later mapping would not be shared",
+                i
+            );
+            assert!(!entry.is(Flags::USER), "entry {} has the USER bit", i);
+        }
+    }
 
     #[test_case]
     fn an_address_is_four_indices_and_an_offset() {

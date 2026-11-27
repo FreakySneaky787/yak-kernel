@@ -9,6 +9,8 @@
   files, a CR3 per thread loaded by the scheduler, `spawn`/`join` for programs, and programs built from
   `programs/*.S` with `as` and `ld` into `/bin` of the test disk. Two programs run at the same addresses at once;
   the shell gets `run`. New in the course folders: `programs/`, and `make programs`.
+- Bug #32: in chapters 20 and 21 a ring 3 program could panic the kernel with `write(0, 0)` (an empty slice from a null
+  pointer). Fixed in chapter 21 (and the chapters to come); chapter 20 is left as released – see `docs/BUGS.md`.
 
 ## 1.1.0 (2026-11-06)
 The course release: chapters 1–20 of the course – parts I to V and the start of part VI – each a complete project

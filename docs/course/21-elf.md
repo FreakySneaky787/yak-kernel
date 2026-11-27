@@ -53,14 +53,19 @@ pub fn map(virt: u64, frame: PhysAddr, flags: Flags) -> Result<(), MapError> {
 
 The condition from the background: a PML4 entry that is empty when the copy is made stays empty in the copy, and a
 mapping the kernel makes later would create the entry *in the kernel's PML4 only*. So `init` gives every entry of the
-upper half a table behind it – an empty PDPT where nothing is mapped – and remembers the kernel's PML4:
+upper half a table behind it – an empty PDPT where nothing is mapped – and remembers the kernel's PML4. It also
+clears the USER bit that Limine set on two of the entries (256, the HHDM's, and 511, the kernel's – the test below
+found them): the pages underneath are supervisor-only, so ring 3 could not use them anyway, but nothing of the
+kernel's half should look open to a program, and every program's PML4 gets a copy of these entries:
 
 ```rust,file=kernel/src/paging.rs
 pub fn init() {
     let root = read_cr3();
     KERNEL_ROOT.store(root.0, Ordering::Relaxed);
     for entry in &mut table(root).0[KERNEL_HALF..] {
-        if !entry.is(Flags::PRESENT) {
+        if entry.is(Flags::PRESENT) {
+            entry.0 &= !Flags::USER.0;
+        } else {
             let pdpt = pmm::alloc_frame_zeroed().expect("a frame for a table of the kernel half");
             *entry = Entry::new(pdpt, Flags(Flags::PRESENT.0 | Flags::WRITABLE.0));
         }
@@ -392,7 +397,7 @@ fn run_program(args: &[String], out: &mut dyn Write) -> Result<(), String> {
 ```
 
 ## The tests
-`make test` runs 164 tests in the kernel (chapter 20: 145); the new ones:
+`make test` runs 166 tests in the kernel (chapter 20: 145); the new ones:
 - `address_space.rs`: a new space has the kernel and nothing else (the kernel's code is at the same frame as in the
   kernel's own tables); the same address leads to different frames in two spaces – and the kernel's own tables never saw
   it; what the kernel maps *later* shows up in a space that already exists; writing crosses page boundaries and stops
@@ -409,10 +414,13 @@ fn run_program(args: &[String], out: &mut dyn Write) -> Result<(), String> {
   frame behind; ten programs one after the other lose at most 16 frames (the stack of the last thread, freed when the
   next one starts – a program takes 13: code, data, four stack pages, PML4 and two chains of PDPT, PD and PT); the
   kernel's tables are in CR3 again after a program; four programs and four kernel threads in one run queue.
+- `paging.rs`: every entry of the upper half exists and has no USER bit.
+- `user.rs` once more: `write` of nothing from the null pointer (and from the end of the address space) returns 0 –
+  see "What can go wrong".
 - `shell.rs`: `run` starts a program from the disk.
 
-The boot check types `run /bin/hello` and expects `/bin/hello: Code(42)`. `make test` ends with the unit tests
-passing with 1, 2 and 4 CPUs (`KERNEL_SMP=1 cargo test` …). Four counter-checks, one run each:
+The boot check types `run /bin/hello` and expects `/bin/hello: Code(42)`. The unit tests pass with 1, 2 and 4
+CPUs (`KERNEL_SMP=1 cargo test` …). Six counter-checks, one run each:
 - no table behind the entries of the upper half (`init` does nothing): `what_the_kernel_maps_later_shows_up_in_every_space`
   fails – the new mapping is not there;
 - `drop` of the address space does not call `free_user_half`: `dropping_a_space_gives_every_frame_back` fails, 48 frames
@@ -420,7 +428,9 @@ passing with 1, 2 and 4 CPUs (`KERNEL_SMP=1 cargo test` …). Four counter-check
 - the scheduler does not load the thread's CR3: the first program started from a file dies with a page fault at
   0x400000 – on the kernel's tables there is nothing there;
 - `new_root` leaves the upper half empty: `a_new_space_has_the_kernel_and_nothing_else` fails; the kernel's code is not
-  there.
+  there;
+- `init` leaves the USER bit alone: "entry 256 has the USER bit";
+- `user_bytes` without the early return for length 0: the kernel panics (see below).
 
 ## Run it
 ```sh
@@ -444,6 +454,11 @@ and in the shell: `run /bin/hello` prints the greeting and `/bin/hello: Code(42)
 - **Freeing a space that is in use:** `free_user_half` refuses the PML4 that CR3 holds, but only on the CPU that runs
   it. That is why `join` waits for the thread to be off its CPU, *and that CPU to have loaded other tables*, before it
   drops the space – the scheduler loads the next thread's tables before it switches.
+- **An empty buffer from a null pointer:** `user_bytes` made a slice from whatever address the program passed – for
+  `write(0, 0)` a slice of length 0 at the null pointer, which Rust calls undefined behaviour and the debug build
+  stops with `unsafe precondition(s) violated: slice::from_raw_parts requires the pointer to be aligned and non-null`:
+  *any program could panic the kernel.* This chapter's tests found it (it is bug #12 of the reference kernel, back
+  again as bug #32 in `docs/BUGS.md` – chapters 20 and 21 had it). The rule: a length of 0 never looks at the address.
 - **Trusting the file:** an ELF file is input like any other. A segment at the end of the address space that wraps
   around, a size larger than the file, an entry point in the data – without the checks of `parse` a file can make the
   kernel map or copy anywhere. (The fixes are the tests above.)

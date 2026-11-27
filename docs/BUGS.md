@@ -357,6 +357,22 @@ Format: number · date · title, then symptom → cause → fix → test.
 - **Remember:** "the CPU I run on" is a moving target once threads migrate – a per-CPU question has to be asked on
   that CPU (as chapter 15 learned for the double fault stack).
 
+### #32 · 2026-11-27 · Course chapters 20 and 21: `write(0, 0)` panics the kernel
+- **Symptom:** a ring 3 program that calls `write` with address 0 and length 0 ends the whole kernel with
+  `unsafe precondition(s) violated: slice::from_raw_parts requires the pointer to be aligned and non-null` – found by
+  a probe test while writing chapter 21, which copies chapter 20's `user_bytes`.
+- **Cause:** the same as #12 of the reference kernel: `user_bytes` accepted an empty range (the page loop does not run)
+  and then built `from_raw_parts(address as *const u8, 0)` from the unchecked address. With a null pointer that is
+  undefined behaviour, which the debug build checks.
+- **Fix:** `user_bytes` returns an empty slice for length 0 before it looks at the address. **Done in chapters 21 and
+  later; chapter 20 still has the bug** (its folder and page are left unchanged until I decide to fix it there too, as
+  was done for #31).
+- **Test:** `writing_nothing_is_fine_whatever_the_address` (chapter 21): a program that writes 0 bytes from address 0
+  exits with 0; `user_bytes(0, 0)` and `user_bytes(u64::MAX, 0)` are empty slices. Counter-check: without the early
+  return the test panics in `from_raw_parts`.
+- **Remember:** "an accessible empty range is no licence to dereference its pointer" (#12) – a new copy of an old
+  helper needs the old tests.
+
 ## Known pitfalls (not bugs, but worth remembering)
 - **The Limine host utility (`limine bios-install`) needs a C compiler** (`gcc`). It is not required for booting the ISO
   in QEMU with `-cdrom`; it is only needed to make the ISO bootable as a hard disk / USB image.
