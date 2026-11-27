@@ -603,6 +603,11 @@ decide again – chapters 21–36 (plan in `docs/ROADMAP.md`) and phase E wait f
 the course is still open.
 
 **Update 2026-11-27:** chapters 21–23 are written (C21–C23 above; bugs #32 and #33). So far the course ends with chapter
-23; chapters 24 (FPU/SSE state) and 25 (processes) are next in the plan, then 26–36. Not run yet for these chapters:
-`make course` for all 23 chapters, `make stress`, CI (the 30-minute limit of the course job is to be watched with 23
-chapters). Chapter 20 got the fix for #32 (and a test) on the same day.
+23; chapters 24 (FPU/SSE state) and 25 (processes) are next in the plan, then 26–36. Chapter 20 got the fix for #32 (and a
+test) on the same day. Checked on the final commit: `make course` 23/23 chapters pass `make test` (10 minutes here under
+QEMU TCG – the CI job has 30); `make stress` green on the second run (5 passes with 1/2/4 CPUs, qemu64 and UEFI, 20 end-to-end
+runs 135/135, soak 10 rounds 0 failures; 37 minutes). The first run stopped in pass 3 (1 CPU): the shell prompt did
+not come within the 20 s of the end-to-end test, and the two network steps after it failed with it; the same test passed
+at once when run again and in all 20 runs of the second stress – a boot that was slower than the limit once, not a bug that
+was found. The reference kernel (`kernel/`, `user/`) is unchanged since 1.1.0. Not run: CI on GitHub, `make book`
+(no mdbook here).
