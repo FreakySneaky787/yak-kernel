@@ -4,7 +4,7 @@
 controlled door back into the kernel: a system call.
 **You end up with:** user segments in the GDT, a TSS whose RSP0 follows the running thread, pages with the USER bit,
 a jump to ring 3 with `iretq`, `int 0x80` with two system calls (`write`, `exit`), and faults in ring 3 that end the
-program instead of the kernel. The start of part VI – and, for now, the last chapter of the course.
+program instead of the kernel. The start of part VI.
 **Code:** [`course/20-ring3/`](https://github.com/FreakySneaky787/yak-kernel/tree/main/course/20-ring3)
 (chapter 19 plus `user.rs`; user segments and RSP0 in `gdt.rs`, a DPL 3 gate in `idt.rs`, the USER bit in
 `paging.rs`, faults from ring 3 in `interrupts.rs`, one line in `task.rs`)
@@ -98,7 +98,7 @@ so the code page can stay read-only for the program. They stay mapped for good: 
 be in the TLB of another, which would go on using a frame that may already be someone else's.
 
 There is one address space – the kernel's – and these three pages are in it, so one program runs at a time. Giving
-each program its own page tables, and loading programs from the disk, is what chapter 21 of the plan would do.
+each program its own page tables, and loading programs from the disk, is what chapter 21 does.
 
 ## Step 4: into ring 3
 `iretq` takes RIP, CS, RFLAGS, RSP and SS from the stack, as if it returned from an interrupt that came from ring 3.
@@ -279,8 +279,9 @@ Ring 3: the program that tried `cli` ended with Killed("general protection fault
 4. Look at the reference kernel's `kernel/src/arch/x86_64/syscall.rs`: what does its entry do before it can push
    anything?
 
-## The end, for now
-This is the last chapter I have written for now (my decision of 2026-11-06, in `docs/ROADMAP.md`). The kernel boots,
+## Where this chapter ends
+This was the last chapter of release 1.1.0 (my decision of 2026-11-06, in `docs/ROADMAP.md`); chapters 21 and on continue from
+here. The kernel boots,
 handles interrupts, manages memory, runs threads on every CPU, reads and writes a FAT32 disk, and runs code in ring 3
 that can only ask. The reference kernel goes on from here – own address spaces, programs loaded from the disk,
 processes, pipes, signals, a network stack – and its [walkthroughs](../walkthrough/README.md) explain how.

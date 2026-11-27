@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+The course continues after 1.1.0: so far it ends with chapter 23 (1.1.0 had chapters 1–20).
 
 **Course**
 - Chapter 21 – Address spaces and ELF files: a PML4 per program whose upper half is the kernel's (`paging::init`

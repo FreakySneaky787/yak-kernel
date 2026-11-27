@@ -49,8 +49,8 @@ step at a time. Every chapter ends with a kernel that boots in QEMU and passes i
 | 22 | [Files for programs](22-files.md) | file descriptors and the calls `open`, `read`, `write`, `seek` and `close`: a table of open files per program that goes away with it, `FatFs::read_at`, errors as negative numbers – and the programs `cat` and `copy` |
 | 23 | [A heap for programs: `brk` and demand paging](23-demand-paging.md) | `brk` and a heap of up to 64 MiB per program whose frames are mapped by the page fault handler when a page is first touched, and given back when the break moves down – a 32 MiB heap with three touched pages costs 17 frames |
 
-For now the course ends with chapter 20 (my decision of 2026-11-06; the plan for chapters 21–36 is in
-[`docs/ROADMAP.md`](../ROADMAP.md)). The pilot (chapters 1–4) gets a round of feedback from readers, and the chapters
+So far the course ends with chapter 23 (release 1.1.0 had chapters 1–20; chapters 21–23 were added on 2026-11-27 and are
+not released yet; the plan for chapters 24–36 is in [`docs/ROADMAP.md`](../ROADMAP.md)). The pilot (chapters 1–4) gets a round of feedback from readers, and the chapters
 after it change with what they report. If you get stuck, use the issue form
 [**I got stuck in a course chapter**](https://github.com/FreakySneaky787/yak-kernel/issues/new?template=course-stuck.yml);
 if something was unclear even though it worked, use

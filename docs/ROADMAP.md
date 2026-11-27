@@ -82,6 +82,11 @@ complete with chapter 19, and chapter 20 (ring 3 and the first system call) as t
 stay planned as listed above, but nothing is written for them until I decide again; phase E and release 1.1.0 wait
 for that decision too. Release 1.1.0 (2026-11-06) is the course up to chapter 20.
 
+**Continued (2026-11-27):** chapters 21 (address spaces and ELF), 22 (files for programs) and 23 (a heap: `brk` and demand
+paging) were written, in the order of the list above. So far the course ends with chapter 23; chapters 24–36 stay
+planned as listed (24 FPU/SSE state and 25 processes are next), and nothing is written for them until it is decided to
+continue. They are not part of a release yet.
+
 ### Phase E – polish and growth
 - Exercises per chapter with tests learners can run (`make check` on their branch); solutions = next chapter branch.
 - Diagrams (memory layout, interrupt path, scheduler states), glossary, search (mdBook built-in).

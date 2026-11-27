@@ -581,9 +581,11 @@ they make YAK smaller than a production system, but they do not break the promis
 - Under TCG (no KVM) `make check` takes about 2 minutes on a warm build, `make stress` (5 passes) about 30 minutes.
 
 **Course (1.1)**
-- The course ends at chapter 20 (my decision of 2026-11-06): ring 3 with one address space and two system calls.
-  Own address spaces, programs from the disk, processes, the network and hardening are in the reference kernel and
-  its walkthroughs, not yet in the course. No exercises, diagrams or glossary yet (phase E).
+- The course ends at chapter 20 in release 1.1.0 (my decision of 2026-11-06): ring 3 with one address space and two
+  system calls. Chapters 21–23 (address spaces and ELF, files for programs, a heap with demand paging) were added
+  afterwards and are unreleased; so far the course ends with chapter 23. Processes, the floating point state, pipes,
+  signals, the network and hardening are in the reference kernel and its walkthroughs, not yet in the course. No
+  exercises, diagrams or glossary yet (phase E). Chapter 20 still has bug #32 (`write(0, 0)`); chapters 21 and later are fixed.
 - The pilot (chapters 1–4) still waits for its first outside reader.
 
 ## Open after 1.0
@@ -599,3 +601,8 @@ runs code in ring 3). Next: I create the tag `v1.1.0` on the merge commit and pu
 (`docs/RELEASING.md`, steps 6–8); the release workflow attaches the files. After that nothing is planned until I
 decide again – chapters 21–36 (plan in `docs/ROADMAP.md`) and phase E wait for that decision; an outside reader for
 the course is still open.
+
+**Update 2026-11-27:** chapters 21–23 are written (C21–C23 above; bugs #32 and #33). So far the course ends with chapter
+23; chapters 24 (FPU/SSE state) and 25 (processes) are next in the plan, then 26–36. Not run yet for these chapters:
+`make course` for all 23 chapters, `make stress`, CI (the 30-minute limit of the course job is to be watched with 23
+chapters). Open: whether chapter 20 gets the fix for #32 too.
