@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+**Course**
+- Chapter 21 – Address spaces and ELF files: a PML4 per program whose upper half is the kernel's (`paging::init`
+  gives every upper-half entry a table first, so later kernel mappings reach every space), `AddressSpace` that gives
+  back every frame and table on `drop`, an ELF loader that refuses damaged, wrapping and writable-and-executable
+  files, a CR3 per thread loaded by the scheduler, `spawn`/`join` for programs, and programs built from
+  `programs/*.S` with `as` and `ld` into `/bin` of the test disk. Two programs run at the same addresses at once;
+  the shell gets `run`. New in the course folders: `programs/`, and `make programs`.
+
 ## 1.1.0 (2026-11-06)
 The course release: chapters 1–20 of the course – parts I to V and the start of part VI – each a complete project
 in `course/NN-slug/` with its own `make test`, all of them built and tested by CI. The reference kernel is the one of

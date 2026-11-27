@@ -25,6 +25,7 @@
   - [18 – Writing FAT32](course/18-fat32-write.md)
   - [19 – A block cache, and the disk's interrupt](course/19-disk-irq.md)
   - [20 – Ring 3 and the first system call](course/20-ring3.md)
+  - [21 – Address spaces and ELF files](course/21-elf.md)
 
 # Understand the kernel
 
