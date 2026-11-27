@@ -1,0 +1,3 @@
+its guard page at 0xffffff0000000000 is mapped: no
+running on the double fault stack: yes
+EXCEPTION: DOUBLE FAULT (code 0x0), last page fault at 0xffffff0000000

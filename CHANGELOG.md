@@ -14,6 +14,10 @@
   what it gets and answers with a negative error number, one call moves at most 64 KiB; system calls run with interrupts
   on; the programs `cat` and `copy`, and `run /bin/copy` in the shell. Bug #33 (a chapter 4 test that expected a kernel SS
   which ring 3 had made null) found on the way: the test is fixed.
+- Chapter 23 – A heap for programs: `brk` and demand paging: a heap of up to 64 MiB per program that starts behind its
+  image, frames mapped by the page fault handler on the first touch (and by the system calls that look at a buffer
+  in the heap), given back when the break moves down or the program ends; a 32 MiB heap with three touched pages costs
+  17 frames. The page fault handler tells a missing page from a protection fault.
 - Bug #32: in chapters 20 and 21 a ring 3 program could panic the kernel with `write(0, 0)` (an empty slice from a null
   pointer). Fixed in chapter 21 (and the chapters to come); chapter 20 is left as released – see `docs/BUGS.md`.
 

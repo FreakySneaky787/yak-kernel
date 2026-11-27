@@ -47,6 +47,7 @@ step at a time. Every chapter ends with a kernel that boots in QEMU and passes i
 | 20 | [Ring 3 and the first system call](20-ring3.md) | code in ring 3 that can only compute and ask: user segments, RSP0 per thread, USER pages, `iretq`, `int 0x80` with `write` and `exit`, faults that end the program, not the kernel; part VI |
 | 21 | [Address spaces and ELF files](21-elf.md) | a page table of its own for every program (the upper half is the kernel's), an ELF loader that refuses what it should not load, a CR3 per thread loaded at every switch, and programs built with `as` and `ld` that run from `/bin` of the disk – two of them at the same addresses at once |
 | 22 | [Files for programs](22-files.md) | file descriptors and the calls `open`, `read`, `write`, `seek` and `close`: a table of open files per program that goes away with it, `FatFs::read_at`, errors as negative numbers – and the programs `cat` and `copy` |
+| 23 | [A heap for programs: `brk` and demand paging](23-demand-paging.md) | `brk` and a heap of up to 64 MiB per program whose frames are mapped by the page fault handler when a page is first touched, and given back when the break moves down – a 32 MiB heap with three touched pages costs 17 frames |
 
 For now the course ends with chapter 20 (my decision of 2026-11-06; the plan for chapters 21–36 is in
 [`docs/ROADMAP.md`](../ROADMAP.md)). The pilot (chapters 1–4) gets a round of feedback from readers, and the chapters

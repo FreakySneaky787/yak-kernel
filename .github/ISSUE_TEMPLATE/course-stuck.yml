@@ -35,6 +35,7 @@ body:
         - 20 – Ring 3 and the first system call
         - 21 – Address spaces and ELF files
         - 22 – Files for programs
+        - 23 – A heap for programs: brk and demand paging
     validations:
       required: true
   - type: dropdown
