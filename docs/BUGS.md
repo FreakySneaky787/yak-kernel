@@ -364,10 +364,9 @@ Format: number · date · title, then symptom → cause → fix → test.
 - **Cause:** the same as #12 of the reference kernel: `user_bytes` accepted an empty range (the page loop does not run)
   and then built `from_raw_parts(address as *const u8, 0)` from the unchecked address. With a null pointer that is
   undefined behaviour, which the debug build checks.
-- **Fix:** `user_bytes` returns an empty slice for length 0 before it looks at the address. **Done in chapters 21 and
-  later; chapter 20 still has the bug** (its folder and page are left unchanged until I decide to fix it there too, as
-  was done for #31).
-- **Test:** `writing_nothing_is_fine_whatever_the_address` (chapter 21): a program that writes 0 bytes from address 0
+- **Fix:** `user_bytes` returns an empty slice for length 0 before it looks at the address. **Done in chapters 20 (added after release
+  1.1.0, as was done for #31, with its page) and in chapters 21 and later.**
+- **Test:** `writing_nothing_is_fine_whatever_the_address` (chapters 20 and 21): a program that writes 0 bytes from address 0
   exits with 0; `user_bytes(0, 0)` and `user_bytes(u64::MAX, 0)` are empty slices. Counter-check: without the early
   return the test panics in `from_raw_parts`.
 - **Remember:** "an accessible empty range is no licence to dereference its pointer" (#12) – a new copy of an old

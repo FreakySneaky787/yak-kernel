@@ -20,7 +20,7 @@ The course continues after 1.1.0: so far it ends with chapter 23 (1.1.0 had chap
   in the heap), given back when the break moves down or the program ends; a 32 MiB heap with three touched pages costs
   17 frames. The page fault handler tells a missing page from a protection fault.
 - Bug #32: in chapters 20 and 21 a ring 3 program could panic the kernel with `write(0, 0)` (an empty slice from a null
-  pointer). Fixed in chapter 21 (and the chapters to come); chapter 20 is left as released – see `docs/BUGS.md`.
+  pointer). Fixed in chapter 20 (a test and the fix, after the release) and in chapter 21 on – see `docs/BUGS.md`.
 
 ## 1.1.0 (2026-11-06)
 The course release: chapters 1–20 of the course – parts I to V and the start of part VI – each a complete project

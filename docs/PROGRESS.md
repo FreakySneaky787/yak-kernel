@@ -585,7 +585,7 @@ they make YAK smaller than a production system, but they do not break the promis
   system calls. Chapters 21–23 (address spaces and ELF, files for programs, a heap with demand paging) were added
   afterwards and are unreleased; so far the course ends with chapter 23. Processes, the floating point state, pipes,
   signals, the network and hardening are in the reference kernel and its walkthroughs, not yet in the course. No
-  exercises, diagrams or glossary yet (phase E). Chapter 20 still has bug #32 (`write(0, 0)`); chapters 21 and later are fixed.
+  exercises, diagrams or glossary yet (phase E). Bug #32 (`write(0, 0)`) is fixed in chapter 20 (146 tests now) and in chapters 21 and later.
 - The pilot (chapters 1–4) still waits for its first outside reader.
 
 ## Open after 1.0
@@ -605,4 +605,4 @@ the course is still open.
 **Update 2026-11-27:** chapters 21–23 are written (C21–C23 above; bugs #32 and #33). So far the course ends with chapter
 23; chapters 24 (FPU/SSE state) and 25 (processes) are next in the plan, then 26–36. Not run yet for these chapters:
 `make course` for all 23 chapters, `make stress`, CI (the 30-minute limit of the course job is to be watched with 23
-chapters). Open: whether chapter 20 gets the fix for #32 too.
+chapters). Chapter 20 got the fix for #32 (and a test) on the same day.

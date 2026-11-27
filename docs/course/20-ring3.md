@@ -174,6 +174,11 @@ is never trusted.** It could point into the kernel, past the end of the lower ha
 
 ```rust,file=kernel/src/user.rs
 fn user_bytes(address: u64, length: u64) -> Option<&'static [u8]> {
+    if length == 0 {
+        // nothing to read, so the address is nobody's business - and a null pointer must never reach `from_raw_parts`,
+        // not even for an empty slice (bug #32)
+        return Some(&[]);
+    }
     let end = address.checked_add(length)?;
     if end > USER_END {
         return None;
@@ -190,6 +195,11 @@ fn user_bytes(address: u64, length: u64) -> Option<&'static [u8]> {
 ```
 
 A bad address gets −14 back (Linux's EFAULT), an unknown call −38 (ENOSYS).
+
+The first lines are an addition made after the release (bug #32 in `docs/BUGS.md`): without them, `write(0, 0)` – nothing,
+from nowhere – made a slice of length 0 from the null pointer, which Rust calls undefined behaviour and the debug
+build stops with `unsafe precondition(s) violated: slice::from_raw_parts requires the pointer to be aligned and
+non-null`: any program could panic the kernel. A length of 0 never looks at the address.
 
 The first program, assembled into the kernel and copied to 0x40_0000 – it only uses addresses relative to RIP, so it
 runs wherever it is put:
@@ -223,24 +233,28 @@ fn end_user_program_on_fault(frame: &InterruptStackFrame, what: &'static str) {
 tries `cli`.
 
 ## The tests
-`make test` runs 145 tests in the kernel; new:
+`make test` runs 146 tests in the kernel (145 in release 1.1.0 – the last one was added for bug #32); new:
 - `the_user_segments_have_privilege_level_3` (`gdt.rs`);
 - `a_program_writes_and_exits` (the output, exit code 42), `a_program_has_a_stack` (`push 5; pop rdi`);
 - `privileged_instructions_end_the_program` (`cli`), `kernel_memory_is_out_of_reach` (reading a kernel address, and
   writing into its own read-only code page: page faults);
 - `system_calls_check_what_they_get` (a kernel pointer → −14, call 99 → −38, and `user_bytes` at the edges: past the
   lower half, wrapping around, an unmapped page);
+- `writing_nothing_is_fine_whatever_the_address` (bug #32): a program that writes 0 bytes from address 0 exits with 0,
+  and `user_bytes` of length 0 is an empty slice at any address;
 - `the_timer_takes_the_cpu_away_from_ring_3` – a program that spins until a byte in its data page changes; the
   kernel sleeps 50 ms meanwhile, then changes the byte. It passes with `KERNEL_SMP=1` too, where only the timer can
   get the one CPU back from ring 3;
 - `each_cpu_switches_to_the_thread_s_own_kernel_stack` – RSP0 of the CPU is just above the running thread's stack
   pointer.
 
-The IDT test of chapter 5 knows vector 0x80 now. Three counter-checks, one run each:
+The IDT test of chapter 5 knows vector 0x80 now. Four counter-checks, one run each:
 - the gate without DPL 3: `int 0x80` itself is a general protection fault – every program is ended at its first call;
 - USER only on the page, not on the tables above: a page fault at 0x400000, the program's first instruction;
 - no `set_kernel_stack` in the scheduler: RSP0 is 0, the first interrupt from ring 3 pushes to address −8 – a page
-  fault the CPU cannot deliver either: a double fault ("last page fault at 0xfffffffffffffff8").
+  fault the CPU cannot deliver either: a double fault ("last page fault at 0xfffffffffffffff8");
+- `user_bytes` without the early return for length 0 (bug #32): `writing_nothing_is_fine_whatever_the_address` panics with
+  `unsafe precondition(s) violated`.
 
 ## Run it
 ```sh

@@ -189,6 +189,11 @@ fn write(address: u64, length: u64) -> u64 {
 }
 
 fn user_bytes(address: u64, length: u64) -> Option<&'static [u8]> {
+    if length == 0 {
+        // nothing to read, so the address is nobody's business - and a null pointer must never reach `from_raw_parts`,
+        // not even for an empty slice (bug #32)
+        return Some(&[]);
+    }
     let end = address.checked_add(length)?;
     if end > USER_END {
         return None;
@@ -267,6 +272,17 @@ global_asm!(
     "mov eax, 2",
     "int 0x80",
     "user_stack_end:",
+    // write(address 0, length 0) - nothing, from nowhere; exit with what the call returned
+    ".global user_null, user_null_end",
+    "user_null:",
+    "mov eax, 1",
+    "xor edi, edi",
+    "xor esi, esi",
+    "int 0x80",
+    "mov rdi, rax",
+    "mov eax, 2",
+    "int 0x80",
+    "user_null_end:",
     // spin until the first byte of the data page (0x401000) is not 0, then exit(7)
     ".global user_spin, user_spin_end",
     "user_spin:",
@@ -339,6 +355,15 @@ mod tests {
         assert!(user_bytes(USER_END - 8, 16).is_none(), "past the lower half");
         assert!(user_bytes(u64::MAX - 4, 8).is_none(), "wraps around");
         assert!(user_bytes(0x1000, 8).is_none(), "not mapped");
+    }
+
+    #[test_case]
+    fn writing_nothing_is_fine_whatever_the_address() {
+        // an empty range is nobody's memory: the address is never looked at (bug #32 - a slice of length 0 from a
+        // null pointer is already undefined behaviour, and the debug build panics)
+        assert_eq!(run(program!(user_null, user_null_end)), Exit::Code(0));
+        assert!(user_bytes(0, 0).is_some_and(|bytes| bytes.is_empty()));
+        assert!(user_bytes(u64::MAX, 0).is_some_and(|bytes| bytes.is_empty()));
     }
 
     #[test_case]
