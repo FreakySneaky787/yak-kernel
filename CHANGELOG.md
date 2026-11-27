@@ -9,6 +9,11 @@
   files, a CR3 per thread loaded by the scheduler, `spawn`/`join` for programs, and programs built from
   `programs/*.S` with `as` and `ld` into `/bin` of the test disk. Two programs run at the same addresses at once;
   the shell gets `run`. New in the course folders: `programs/`, and `make programs`.
+- Chapter 22 – Files for programs: file descriptors and the calls `open`, `read`, `write` (now `write(fd, …)`), `seek` and
+  `close`; a table of open files per program that is closed when the program ends; `FatFs::read_at`; every call checks
+  what it gets and answers with a negative error number, one call moves at most 64 KiB; system calls run with interrupts
+  on; the programs `cat` and `copy`, and `run /bin/copy` in the shell. Bug #33 (a chapter 4 test that expected a kernel SS
+  which ring 3 had made null) found on the way: the test is fixed.
 - Bug #32: in chapters 20 and 21 a ring 3 program could panic the kernel with `write(0, 0)` (an empty slice from a null
   pointer). Fixed in chapter 21 (and the chapters to come); chapter 20 is left as released – see `docs/BUGS.md`.
 

@@ -373,6 +373,20 @@ Format: number · date · title, then symptom → cause → fix → test.
 - **Remember:** "an accessible empty range is no licence to dereference its pointer" (#12) – a new copy of an old
   helper needs the old tests.
 
+### #33 · 2026-11-27 · Course chapter 22: a test expected a kernel SS that ring 3 had made null
+- **Symptom:** with chapter 22's file tests, `gdt::tests::our_segments_are_loaded` (chapter 4: is SS the kernel's data
+  selector?) failed with `left: 0, right: 16`.
+- **Cause:** a test, not the kernel. An interrupt that comes from ring 3 (a system call, the timer) makes the CPU load a
+  *null* SS, and nothing loads it again. A probe before the fix: SS 16 on all four CPUs before four programs ran,
+  `[0, 0, 16, 16]` after them. In 64-bit mode a null SS is legal in ring 0 (base and limit of the stack segment are
+  ignored). The test passed in chapters 20 and 21 only because it runs before the first ring 3 program there; the new
+  tests of chapter 22 (`files`) sort before `gdt`.
+- **Fix:** the assertion accepts the kernel's data selector *or* 0, with a comment; chapter 22 and later. Chapters 4–21
+  are unchanged (their order of tests never exposes it).
+- **Test:** `our_segments_are_loaded` itself, now after programs have run.
+- **Remember:** a test that reads CPU state is as good as the history of that CPU. Which CPU, and what ran on it before,
+  decide (see also #31).
+
 ## Known pitfalls (not bugs, but worth remembering)
 - **The Limine host utility (`limine bios-install`) needs a C compiler** (`gcc`). It is not required for booting the ISO
   in QEMU with `-cdrom`; it is only needed to make the ISO bootable as a hard disk / USB image.

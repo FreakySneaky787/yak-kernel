@@ -1,0 +1,8 @@
+# Pinned so every checkout builds with the same compiler (nightly is needed for
+# custom_test_frameworks, abi_x86_interrupt and -Zbuild-std). Update deliberately,
+# then run `make check`.
+[toolchain]
+channel = "nightly-2026-10-26"
+components = ["rust-src", "rustfmt"]
+targets = ["x86_64-unknown-none"]
+profile = "minimal"
